@@ -247,12 +247,10 @@ GCodeResult Move::ConfigurePressureAdvance(GCodeBuffer& gb, const StringRef& rep
 }
 
 // Process M203.1
-// Set/report the maximum extrusion feedrate per extruder.
+// Set/report the maximum extrusion feedrate per extruder in mm/min (consistent with G-code feedrates).
 // This limit only applies during forward extrusion (printing), not during retracts or load/unload moves.
 GCodeResult Move::ConfigureExtrusionSpeedLimit(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
-	// Units are mm/sec if S1 is given, else mm/min
-	const bool usingMmPerSec = (gb.Seen('S') && gb.GetIValue() == 1);
 	bool seen = false;
 	const size_t numExtruders = reprap.GetGCodes().GetNumExtruders();
 
@@ -264,7 +262,7 @@ GCodeResult Move::ConfigureExtrusionSpeedLimit(GCodeBuffer& gb, const StringRef&
 		gb.GetFloatArray(eVals, eCount, true);
 		for (size_t e = 0; e < eCount; e++)
 		{
-			GetExtruderShaperForExtruder(e).SetMaxExtrusionSpeed(ConvertSpeedFromMm(eVals[e], usingMmPerSec));
+			GetExtruderShaperForExtruder(e).SetMaxExtrusionSpeed(ConvertSpeedFromMmPerMin(eVals[e]));
 		}
 	}
 
@@ -274,7 +272,7 @@ GCodeResult Move::ConfigureExtrusionSpeedLimit(GCodeBuffer& gb, const StringRef&
 	}
 	else
 	{
-		reply.printf("Max extrusion speeds (%s): E:", (usingMmPerSec) ? "mm/sec" : "mm/min");
+		reply.printf("Max extrusion speeds (mm/min): E:");
 		char sep = ' ';
 		for (size_t e = 0; e < numExtruders; e++)
 		{
@@ -285,7 +283,7 @@ GCodeResult Move::ConfigureExtrusionSpeedLimit(GCodeBuffer& gb, const StringRef&
 			}
 			else
 			{
-				reply.catf("%c%.1f", sep, (double)InverseConvertSpeedToMm(speed, usingMmPerSec));
+				reply.catf("%c%.1f", sep, (double)InverseConvertSpeedToMmPerMin(speed));
 			}
 			sep = ':';
 		}
