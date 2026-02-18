@@ -317,6 +317,9 @@ public:
 	void ClearExtruderMovementPending(size_t extruder) noexcept;
 	float GetPressureAdvanceClocksForLogicalDrive(size_t drive) const noexcept;
 	float GetPressureAdvanceClocksForExtruder(size_t extruder) const noexcept;
+	float GetMaxExtrusionSpeedForLogicalDrive(size_t drive) const noexcept;
+	float GetMaxExtrusionSpeedForExtruder(size_t extruder) const noexcept;
+	GCodeResult ConfigureExtrusionSpeedLimit(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);	// process M203.1
 
 #if SUPPORT_REMOTE_COMMANDS
 	GCodeResult EutSetMotorCurrents(const CanMessageMultipleDrivesRequest<float>& msg, size_t dataLength, const StringRef& reply) noexcept;
@@ -927,6 +930,16 @@ inline float Move::GetPressureAdvanceClocksForLogicalDrive(size_t drive) const n
 inline float Move::GetPressureAdvanceClocksForExtruder(size_t extruder) const noexcept
 {
 	return (extruder < MaxExtruders) ? GetPressureAdvanceClocksForLogicalDrive(ExtruderToLogicalDrive(extruder)) : 0.0;
+}
+
+inline float Move::GetMaxExtrusionSpeedForLogicalDrive(size_t drive) const noexcept
+{
+	return dms[drive].extruderShaper.GetMaxExtrusionSpeed();
+}
+
+inline float Move::GetMaxExtrusionSpeedForExtruder(size_t extruder) const noexcept
+{
+	return (extruder < MaxExtruders) ? GetMaxExtrusionSpeedForLogicalDrive(ExtruderToLogicalDrive(extruder)) : 0.0;
 }
 
 // Schedule the next interrupt, returning true if we can't because it is already due

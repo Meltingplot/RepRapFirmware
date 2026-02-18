@@ -516,6 +516,24 @@ MovementError DDA::InitStandardMove(DDARing& ring, const RawMove &nextMove, bool
 	requestedSpeed = min<float>(max<float>(reqSpeed, move.MinMovementSpeed()),
 								VectorBoxIntersection(normalisedDirectionVector, move.MaxFeedrates()));
 
+	// Apply maximum extrusion feedrate limits (M203.1) to printing moves only.
+	// This limits the extruder speed during actual printing (XY movement with forward extrusion),
+	// but does not affect retracts, load/unload, or other non-printing extruder moves.
+	if (flags.isPrintingMove)
+	{
+		for (size_t drive = MaxAxesPlusExtruders - reprap.GetGCodes().GetNumExtruders(); drive < MaxAxesPlusExtruders; ++drive)
+		{
+			if (directionVector[drive] > 0.0 && normalisedDirectionVector[drive] > 0.0)
+			{
+				const float maxExtSpeed = move.GetMaxExtrusionSpeedForLogicalDrive(drive);
+				if (maxExtSpeed > 0.0)
+				{
+					requestedSpeed = min<float>(requestedSpeed, maxExtSpeed / normalisedDirectionVector[drive]);
+				}
+			}
+		}
+	}
+
 	// On a Cartesian printer, it is OK to limit the X and Y speeds and accelerations independently, and in consequence to allow greater values
 	// for diagonal moves. On other architectures, this is not OK and any movement in the XY plane should be limited on other ways.
 	if (doMotorMapping)
