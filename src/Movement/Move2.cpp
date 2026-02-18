@@ -262,7 +262,7 @@ GCodeResult Move::ConfigureExtrusionSpeedLimit(GCodeBuffer& gb, const StringRef&
 		gb.GetFloatArray(eVals, eCount, true);
 		for (size_t e = 0; e < eCount; e++)
 		{
-			GetExtruderShaperForExtruder(e).SetMaxExtrusionSpeed(ConvertSpeedFromMmPerMin(eVals[e]));
+			SetMaxExtrusionSpeedForExtruder(e, ConvertSpeedFromMmPerMin(eVals[e]));
 		}
 	}
 

@@ -521,11 +521,12 @@ MovementError DDA::InitStandardMove(DDARing& ring, const RawMove &nextMove, bool
 	// but does not affect retracts, load/unload, or other non-printing extruder moves.
 	if (flags.isPrintingMove)
 	{
-		for (size_t drive = MaxAxesPlusExtruders - reprap.GetGCodes().GetNumExtruders(); drive < MaxAxesPlusExtruders; ++drive)
+		const size_t numExtruders = reprap.GetGCodes().GetNumExtruders();
+		for (size_t drive = MaxAxesPlusExtruders - numExtruders; drive < MaxAxesPlusExtruders; ++drive)
 		{
 			if (directionVector[drive] > 0.0 && normalisedDirectionVector[drive] > 0.0)
 			{
-				const float maxExtSpeed = move.GetMaxExtrusionSpeedForLogicalDrive(drive);
+				const float maxExtSpeed = move.GetMaxExtrusionSpeedForExtruder(LogicalDriveToExtruder(drive));
 				if (maxExtSpeed > 0.0)
 				{
 					requestedSpeed = min<float>(requestedSpeed, maxExtSpeed / normalisedDirectionVector[drive]);
