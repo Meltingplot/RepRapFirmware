@@ -726,7 +726,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 
 		GCodeResult result;
 		if (   gb.GetCommandFraction() > 0
-			&& code != 36 && code != 201 && code != 260 && code != 261 && code != 505
+			&& code != 36 && code != 201 && code != 203 && code != 260 && code != 261 && code != 505
 #if SUPPORT_SCANNING_PROBES
 			&& code != 558
 #endif
