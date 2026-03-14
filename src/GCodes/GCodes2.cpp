@@ -726,7 +726,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 
 		GCodeResult result;
 		if (   gb.GetCommandFraction() > 0
-			&& code != 36 && code != 201 && code != 260 && code != 261 && code != 505
+			&& code != 36 && code != 201 && code != 203 && code != 260 && code != 261 && code != 505
 #if SUPPORT_SCANNING_PROBES
 			&& code != 558
 #endif
@@ -2485,6 +2485,16 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 				break;
 
 			case 203: // Set/print minimum/maximum feedrates
+				if (gb.GetCommandFraction() == 1)
+				{
+					// M203.1 - Set/report maximum extrusion feedrate (only limits forward extrusion, not retracts or load/unload)
+					result = reprap.GetMove().ConfigureExtrusionSpeedLimit(gb, reply);
+				}
+				else if (gb.GetCommandFraction() > 1)
+				{
+					result = GCodeResult::errorNotSupported;
+				}
+				else
 				{
 					// Units are mm/sec if S1 is given, else mm/min
 					const bool usingMmPerSec = (gb.Seen('S') && gb.GetIValue() == 1);

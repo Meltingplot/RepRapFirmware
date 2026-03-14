@@ -246,6 +246,51 @@ GCodeResult Move::ConfigurePressureAdvance(GCodeBuffer& gb, const StringRef& rep
 	return GCodeResult::ok;
 }
 
+// Process M203.1
+// Set/report the maximum extrusion feedrate per extruder in mm/min (consistent with G-code feedrates).
+// This limit only applies during forward extrusion (printing), not during retracts or load/unload moves.
+GCodeResult Move::ConfigureExtrusionSpeedLimit(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
+{
+	bool seen = false;
+	const size_t numExtruders = reprap.GetGCodes().GetNumExtruders();
+
+	if (gb.Seen(extrudeLetter))
+	{
+		seen = true;
+		float eVals[MaxExtruders];
+		size_t eCount = numExtruders;
+		gb.GetFloatArray(eVals, eCount, true);
+		for (size_t e = 0; e < eCount; e++)
+		{
+			SetMaxExtrusionSpeedForExtruder(e, ConvertSpeedFromMmPerMin(eVals[e]));
+		}
+	}
+
+	if (seen)
+	{
+		reprap.MoveUpdated();
+	}
+	else
+	{
+		reply.printf("Max extrusion speeds (mm/min): E:");
+		char sep = ' ';
+		for (size_t e = 0; e < numExtruders; e++)
+		{
+			const float speed = GetMaxExtrusionSpeedForExtruder(e);
+			if (speed <= 0.0)
+			{
+				reply.catf("%cunlimited", sep);
+			}
+			else
+			{
+				reply.catf("%c%.1f", sep, (double)InverseConvertSpeedToMmPerMin(speed));
+			}
+			sep = ':';
+		}
+	}
+	return GCodeResult::ok;
+}
+
 // Process M208
 GCodeResult Move::ConfigureAxisLimits(GCodeBuffer& gb, const StringRef& reply, const char *_ecv_array axisLetters, size_t numTotalAxes, bool inM501) THROWS(GCodeException)
 {
