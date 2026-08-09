@@ -208,6 +208,34 @@ void SbcInterface::ExchangeData() noexcept
 			}
 
 			const CodeHeader *code = reinterpret_cast<const CodeHeader*>(transfer.ReadData(packet->length));
+
+			// Range-check the length before we trust it. It comes straight from DSF and is validated nowhere else:
+			// ReadPacket does not bound it, and the CRC only proves the bytes are the ones DSF sent, not that the
+			// length is sane. A length >= 65532 would wrap the uint16 bufferedCodeSize computed further down to a
+			// tiny value that passes the space check, while the memcpyu32 still copies the full length into the 4kB
+			// code buffer; anything above MaxCodeBufferSize also overruns GCodeBuffer::buffer via BinaryParser::Put.
+			// This must come AFTER ReadData above, so that the payload is consumed either way: ReadPacket only skips
+			// the packet header, so bailing out before ReadData would leave the parser pointing at the code payload
+			// and the next iteration would decode it as a PacketHeader - and a payload starting 00 00 or 01 00 reads
+			// as EmergencyStop or Reset. Consuming it is the lesser evil rather than a clean recovery: an
+			// out-of-range length over-advances the read pointer past the end of the data, so ReadPacket returns
+			// nullptr and every remaining packet of this transfer is dropped without being re-requested - only the
+			// refused packet itself is resent, by the ResendPacket call after the switch.
+			// It must also stay ahead of the GCodeBuffer lookup, which can resolve a pending macro request for a code
+			// we are about to refuse, and outside the critical section taken further down, because reporting anything
+			// with the scheduler suspended takes a mutex and resets the board.
+			// Refuse the packet exactly the way we refuse one that does not fit in the code buffer, by clearing both
+			// flags. Clearing codeBufferAvailable as well is what preserves ordering: it stops us accepting any
+			// further code in this transfer, so a later code cannot execute ahead of the one we just refused. DSF
+			// matches replies positionally against the head of its per-channel queue, so letting the queue advance
+			// past a code it still holds would offset that channel's reply pairing permanently.
+			if (packet->length < sizeof(CodeHeader) || packet->length > MaxCodeBufferSize ||
+				(packet->length % sizeof(uint32_t)) != 0)
+			{
+				packetAcknowledged = codeBufferAvailable = false;
+				break;
+			}
+
 			const GCodeChannel channel(code->channel);
 			if (channel.IsValid())
 			{
@@ -1507,18 +1535,37 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 	{
 		//TODO can we take the lock inside the loop body instead, if we re-read readPointer and writePointer after taking it?
 		TaskCriticalSectionLocker locker;
+
+		// Defend against an empty overlapping block. The walk below dereferences codeBuffer + readPointer before it
+		// tests either terminator, so rxPointer == txEnd != 0 would make it parse free space and never terminate.
+		// Note that we must not turn the do/while into a test-at-top loop instead: rxPointer == txPointer with
+		// txEnd != 0 is the legitimate buffer-full encoding, and exiting on it would stall the code queue.
+		if (txEnd != 0 && rxPointer == txEnd)
+		{
+			rxPointer = txEnd = 0;
+			sendBufferUpdate = true;
+		}
+
 		if (rxPointer != txPointer || txEnd != 0)
 		{
 			bool updateRxPointer = true;
 			uint16_t readPointer = rxPointer;
 			do
 			{
+				// Bound readPointer before the header is dereferenced. The assert further down catches an overrun
+				// only after the record has been read, which is the ordering the two hardened walks below avoid.
+				RRF_ASSERT(readPointer + sizeof(BufferedCodeHeader) <= SpiCodeBufferSize);
 				BufferedCodeHeader *bufHeader = reinterpret_cast<BufferedCodeHeader*>(codeBuffer + readPointer);
 				readPointer += sizeof(BufferedCodeHeader);
 				const CodeHeader *codeHeader = reinterpret_cast<const CodeHeader*>(codeBuffer + readPointer);
 				readPointer += bufHeader->length;
 
 				RRF_ASSERT(bufHeader->length > 0);
+				// Bound the length before it reaches PutBinary below. BinaryParser::Put memcpys it into
+				// GCodeBuffer::buffer, which is only MaxGCodeLength bytes and is immediately followed by
+				// macroSemaphore and isWaitingForMacro, so an unbounded length corrupts the SBC/MAIN handshake
+				// rather than merely walking off the end of the code buffer.
+				RRF_ASSERT(bufHeader->length <= MaxCodeBufferSize);
 				RRF_ASSERT(readPointer <= SpiCodeBufferSize);
 
 				if (bufHeader->isPending)
@@ -1931,11 +1978,29 @@ void SbcInterface::DefragmentBufferedCodes() noexcept
 		else
 		{
 			// Ring buffer overlapped (rxPointer..txEnd, 0..txPointer)
-			if (!DefragmentCodeBlock(rxPointer, txEnd) &&
+			const bool tailDefragmented = DefragmentCodeBlock(rxPointer, txEnd);
+
+			// If the overlapping block contained no pending codes at all then DefragmentCodeBlock has just set
+			// txEnd = rxPointer, because gapStart never advanced past the first (dead) record. That is not a legal
+			// encoding: an empty overlapping block must be expressed by returning to sequential mode. If we leave
+			// txEnd == rxPointer != 0 behind then FillBuffer and InvalidateBufferedCodes start their walk on free
+			// space and neither of their terminators can ever be reached, so they run off the end of the buffer.
+			// This also repairs the state if we are called again while it is already wrong.
+			if (txEnd == rxPointer)
+			{
+				rxPointer = txEnd = 0;					// the live data is [0, txPointer) from here on
+				sendBufferUpdate = true;
+			}
+			else if (!tailDefragmented &&
 				!DefragmentCodeBlock(0, txPointer) &&
 				SpiCodeBufferSize - (size_t)txEnd > MaxCodeBufferSize)
 			{
-				size_t endBufferSize = txEnd - rxPointer;
+				// Both operands are promoted to int before the subtraction, so a txEnd below rxPointer would yield a
+				// negative difference and, once cast, a huge size_t - which would put the memmove destination far
+				// below the buffer. The check above only excludes equality, so assert the ordering rather than
+				// assume it; the explicit cast below would otherwise silence the very diagnostic that catches this.
+				RRF_ASSERT(txEnd > rxPointer);
+				const size_t endBufferSize = (size_t)(txEnd - rxPointer);
 				memmoveu32(reinterpret_cast<uint32_t*>(codeBuffer + SpiCodeBufferSize - endBufferSize), reinterpret_cast<uint32_t*>(codeBuffer + rxPointer), endBufferSize / sizeof(uint32_t));
 				rxPointer = SpiCodeBufferSize - endBufferSize;
 				txEnd = SpiCodeBufferSize;
@@ -1951,7 +2016,14 @@ bool SbcInterface::DefragmentCodeBlock(uint16_t start, volatile uint16_t &end) n
 	char *gapStart = nullptr;
 	for (uint16_t readPointer = start; readPointer != end;)
 	{
+		// This walk had no bounds check of any kind, yet it both reads and (via the memcpys below) writes through
+		// readPointer. One bad length would let it iterate over the whole uint16 range and copy up to 64kB.
+		// Bound it against `end` rather than against the buffer size: the byte count in the "gap too small" branch
+		// below is measured from bufHeader to codeBuffer + end, so a walk that has already stepped past end would
+		// compute a negative difference and hand memcpyu32 a count of roughly 4GB.
+		RRF_ASSERT(end <= SpiCodeBufferSize && readPointer < end);
 		BufferedCodeHeader *bufHeader = reinterpret_cast<BufferedCodeHeader *>(codeBuffer + readPointer);
+		RRF_ASSERT(bufHeader->length > 0 && bufHeader->length <= MaxCodeBufferSize);
 		size_t bufSize = sizeof(BufferedCodeHeader) + bufHeader->length;
 		readPointer += bufSize;
 
@@ -1968,8 +2040,12 @@ bool SbcInterface::DefragmentCodeBlock(uint16_t start, volatile uint16_t &end) n
 				}
 				else
 				{
-					// Gap size is too small. Move the remaining buffer but only once per run
-					memcpyu32(reinterpret_cast<uint32_t*>(gapStart), reinterpret_cast<uint32_t *>(bufHeader), (codeBuffer + end - gapStart) / sizeof(uint32_t));
+					// Gap size is too small. Move the remaining buffer but only once per run.
+					// The run to move is [bufHeader, codeBuffer + end), so it must be measured from bufHeader.
+					// Measuring it from gapStart (as this did) over-reads exactly gapSize bytes past end, which at
+					// end == SpiCodeBufferSize reads past the end of the allocation.
+					memcpyu32(reinterpret_cast<uint32_t*>(gapStart), reinterpret_cast<uint32_t *>(bufHeader),
+								(size_t)(codeBuffer + end - reinterpret_cast<const char *>(bufHeader)) / sizeof(uint32_t));
 					readPointer = (uint16_t)(gapStart - codeBuffer + bufSize);
 					gapStart = nullptr;
 					end -= gapSize;
@@ -1996,13 +2072,24 @@ bool SbcInterface::DefragmentCodeBlock(uint16_t start, volatile uint16_t &end) n
 void SbcInterface::InvalidateBufferedCodes(GCodeChannel channel) noexcept
 {
 	TaskCriticalSectionLocker locker;
+
+	// Same defence as in FillBuffer. This walk has no bounds assert at all and it STORES through the walked
+	// pointer (isPending below, rxPointer at the end), so an empty overlapping block corrupts the heap silently.
+	if (txEnd != 0 && rxPointer == txEnd)
+	{
+		rxPointer = txEnd = 0;
+		sendBufferUpdate = true;
+	}
+
 	if (rxPointer != txPointer || txEnd != 0)
 	{
 		bool updateRxPointer = true;
 		uint16_t readPointer = rxPointer;
 		do
 		{
+			RRF_ASSERT(readPointer < SpiCodeBufferSize);
 			BufferedCodeHeader *bufHeader = reinterpret_cast<BufferedCodeHeader *>(codeBuffer + readPointer);
+			RRF_ASSERT(bufHeader->length > 0 && bufHeader->length <= MaxCodeBufferSize);
 			if (bufHeader->isPending)
 			{
 				const CodeHeader *codeHeader = reinterpret_cast<const CodeHeader*>(codeBuffer + readPointer + sizeof(BufferedCodeHeader));
