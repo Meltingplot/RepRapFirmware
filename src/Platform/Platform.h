@@ -159,6 +159,9 @@ enum class DiagnosticTestType : unsigned int
 	TimeCRC32 = 107,				// time how long it takes to calculate CRC32
 	TimeGetTimerTicks = 108,		// time now long it takes to read the step clock
 	UndervoltageEvent = 109,		// pretend an undervoltage condition has occurred
+#if HAS_SBC_INTERFACE
+	TestSbcCodeBufferRing = 110,	// check that the SBC code buffer ring walks handle the states that used to break them
+#endif
 
 	SetWriteBuffer = 500,			// enable/disable the write buffer
 
@@ -171,7 +174,19 @@ enum class DiagnosticTestType : unsigned int
 	UnalignedMemoryAccess = 1005,	// do an unaligned memory access to test exception handling
 	BusFault = 1006,				// generate a bus fault
 	AccessMemory = 1007,			// read or write  memory
-	MemoryLeak = 1008				// cause an out of memory fault
+	MemoryLeak = 1008,				// cause an out of memory fault
+
+#if HAS_SBC_INTERFACE
+	// Fault injection on the SBC link. Unlike the tests above these are not expected to break anything: each of them
+	// provokes an error that the protocol is meant to absorb, so the machine carrying on is the result we are after.
+	SbcBadTxHeaderChecksum = 1010,	// send one transfer header with a bad checksum
+	SbcBadTxDataChecksum = 1011,	// send the data of one transfer corrupted
+	SbcBadRxHeaderChecksum = 1012,	// treat one received transfer header as corrupt
+	SbcBadRxDataChecksum = 1013,	// treat the data of one received transfer as corrupt
+	SbcRefuseNextCode = 1014,		// refuse one code as if it were over-long, so that the SBC resends it
+	SbcPoisonCodeBufferRing = 1015,	// leave the illegal code buffer ring encoding behind that used to crash us
+	SbcSimulateTimeout = 1016		// treat one completed transfer as a timeout, to exercise the disconnect path
+#endif
 };
 
 /***************************************************************************************************************/

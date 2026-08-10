@@ -44,6 +44,14 @@ constexpr uint32_t SbcYieldTimeout = 10;
 
 static Task<SBCTaskStackWords> *sbcTask;
 
+// Check whether a code length received from the SBC is one we can store and execute. See the call site in
+// ExchangeData for why this must be checked at all. Factored out so that the diagnostic test at the end of this file
+// exercises the real condition instead of a copy of it.
+static inline constexpr bool IsValidCodeLength(uint16_t length) noexcept
+{
+	return length >= sizeof(CodeHeader) && length <= MaxCodeBufferSize && (length % sizeof(uint32_t)) == 0;
+}
+
 extern "C" [[noreturn]] void SBCTaskStart(void * pvParameters) noexcept
 {
 	reprap.GetSbcInterface().TaskLoop();
@@ -111,6 +119,17 @@ void SbcInterface::Init() noexcept
 				break;
 			}
 		} while (busy);
+
+		// Fault injection (M122 P1016): pretend the transfer timed out. This is the only way to reach the disconnect
+		// path - the message, InvalidateResources and the connection reset below - without pulling the cable, and it
+		// is the one path that tears down every channel's state while the SBC still has codes outstanding. Only taken
+		// when the transfer in fact completed, so that a real error is never masked by it.
+		if (transferComplete && transfer.TakeInjectedFault(SbcFaultInjection::simulateTimeout))
+		{
+			transferComplete = false;
+			hadTimeout = true;
+			hadSbcTimeout = false;
+		}
 
 		// Handle connection errors
 		if (isConnected && (hadReset || hadTimeout))
@@ -229,8 +248,10 @@ void SbcInterface::ExchangeData() noexcept
 			// further code in this transfer, so a later code cannot execute ahead of the one we just refused. DSF
 			// matches replies positionally against the head of its per-channel queue, so letting the queue advance
 			// past a code it still holds would offset that channel's reply pairing permanently.
-			if (packet->length < sizeof(CodeHeader) || packet->length > MaxCodeBufferSize ||
-				(packet->length % sizeof(uint32_t)) != 0)
+			// The injected fault (M122 P1014) refuses a code of perfectly good length through the same path, which is
+			// the only way to reach it without an SBC that sends over-long codes. It is only taken when the length is
+			// in fact valid, so that a real over-long code does not consume it.
+			if (!IsValidCodeLength(packet->length) || transfer.TakeInjectedFault(SbcFaultInjection::refuseNextCode))
 			{
 				packetAcknowledged = codeBufferAvailable = false;
 				break;
@@ -2132,6 +2153,560 @@ void SbcInterface::InvalidateBufferedCodes(GCodeChannel channel) noexcept
 			}
 		} while (readPointer != txPointer);
 	}
+}
+
+// Diagnostic test for the code buffer ring, run by M122 P110 [Sn]
+//
+// The ring is walked in three places (FillBuffer, InvalidateBufferedCodes and DefragmentCodeBlock) from two tasks,
+// and the only way in from outside is an SPI exchange with the SBC, so the states that break those walks cannot be
+// provoked from a G-code file. These tests build the states directly in a scratch buffer and run the real functions
+// over them. Each one covers one part of the fix for the code buffer desync that used to send the walks off the end
+// of the buffer, so a failure names the regression rather than just reporting that something is wrong.
+//
+// Tests 3 and 4 hand the walks a state that the unfixed code cannot terminate on, and the bounds asserts that stop
+// it are part of the same fix, so those two must not be run on firmware that does not contain it - use the S
+// parameter to select the others. The remaining tests are safe either way: they either detect the wrong result and
+// report it, or (test 5) confine the over-read to the guard area allocated after the buffer.
+
+enum class SbcRingTest : unsigned int
+{
+	emptyTailNormalised = 1,	// DefragmentBufferedCodes returns to sequential mode when the tail block empties
+	poisonedStateRepaired,		// ...and repairs txEnd == rxPointer != 0 if it finds it already set
+	invalidateWalkGuarded,		// InvalidateBufferedCodes does not start a walk on an empty overlapping block
+	fillBufferWalkGuarded,		// ...and neither does FillBuffer
+	gapTooSmallMove,			// DefragmentCodeBlock does not read past `end` when the gap is too small
+	gapLargeEnoughMove,			// ...and still compacts correctly when the gap is big enough (regression guard)
+	codeLengthCheck,			// the range check on the code length received from the SBC
+	tailMovedToEnd,				// DefragmentBufferedCodes slides a gapless tail block up against the end of the buffer
+
+	firstTest = emptyTailNormalised,
+	lastTest = tailMovedToEnd
+};
+
+static const char * const SbcRingTestNames[] =
+{
+	"",
+	"empty tail normalised",
+	"poisoned state repaired",
+	"invalidate walk guarded",
+	"fill buffer walk guarded",
+	"gap too small move",
+	"gap large enough move",
+	"code length check",
+	"tail moved to end"
+};
+
+static_assert(ARRAY_SIZE(SbcRingTestNames) == (unsigned int)SbcRingTest::lastTest + 1);
+
+// Layout constants for the synthetic ring contents. Both record sizes are powers of two so that a whole number of
+// them tiles the code buffer exactly, which the fixed layout of test 5 relies on.
+constexpr uint16_t TestSmallCodeLength = 28;
+constexpr uint16_t TestSmallRecordSize = sizeof(BufferedCodeHeader) + TestSmallCodeLength;
+constexpr uint16_t TestLargeCodeLength = 60;
+constexpr uint16_t TestLargeRecordSize = sizeof(BufferedCodeHeader) + TestLargeCodeLength;
+static_assert(TestSmallCodeLength >= sizeof(CodeHeader) && TestSmallCodeLength % sizeof(uint32_t) == 0);
+static_assert(TestSmallRecordSize == 32 && TestLargeRecordSize == 64);
+static_assert(SpiCodeBufferSize % TestSmallRecordSize == 0);
+
+// The head of the ring in tests 1 to 4, and the start of the tail block. Leaving exactly MaxCodeBufferSize free is
+// what makes DefragmentBufferedCodes act instead of deciding that there is still room for another code.
+constexpr uint16_t TestHeadEnd = 2 * TestSmallRecordSize;
+constexpr uint16_t TestTailStart = TestHeadEnd + MaxCodeBufferSize;
+constexpr uint16_t TestTailEnd = TestTailStart + 3 * TestSmallRecordSize;
+static_assert(TestTailEnd <= SpiCodeBufferSize);
+
+// The scratch buffer is followed by a guard area filled with this pattern. DefragmentCodeBlock used to measure the
+// "gap too small" move from the gap rather than from the code it relocates, so it read gapSize bytes past `end` -
+// with end == SpiCodeBufferSize that is past the end of the allocation - and copied them into the buffer. Finding
+// the pattern inside the buffer afterwards is a direct signature of that bug.
+constexpr uint32_t TestGuardPattern = 0xDEADBEEF;
+constexpr size_t TestBufferWords = SpiCodeBufferSize / sizeof(uint32_t);
+constexpr size_t TestGuardWords = MaxCodeBufferSize / sizeof(uint32_t);
+
+// Write one buffered code record and return the offset of the next one
+static uint16_t PutTestCode(char *buffer, uint16_t offset, uint16_t codeLength, bool isPending, uint8_t channel, int32_t signature) noexcept
+{
+	BufferedCodeHeader * const bufHeader = reinterpret_cast<BufferedCodeHeader *>(buffer + offset);
+	bufHeader->isPending = isPending;
+	bufHeader->padding = 0;
+	bufHeader->length = codeLength;
+
+	CodeHeader * const codeHeader = reinterpret_cast<CodeHeader *>(buffer + offset + sizeof(BufferedCodeHeader));
+	memset(codeHeader, 0, codeLength);
+	codeHeader->channel = channel;
+	codeHeader->letter = 'M';
+	codeHeader->majorCode = signature;						// carries the signature so that we can tell records apart after a move
+	return (uint16_t)(offset + sizeof(BufferedCodeHeader) + codeLength);
+}
+
+// Check that the record at the given offset is the one we wrote, wherever it may have been moved from
+static bool CheckTestCode(const char *buffer, uint16_t offset, uint16_t codeLength, bool isPending, int32_t signature) noexcept
+{
+	const BufferedCodeHeader * const bufHeader = reinterpret_cast<const BufferedCodeHeader *>(buffer + offset);
+	const CodeHeader * const codeHeader = reinterpret_cast<const CodeHeader *>(buffer + offset + sizeof(BufferedCodeHeader));
+	return bufHeader->length == codeLength && bufHeader->isPending == isPending && codeHeader->majorCode == signature;
+}
+
+// Reset the scratch buffer before each test. The free space is filled with well-formed dead records rather than with
+// a poison value, so that a walk which does escape its bounds - which is what these tests look for - steps through
+// the buffer instead of straight over it.
+static void FillTestBuffer(char *buffer) noexcept
+{
+	for (uint16_t offset = 0; offset < SpiCodeBufferSize; offset += TestSmallRecordSize)
+	{
+		(void)PutTestCode(buffer, offset, TestSmallCodeLength, false, 0, 0);
+	}
+
+	uint32_t * const guard = reinterpret_cast<uint32_t *>(buffer) + TestBufferWords;
+	for (size_t i = 0; i < TestGuardWords; ++i)
+	{
+		guard[i] = TestGuardPattern;
+	}
+}
+
+// Check that the guard area is untouched and that none of it has been copied into the buffer
+static bool IsGuardIntact(const uint32_t *scratch) noexcept
+{
+	for (size_t i = 0; i < TestGuardWords; ++i)
+	{
+		if (scratch[TestBufferWords + i] != TestGuardPattern)
+		{
+			return false;
+		}
+	}
+	for (size_t i = 0; i < TestBufferWords; ++i)
+	{
+		if (scratch[i] == TestGuardPattern)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+GCodeResult SbcInterface::TestCodeBufferRing(GCodeBuffer& gb, unsigned int whichTest, const StringRef& reply) noexcept
+{
+	if (whichTest > (unsigned int)SbcRingTest::lastTest)
+	{
+		reply.printf("Invalid test number, expected 0 (all) or %u..%u", (unsigned int)SbcRingTest::firstTest, (unsigned int)SbcRingTest::lastTest);
+		return GCodeResult::error;
+	}
+
+	// Allocate the scratch buffer before suspending the scheduler, because operator new takes the heap mutex
+	uint32_t * const scratch = new uint32_t[TestBufferWords + TestGuardWords];
+	char * const testBuffer = reinterpret_cast<char *>(scratch);
+
+	// Put the synthetic codes on a channel that cannot be the one this M122 arrived on, so that the FillBuffer test
+	// below cannot pick one of them up and overwrite the code we are executing
+	const uint8_t otherChannel = (uint8_t)((gb.GetChannel().RawValue() + 1) % NumGCodeChannels);
+	const GCodeChannel thirdChannel((uint8_t)((otherChannel + 1) % NumGCodeChannels));
+
+	// Per-test results. Collected while the scheduler is suspended and formatted afterwards, because allocating an
+	// output buffer or taking a mutex in a critical section resets the board. The three observed values are whatever
+	// the test in question looks at, see the individual comments below.
+	struct TestResult
+	{
+		uint16_t observed[3];
+		bool run, passed;
+	} results[(unsigned int)SbcRingTest::lastTest + 1];
+	memset(results, 0, sizeof(results));
+
+	const auto isSelected = [whichTest](SbcRingTest t) noexcept { return whichTest == 0 || whichTest == (unsigned int)t; };
+	const auto record = [&results](SbcRingTest t, bool passed, uint16_t v0, uint16_t v1, uint16_t v2) noexcept
+						{
+							TestResult& r = results[(unsigned int)t];
+							r.run = true;
+							r.passed = passed;
+							r.observed[0] = v0;
+							r.observed[1] = v1;
+							r.observed[2] = v2;
+						};
+
+	{
+		TaskCriticalSectionLocker locker;
+
+		// Swap in the scratch buffer. The SBC task cannot run while the scheduler is suspended and every other
+		// accessor of these members runs in a critical section too, so nothing can observe the substitution.
+		char * const savedCodeBuffer = codeBuffer;
+		const uint16_t savedRxPointer = rxPointer, savedTxPointer = txPointer, savedTxEnd = txEnd;
+		const bool savedSendBufferUpdate = sendBufferUpdate;
+		codeBuffer = testBuffer;
+
+		// Test 1: an overlapping ring, nearly full, whose tail block holds nothing but already-consumed codes.
+		// DefragmentCodeBlock collapses that block onto its own start, which used to write txEnd = rxPointer and
+		// leave an encoding behind that no walk can terminate on. Observed: rxPointer, txPointer, txEnd.
+		if (isSelected(SbcRingTest::emptyTailNormalised))
+		{
+			FillTestBuffer(testBuffer);
+			uint16_t offset = PutTestCode(testBuffer, 0, TestSmallCodeLength, true, otherChannel, 1);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, 2);
+			txPointer = offset;
+			offset = PutTestCode(testBuffer, TestTailStart, TestSmallCodeLength, false, otherChannel, 3);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, false, otherChannel, 4);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, false, otherChannel, 5);
+			rxPointer = TestTailStart;
+			txEnd = offset;
+			sendBufferUpdate = false;
+
+			DefragmentBufferedCodes();
+
+			record(SbcRingTest::emptyTailNormalised,
+					rxPointer == 0 && txEnd == 0 && txPointer == TestHeadEnd && sendBufferUpdate &&
+						CheckTestCode(testBuffer, 0, TestSmallCodeLength, true, 1) &&
+						CheckTestCode(testBuffer, TestSmallRecordSize, TestSmallCodeLength, true, 2),
+					rxPointer, txPointer, txEnd);
+		}
+
+		// Test 2: the same ring but already poisoned, which is the state a firmware without the fix leaves behind.
+		// Defragmenting again used to be a no-op, so the next walk was guaranteed to run off the end rather than
+		// merely likely to. Observed: rxPointer, txPointer, txEnd.
+		if (isSelected(SbcRingTest::poisonedStateRepaired))
+		{
+			FillTestBuffer(testBuffer);
+			uint16_t offset = PutTestCode(testBuffer, 0, TestSmallCodeLength, true, otherChannel, 1);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, 2);
+			txPointer = offset;
+			rxPointer = txEnd = TestTailStart;
+			sendBufferUpdate = false;
+
+			DefragmentBufferedCodes();
+
+			record(SbcRingTest::poisonedStateRepaired,
+					rxPointer == 0 && txEnd == 0 && txPointer == TestHeadEnd && sendBufferUpdate &&
+						CheckTestCode(testBuffer, 0, TestSmallCodeLength, true, 1) &&
+						CheckTestCode(testBuffer, TestSmallRecordSize, TestSmallCodeLength, true, 2),
+					rxPointer, txPointer, txEnd);
+		}
+
+		// Test 3: InvalidateBufferedCodes on the poisoned state. It must normalise the pointers before the walk
+		// starts, then walk the head block only and leave both codes pending because they are on another channel.
+		// Observed: rxPointer, txPointer, txEnd.
+		if (isSelected(SbcRingTest::invalidateWalkGuarded))
+		{
+			FillTestBuffer(testBuffer);
+			uint16_t offset = PutTestCode(testBuffer, 0, TestSmallCodeLength, true, otherChannel, 1);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, 2);
+			txPointer = offset;
+			rxPointer = txEnd = TestTailStart;
+			sendBufferUpdate = false;
+
+			InvalidateBufferedCodes(thirdChannel);
+
+			record(SbcRingTest::invalidateWalkGuarded,
+					rxPointer == 0 && txEnd == 0 && txPointer == TestHeadEnd &&
+						CheckTestCode(testBuffer, 0, TestSmallCodeLength, true, 1) &&
+						CheckTestCode(testBuffer, TestSmallRecordSize, TestSmallCodeLength, true, 2),
+					rxPointer, txPointer, txEnd);
+		}
+
+		// Test 4: the same for FillBuffer, which is where the field failure actually asserted. It must return
+		// without a code because both buffered codes are on another channel, so the G-code buffer we were called
+		// from is left alone. Observed: rxPointer, txPointer, txEnd.
+		if (isSelected(SbcRingTest::fillBufferWalkGuarded))
+		{
+			// FillBuffer returns before it reaches the walk if the channel is suspended, in which case the test
+			// would pass without having tested anything. Report that rather than pretend we ran it.
+			if (gb.IsInvalidated() || gb.IsMacroFileClosed() || gb.IsMessageAcknowledged() || gb.IsAbortRequested() ||
+				(reportPause && gb.IsFileChannel()) ||
+				(gb.LatestMachineState().waitingForAcknowledgement && gb.IsMessagePromptPending()))
+			{
+				// leave the test marked as not run
+			}
+			else
+			{
+				FillTestBuffer(testBuffer);
+				uint16_t offset = PutTestCode(testBuffer, 0, TestSmallCodeLength, true, otherChannel, 1);
+				offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, 2);
+				txPointer = offset;
+				rxPointer = txEnd = TestTailStart;
+				sendBufferUpdate = false;
+
+				const bool gotCode = FillBuffer(gb);
+
+				record(SbcRingTest::fillBufferWalkGuarded,
+						!gotCode && rxPointer == 0 && txEnd == 0 && txPointer == TestHeadEnd &&
+							CheckTestCode(testBuffer, 0, TestSmallCodeLength, true, 1) &&
+							CheckTestCode(testBuffer, TestSmallRecordSize, TestSmallCodeLength, true, 2),
+						rxPointer, txPointer, txEnd);
+			}
+		}
+
+		// Test 5: a full block ending at SpiCodeBufferSize that starts with a consumed code followed by one too big
+		// to fit in the gap it leaves. The move that relocates the run from that code onwards used to be measured
+		// from the gap, so it read one small record past the end of the allocation and copied it into the buffer.
+		// Observed: the resulting end, and the number of relocated records that came back wrong.
+		if (isSelected(SbcRingTest::gapTooSmallMove))
+		{
+			FillTestBuffer(testBuffer);
+			uint16_t offset = PutTestCode(testBuffer, 0, TestSmallCodeLength, false, otherChannel, 0);
+			offset = PutTestCode(testBuffer, offset, TestLargeCodeLength, true, otherChannel, 1);
+			for (int32_t signature = 2; offset < SpiCodeBufferSize; ++signature)
+			{
+				offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, signature);
+			}
+
+			volatile uint16_t testEnd = SpiCodeBufferSize;
+			sendBufferUpdate = false;
+			const bool defragmented = DefragmentCodeBlock(0, testEnd);
+
+			// The whole run from the second code onwards must have moved down by exactly one small record
+			uint16_t badRecords = 0;
+			if (!CheckTestCode(testBuffer, 0, TestLargeCodeLength, true, 1))
+			{
+				++badRecords;
+			}
+			int32_t expected = 2;
+			for (uint16_t o = TestLargeRecordSize; o + TestSmallRecordSize <= testEnd; o += TestSmallRecordSize, ++expected)
+			{
+				if (!CheckTestCode(testBuffer, o, TestSmallCodeLength, true, expected))
+				{
+					++badRecords;
+				}
+			}
+
+			record(SbcRingTest::gapTooSmallMove,
+					defragmented && sendBufferUpdate && testEnd == SpiCodeBufferSize - TestSmallRecordSize &&
+						badRecords == 0 && IsGuardIntact(scratch),
+					testEnd, badRecords, 0);
+		}
+
+		// Test 6: the branch next to it, where the gap is big enough to take the code. Nothing in the fix changes
+		// this path, so it is here to show that the corrected byte count did not disturb it. Observed: the resulting
+		// end, and whether the two surviving codes are in the right order.
+		if (isSelected(SbcRingTest::gapLargeEnoughMove))
+		{
+			FillTestBuffer(testBuffer);
+			uint16_t offset = PutTestCode(testBuffer, 0, TestLargeCodeLength, false, otherChannel, 0);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, 1);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, false, otherChannel, 0);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, 2);
+
+			volatile uint16_t testEnd = offset;
+			sendBufferUpdate = false;
+			const bool defragmented = DefragmentCodeBlock(0, testEnd);
+
+			const bool codesOk = CheckTestCode(testBuffer, 0, TestSmallCodeLength, true, 1) &&
+									CheckTestCode(testBuffer, TestSmallRecordSize, TestSmallCodeLength, true, 2);
+			record(SbcRingTest::gapLargeEnoughMove,
+					defragmented && sendBufferUpdate && testEnd == 2 * TestSmallRecordSize && codesOk &&
+						IsGuardIntact(scratch),
+					testEnd, (uint16_t)codesOk, 0);
+		}
+
+		// Test 8: the third way out of DefragmentBufferedCodes, which neither test 1 nor test 2 reaches. When both
+		// blocks of an overlapping ring are gapless there is nothing to compact, so instead the tail block is slid up
+		// against the end of the buffer to make the free run between txPointer and rxPointer as long as possible.
+		// Note that this runs here, inside the critical section, even though it is numbered after the code length
+		// check: the numbering follows the order the tests were written so that a given S keeps meaning the same
+		// thing. Observed: rxPointer, txPointer, txEnd.
+		if (isSelected(SbcRingTest::tailMovedToEnd))
+		{
+			FillTestBuffer(testBuffer);
+			uint16_t offset = PutTestCode(testBuffer, 0, TestSmallCodeLength, true, otherChannel, 1);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, 2);
+			txPointer = offset;
+			offset = PutTestCode(testBuffer, TestTailStart, TestSmallCodeLength, true, otherChannel, 3);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, 4);
+			offset = PutTestCode(testBuffer, offset, TestSmallCodeLength, true, otherChannel, 5);
+			rxPointer = TestTailStart;
+			txEnd = offset;
+			sendBufferUpdate = false;
+
+			DefragmentBufferedCodes();
+
+			// The three tail codes must have arrived at the top of the buffer in the same order, and the head block
+			// must not have been touched
+			constexpr uint16_t movedTailStart = SpiCodeBufferSize - 3 * TestSmallRecordSize;
+			bool codesOk = CheckTestCode(testBuffer, 0, TestSmallCodeLength, true, 1) &&
+							CheckTestCode(testBuffer, TestSmallRecordSize, TestSmallCodeLength, true, 2);
+			for (int32_t signature = 3; signature <= 5; ++signature)
+			{
+				codesOk = codesOk && CheckTestCode(testBuffer, (uint16_t)(movedTailStart + (signature - 3) * TestSmallRecordSize),
+													TestSmallCodeLength, true, signature);
+			}
+
+			record(SbcRingTest::tailMovedToEnd,
+					rxPointer == movedTailStart && txEnd == SpiCodeBufferSize && txPointer == TestHeadEnd &&
+						sendBufferUpdate && codesOk && IsGuardIntact(scratch),
+					rxPointer, txPointer, txEnd);
+		}
+
+		// Restore the ring before anything else can look at it again
+		codeBuffer = savedCodeBuffer;
+		rxPointer = savedRxPointer;
+		txPointer = savedTxPointer;
+		txEnd = savedTxEnd;
+		sendBufferUpdate = savedSendBufferUpdate;
+	}
+
+	delete[] scratch;
+
+	// Test 7: the range check on the code length that DSF sends us. This one needs no ring state, so it runs with
+	// the scheduler running again. Observed: the number of cases that were classified wrongly.
+	if (isSelected(SbcRingTest::codeLengthCheck))
+	{
+		static constexpr struct { uint16_t length; bool valid; } lengthCases[] =
+		{
+			{ 0,										false },	// empty code, rejected before we get here
+			{ 4,										false },	// shorter than a CodeHeader
+			{ (uint16_t)sizeof(CodeHeader) - 4,			false },
+			{ (uint16_t)sizeof(CodeHeader),				true  },	// the shortest code there can be
+			{ (uint16_t)sizeof(CodeHeader) + 2,			false },	// not a whole number of dwords
+			{ (uint16_t)MaxCodeBufferSize,				true  },	// the longest code DSF may send
+			{ (uint16_t)MaxCodeBufferSize + 4,			false },	// overruns GCodeBuffer::buffer via BinaryParser::Put
+			{ 65532,									false },	// wraps the uint16 bufferedCodeSize to zero
+			{ 65535,									false }
+		};
+
+		uint16_t badCases = 0;
+		for (const auto& c : lengthCases)
+		{
+			if (IsValidCodeLength(c.length) != c.valid)
+			{
+				++badCases;
+			}
+		}
+		record(SbcRingTest::codeLengthCheck, badCases == 0, badCases, 0, 0);
+	}
+
+	unsigned int numRun = 0, numPassed = 0;
+	for (unsigned int t = (unsigned int)SbcRingTest::firstTest; t <= (unsigned int)SbcRingTest::lastTest; ++t)
+	{
+		if (results[t].run)
+		{
+			++numRun;
+			if (results[t].passed)
+			{
+				++numPassed;
+			}
+		}
+	}
+
+	reply.printf("SBC code buffer ring test: %u run, %u passed", numRun, numPassed);
+	for (unsigned int t = (unsigned int)SbcRingTest::firstTest; t <= (unsigned int)SbcRingTest::lastTest; ++t)
+	{
+		if (!results[t].run)
+		{
+			if (whichTest == 0 || whichTest == t)
+			{
+				reply.lcatf("test %u (%s) not run", t, SbcRingTestNames[t]);
+			}
+		}
+		else if (!results[t].passed)
+		{
+			reply.lcatf("test %u (%s) FAILED, observed %u/%u/%u",
+						t, SbcRingTestNames[t], (unsigned int)results[t].observed[0], (unsigned int)results[t].observed[1],
+						(unsigned int)results[t].observed[2]);
+		}
+	}
+
+	return (numRun != 0 && numPassed == numRun) ? GCodeResult::ok : GCodeResult::error;
+}
+
+// Arm a one-shot fault on the SPI link (M122 P1010..P1014)
+//
+// Unlike the other tests in the P1000 block these are not expected to crash anything: every one of them provokes an
+// error that the protocol is supposed to absorb within a transfer or two, so the point of running them is that the
+// machine carries on. Run one during a print and watch the failed transfer and checksum error counts in M122 go up
+// by one while the print continues.
+GCodeResult SbcInterface::InjectFault(SbcFaultInjection fault, const StringRef& reply) noexcept
+{
+	if (!isConnected)
+	{
+		reply.copy("Not connected to the SBC");
+		return GCodeResult::error;
+	}
+
+	const SbcFaultInjection alreadyArmed = transfer.GetInjectedFault();
+	if (fault != SbcFaultInjection::none && alreadyArmed != SbcFaultInjection::none && alreadyArmed != fault)
+	{
+		reply.printf("Fault %u is still armed, wait for it to be taken first", (unsigned int)alreadyArmed);
+		return GCodeResult::error;
+	}
+
+	transfer.InjectFault(fault);
+	switch (fault)
+	{
+	case SbcFaultInjection::badTxHeaderChecksum:
+		reply.copy("Armed: the next transfer header will be sent with a bad checksum. Expect the SBC to ask for it again");
+		break;
+
+	case SbcFaultInjection::badTxDataChecksum:
+		reply.copy("Armed: the next transfer that carries data will be sent corrupted. Expect the SBC to ask for the data again");
+		break;
+
+	case SbcFaultInjection::badRxHeaderChecksum:
+		reply.copy("Armed: the next transfer header received will be treated as corrupt. Expect us to ask for it again");
+		break;
+
+	case SbcFaultInjection::badRxDataChecksum:
+		reply.copy("Armed: the next transfer data received will be treated as corrupt. Expect us to ask for it again");
+		break;
+
+	case SbcFaultInjection::refuseNextCode:
+		reply.copy("Armed: the next code from the SBC will be refused as if it were over-long. Expect it to be resent and then run, in order");
+		break;
+
+	case SbcFaultInjection::simulateTimeout:
+		// Unlike the others this one is destructive: InvalidateResources aborts every channel's files and drops the
+		// cached replies, which includes the reply to this very code
+		reply.copy("Armed: the next completed transfer will be treated as a timeout. This aborts open files on every "
+					"channel and drops pending replies, including this one. Expect a reconnect within a few seconds");
+		break;
+
+	default:
+		reply.copy("Cleared any armed fault");
+		break;
+	}
+	reply.cat(". Check the counters with M122");
+	return GCodeResult::ok;
+}
+
+// Put the code buffer ring into the illegal encoding that the defragmenter used to leave behind (M122 P1015)
+//
+// This is the end to end version of test 3 and 4 of M122 P110: rather than running the walks over a scratch buffer it
+// hands the real ring to the real SBC task and lets the machine carry on. On firmware with the code buffer desync fix
+// the next walk normalises the pointers and nothing is noticed; without it the walk parses free space, cannot reach
+// either terminator and runs off the end of the buffer, which is the field failure this reproduces.
+//
+// The ring must be empty for this, which it normally is by the time an M122 gets to run. Anything else would mean
+// discarding codes that the SBC still expects a reply for.
+GCodeResult SbcInterface::PoisonCodeBufferRing(const StringRef& reply) noexcept
+{
+	if (!isConnected)
+	{
+		reply.copy("Not connected to the SBC");
+		return GCodeResult::error;
+	}
+
+	uint16_t rx, tx, end;
+	bool poisoned;
+	{
+		// Note that nothing may be reported from in here, because building a message takes a mutex and doing that
+		// with the scheduler suspended resets the board
+		TaskCriticalSectionLocker locker;
+		rx = rxPointer;
+		tx = txPointer;
+		end = txEnd;
+		poisoned = (rx == tx && end == 0);
+		if (poisoned)
+		{
+			// The essential property is that rxPointer == txEnd != 0 and that it points at free space rather than at
+			// a record, which is what stops both walks from terminating. On an empty ring nothing is lost by it.
+			rxPointer = txEnd = MaxCodeBufferSize;
+			sendBufferUpdate = true;
+		}
+	}
+
+	if (!poisoned)
+	{
+		reply.printf("Code buffer ring is not empty (RX/TX %u/%u-%u), try again when idle",
+					(unsigned int)rx, (unsigned int)tx, (unsigned int)end);
+		return GCodeResult::error;
+	}
+
+	reply.copy("Code buffer ring poisoned, the next walk of it should recover silently");
+	return GCodeResult::ok;
 }
 
 #endif

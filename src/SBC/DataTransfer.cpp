@@ -412,6 +412,7 @@ __nocache uint32_t DataTransfer::txResponse;
 #endif
 
 DataTransfer::DataTransfer() noexcept : state(InternalTransferState::ExchangingData), lastTransferNumber(0), failedTransfers(0), checksumErrors(0),
+	pendingFault(SbcFaultInjection::none), txHeaderChecksumCorrupted(false), txDataCorrupted(false),
 #if SAME5x
 	rxBuffer(nullptr), txBuffer(nullptr),
 #endif
@@ -528,6 +529,10 @@ void DataTransfer::InitFromTask() noexcept
 void DataTransfer::Diagnostics(const StringRef& reply) noexcept
 {
 	reply.lcatf("Transfer state: %d, failed transfers: %u, checksum errors: %u", (int)state, failedTransfers, checksumErrors);
+	if (pendingFault != SbcFaultInjection::none)
+	{
+		reply.catf(", fault %u armed", (unsigned int)pendingFault);
+	}
 	reply.lcatf("RX/TX seq numbers: %d/%d", (int)rxHeader.sequenceNumber, (int)txHeader.sequenceNumber);
 	reply.lcatf("SPI underruns %u, overruns %u", spiTxUnderruns, spiRxOverruns);
 }
@@ -704,6 +709,15 @@ int DataTransfer::ReadFileData(char *buffer, size_t length) noexcept
 
 void DataTransfer::ExchangeHeader() noexcept
 {
+	// Fault injection (M122 P1010). The corruption is applied here rather than where the checksum is computed,
+	// because the retry path re-sends txHeader unchanged. It is undone again as soon as this exchange has finished,
+	// so that the retry the SBC then asks for is the one that succeeds.
+	if (TakeInjectedFault(SbcFaultInjection::badTxHeaderChecksum))
+	{
+		txHeader.crcHeader ^= 1u;
+		txHeaderChecksumCorrupted = true;
+	}
+
 	Cache::FlushBeforeDMASend(&txHeader, sizeof(txHeader));
 	state = InternalTransferState::ExchangingHeader;
 	setup_spi(&rxHeader, &txHeader, sizeof(TransferHeader));
@@ -719,6 +733,15 @@ void DataTransfer::ExchangeResponse(uint32_t response) noexcept
 
 void DataTransfer::ExchangeData() noexcept
 {
+	// Fault injection (M122 P1011). The data itself is corrupted rather than txHeader.crcData, because the checksum
+	// the SBC compares against travelled in the header that has already gone out - changing it now would have no
+	// effect at all. As above this is undone as soon as the exchange has finished.
+	if (txHeader.dataLength > 0 && TakeInjectedFault(SbcFaultInjection::badTxDataChecksum))
+	{
+		txBuffer[0] ^= 1u;
+		txDataCorrupted = true;
+	}
+
 	Cache::FlushBeforeDMASend(txBuffer, txHeader.dataLength);
 	size_t bytesToExchange = max<size_t>(rxHeader.dataLength, txHeader.dataLength);
 	state = InternalTransferState::ExchangingData;
@@ -793,6 +816,15 @@ TransferState DataTransfer::DoTransfer() noexcept
 		{
 			// (1) Exchanged transfer headers
 			Cache::InvalidateAfterDMAReceive(&rxHeader, sizeof(rxHeader));
+
+			// Undo any injected header corruption now that it has gone out, so that the retry the SBC is about to
+			// ask for carries the correct checksum and the link recovers after exactly one bad header
+			if (txHeaderChecksumCorrupted)
+			{
+				txHeader.crcHeader ^= 1u;
+				txHeaderChecksumCorrupted = false;
+			}
+
 			const uint32_t headerResponse = *reinterpret_cast<const uint32_t*>(&rxHeader);
 			if (headerResponse == TransferResponse::BadResponse)
 			{
@@ -806,7 +838,9 @@ TransferState DataTransfer::DoTransfer() noexcept
 			}
 
 			const uint32_t checksum = CalcCRC32(reinterpret_cast<const char *>(&rxHeader), sizeof(TransferHeader) - sizeof(uint32_t));
-			if (rxHeader.crcHeader != checksum)
+			// The injected fault (M122 P1012) is only taken when the checksum is actually good, so that a real error
+			// leaves it armed for the next transfer instead of consuming it
+			if (rxHeader.crcHeader != checksum || TakeInjectedFault(SbcFaultInjection::badRxHeaderChecksum))
 			{
 				if (reprap.Debug(Module::SbcInterface))
 				{
@@ -872,6 +906,14 @@ TransferState DataTransfer::DoTransfer() noexcept
 		{
 			// (3) Exchanged data
 			Cache::InvalidateAfterDMAReceive(rxBuffer, rxHeader.dataLength);
+
+			// Same as for the header above: the corrupted data has gone out, so restore it for the resend
+			if (txDataCorrupted)
+			{
+				txBuffer[0] ^= 1u;
+				txDataCorrupted = false;
+			}
+
 			if (*reinterpret_cast<uint32_t*>(rxBuffer) == TransferResponse::BadResponse)
 			{
 				RestartTransfer(false);
@@ -879,7 +921,8 @@ TransferState DataTransfer::DoTransfer() noexcept
 			}
 
 			const uint32_t checksum = CalcCRC32(rxBuffer, rxHeader.dataLength);
-			if (rxHeader.crcData != checksum)
+			// As above, only taken when the data we received was in fact good (M122 P1013)
+			if (rxHeader.crcData != checksum || TakeInjectedFault(SbcFaultInjection::badRxDataChecksum))
 			{
 				if (reprap.Debug(Module::SbcInterface))
 				{
@@ -985,6 +1028,10 @@ void DataTransfer::StartNextTransfer() noexcept
 	rxHeader.dataLength = 0;
 	rxHeader.crcData = 0;
 	rxHeader.crcHeader = 0;
+
+	// Drop any outstanding fault injection repair. The checksums are recomputed below over whatever the buffers hold
+	// now, so there is nothing left to undo, and applying it later would corrupt a transfer that is not under test.
+	txHeaderChecksumCorrupted = txDataCorrupted = false;
 
 	// Set up TX transfer header
 	txHeader.numPackets = packetId;

@@ -2028,6 +2028,56 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 		break;
 #endif
 
+#if HAS_SBC_INTERFACE
+	// The ring tests run against a scratch buffer and the fault injections against the live link, but all of them
+	// call into the real SbcInterface, so it must have been initialised. Note that tests 3 and 4 of P110 and the ring
+	// poisoning must not be run on firmware without the code buffer desync fix, see the comment above SbcRingTest.
+	case (unsigned int)DiagnosticTestType::TestSbcCodeBufferRing:
+	case (unsigned int)DiagnosticTestType::SbcBadTxHeaderChecksum:
+	case (unsigned int)DiagnosticTestType::SbcBadTxDataChecksum:
+	case (unsigned int)DiagnosticTestType::SbcBadRxHeaderChecksum:
+	case (unsigned int)DiagnosticTestType::SbcBadRxDataChecksum:
+	case (unsigned int)DiagnosticTestType::SbcRefuseNextCode:
+	case (unsigned int)DiagnosticTestType::SbcPoisonCodeBufferRing:
+	case (unsigned int)DiagnosticTestType::SbcSimulateTimeout:
+		if (!reprap.UsingSbcInterface())
+		{
+			reply.copy("SBC interface is not in use");
+			return GCodeResult::error;
+		}
+
+		switch (d)
+		{
+		case (unsigned int)DiagnosticTestType::TestSbcCodeBufferRing:
+			return reprap.GetSbcInterface().TestCodeBufferRing(gb, (gb.Seen('S')) ? gb.GetUIValue() : 0, reply);
+
+		case (unsigned int)DiagnosticTestType::SbcBadTxHeaderChecksum:
+			return reprap.GetSbcInterface().InjectFault(SbcFaultInjection::badTxHeaderChecksum, reply);
+
+		case (unsigned int)DiagnosticTestType::SbcBadTxDataChecksum:
+			return reprap.GetSbcInterface().InjectFault(SbcFaultInjection::badTxDataChecksum, reply);
+
+		case (unsigned int)DiagnosticTestType::SbcBadRxHeaderChecksum:
+			return reprap.GetSbcInterface().InjectFault(SbcFaultInjection::badRxHeaderChecksum, reply);
+
+		case (unsigned int)DiagnosticTestType::SbcBadRxDataChecksum:
+			return reprap.GetSbcInterface().InjectFault(SbcFaultInjection::badRxDataChecksum, reply);
+
+		case (unsigned int)DiagnosticTestType::SbcRefuseNextCode:
+			return reprap.GetSbcInterface().InjectFault(SbcFaultInjection::refuseNextCode, reply);
+
+		case (unsigned int)DiagnosticTestType::SbcSimulateTimeout:
+			return reprap.GetSbcInterface().InjectFault(SbcFaultInjection::simulateTimeout, reply);
+
+		default:
+			// This one can end in a software reset, but only on firmware that does not have the code buffer desync
+			// fix - which is exactly what it is here to tell us
+			deliberateError = true;
+			return reprap.GetSbcInterface().PoisonCodeBufferRing(reply);
+		}
+		break;
+#endif
+
 	default:
 		break;
 	}

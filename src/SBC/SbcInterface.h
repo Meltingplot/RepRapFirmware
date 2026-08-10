@@ -44,6 +44,9 @@ public:
 
 	void EventOccurred(bool timeCritical = false) noexcept;						// Called when a new event has happened. It can optionally start off a new transfer immediately
 	GCodeResult HandleM576(GCodeBuffer& gb, const StringRef& reply) noexcept;	// Set the SPI communication parameters
+	GCodeResult TestCodeBufferRing(GCodeBuffer& gb, unsigned int whichTest, const StringRef& reply) noexcept;	// Run the code buffer ring tests (M122 P110)
+	GCodeResult InjectFault(SbcFaultInjection fault, const StringRef& reply) noexcept;		// Arm a one-shot SPI fault (M122 P1010..P1014, P1016)
+	GCodeResult PoisonCodeBufferRing(const StringRef& reply) noexcept;						// Leave the illegal ring encoding behind that used to crash us (M122 P1015)
 
 	bool IsPrintAborted() noexcept;												// Check if the current print has been aborted
 	bool FillBuffer(GCodeBuffer &gb) noexcept;									// Try to fill up the G-code buffer with the next available G-code

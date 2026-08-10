@@ -35,6 +35,20 @@ enum class TransferState
 	finished
 };
 
+// One-shot faults that M122 P1010..P1016 can arm, to exercise the SPI and code buffer recovery paths that are
+// otherwise only reachable with a broken SBC, a noisy SPI link or a corrupted code buffer. Each of them is consumed
+// by the first exchange that can use it and then disarms itself, so the link always recovers within one transfer.
+enum class SbcFaultInjection : uint8_t
+{
+	none = 0,
+	badTxHeaderChecksum,			// send the transfer header with a broken checksum, so that the SBC asks for it again
+	badTxDataChecksum,				// send the transfer data with a broken checksum, so that the SBC asks for it again
+	badRxHeaderChecksum,			// act as if the header we received had a bad checksum, so that we ask for it again
+	badRxDataChecksum,				// act as if the data we received had a bad checksum, so that we ask for it again
+	refuseNextCode,					// refuse the next code the way an over-long one is refused, so that the SBC resends it
+	simulateTimeout					// act as if the connection had timed out, to exercise the disconnect and recovery path
+};
+
 class DataTransfer
 {
 public:
@@ -62,6 +76,10 @@ public:
 	GCodeChannel ReadDeleteLocalVariable(const StringRef& varName) noexcept;				// Read a variable deletion request
 	FileHandle ReadOpenFileResult(FilePosition& fileLength) noexcept;						// Read the result of a file open request
 	int ReadFileData(char *buffer, size_t length) noexcept;									// Read file data from the SBC
+
+	void InjectFault(SbcFaultInjection fault) noexcept { pendingFault = fault; }		// Arm a one-shot fault, see M122 P1010..P1016
+	bool TakeInjectedFault(SbcFaultInjection fault) noexcept;						// Test for the given armed fault and disarm it
+	SbcFaultInjection GetInjectedFault() const noexcept { return pendingFault; }
 
 	void ResendPacket(const PacketHeader *packet) noexcept;
 	bool WriteObjectModel(OutputBuffer *data) noexcept;
@@ -106,6 +124,13 @@ private:
 	// Transfer properties
 	uint16_t lastTransferNumber;
 	unsigned int failedTransfers, checksumErrors;
+
+	// Fault injection. The two "corrupted" flags record that an injected corruption is still in the outgoing buffers
+	// and has to be taken back out once it has been sent, because neither ExchangeHeader nor ExchangeData recomputes
+	// a checksum when the SBC asks for a retry: a corruption left in place would be re-sent for as long as the SBC
+	// keeps asking, and the link would only recover by timing out.
+	volatile SbcFaultInjection pendingFault;
+	bool txHeaderChecksumCorrupted, txDataCorrupted;
 
 	// Transfer buffers
 #if SAME70
@@ -152,6 +177,18 @@ private:
 
 	size_t AddPadding(size_t length) const noexcept;
 };
+
+// Note that this is deliberately not atomic: it is only ever armed from the Main task via M122 and only ever taken
+// by the SBC task, and the worst a race can do is delay the injected fault by one transfer.
+inline bool DataTransfer::TakeInjectedFault(SbcFaultInjection fault) noexcept
+{
+	if (pendingFault != fault)
+	{
+		return false;
+	}
+	pendingFault = SbcFaultInjection::none;
+	return true;
+}
 
 inline bool DataTransfer::IsConnectionReset() const noexcept
 {
