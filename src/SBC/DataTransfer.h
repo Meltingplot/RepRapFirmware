@@ -49,6 +49,17 @@ enum class SbcFaultInjection : uint8_t
 	simulateTimeout					// act as if the connection had timed out, to exercise the disconnect and recovery path
 };
 
+// Check whether a packet header at the given offset, and the payload it declares, both lie inside a transfer of the
+// given length. ReadPacket used to test only that the offset was below the transfer length, so a header straddling
+// the end was read anyway, and ReadData never checked at all - see the call site for what that opened up.
+// Note that the payload is deliberately measured unpadded. Padding is applied lazily by WritePacketHeader, at the
+// start of the following packet, so the transfer length is the unpadded end of the last packet: rounding up here
+// would refuse every transfer whose last packet does not happen to carry a whole number of dwords.
+static inline constexpr bool PacketFitsInTransfer(size_t offset, uint16_t payloadLength, uint16_t transferLength) noexcept
+{
+	return offset + sizeof(PacketHeader) + payloadLength <= transferLength;
+}
+
 class DataTransfer
 {
 public:

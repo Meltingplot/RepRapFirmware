@@ -2178,9 +2178,11 @@ enum class SbcRingTest : unsigned int
 	gapLargeEnoughMove,			// ...and still compacts correctly when the gap is big enough (regression guard)
 	codeLengthCheck,			// the range check on the code length received from the SBC
 	tailMovedToEnd,				// DefragmentBufferedCodes slides a gapless tail block up against the end of the buffer
+	packetBoundsCheck,			// a packet and its payload must lie inside the transfer the SBC sent
+	codeParameterBound,			// numParameters must be covered by the length of the code carrying it
 
 	firstTest = emptyTailNormalised,
-	lastTest = tailMovedToEnd
+	lastTest = codeParameterBound
 };
 
 static const char * const SbcRingTestNames[] =
@@ -2193,7 +2195,9 @@ static const char * const SbcRingTestNames[] =
 	"gap too small move",
 	"gap large enough move",
 	"code length check",
-	"tail moved to end"
+	"tail moved to end",
+	"packet bounds check",
+	"code parameter bound"
 };
 
 static_assert(ARRAY_SIZE(SbcRingTestNames) == (unsigned int)SbcRingTest::lastTest + 1);
@@ -2567,6 +2571,68 @@ GCodeResult SbcInterface::TestCodeBufferRing(GCodeBuffer& gb, unsigned int which
 			}
 		}
 		record(SbcRingTest::codeLengthCheck, badCases == 0, badCases, 0, 0);
+	}
+
+	// Test 9: the bounds check that ReadPacket applies to a packet header and the payload it declares. Everything the
+	// SBC sends us arrives through it, and until it was added neither the header nor the payload was checked against
+	// the length of the transfer they came in. Observed: the number of cases classified wrongly.
+	if (isSelected(SbcRingTest::packetBoundsCheck))
+	{
+		static constexpr struct { uint16_t offset; uint16_t payload; uint16_t transfer; bool fits; } packetCases[] =
+		{
+			{ 0,	0,		64,	true  },				// empty packet at the start
+			{ 0,	56,		64,	true  },				// exactly fills the transfer
+			{ 0,	60,		64,	false },				// payload one dword too long
+			{ 52,	4,		64,	true  },				// last packet, ending exactly at the end
+			{ 52,	3,		63,	true  },				// last packet with an unpadded payload: must NOT be refused,
+														// because the transfer length is its unpadded end
+			{ 52,	5,		64,	false },				// one byte over
+			{ 56,	0,		64,	true  },				// header exactly at the end, nothing after it
+			{ 60,	0,		64,	false },				// header straddles the end - what the old test let through
+			{ 64,	0,		64,	false },				// starts at the end
+			{ 0,	65535,	64,	false }					// the length that used to wrap bufferedCodeSize
+		};
+
+		uint16_t badCases = 0;
+		for (const auto& c : packetCases)
+		{
+			if (PacketFitsInTransfer(c.offset, c.payload, c.transfer) != c.fits)
+			{
+				++badCases;
+			}
+		}
+		record(SbcRingTest::packetBoundsCheck, badCases == 0, badCases, 0, 0);
+	}
+
+	// Test 10: the bound on how many parameters a binary code of a given length can carry. Observed: as above.
+	if (isSelected(SbcRingTest::codeParameterBound))
+	{
+		static constexpr struct { uint16_t codeLength; uint16_t maxParameters; } parameterCases[] =
+		{
+			{ 0,										0 },	// no code at all
+			{ (uint16_t)sizeof(CodeHeader),				0 },	// header only, so no room for a parameter
+			{ (uint16_t)sizeof(CodeHeader) + 4,			0 },	// ...still not a whole parameter
+			{ (uint16_t)(sizeof(CodeHeader) + sizeof(CodeParameter)),		1 },
+			{ (uint16_t)(sizeof(CodeHeader) + 2 * sizeof(CodeParameter)),	2 },
+			{ (uint16_t)MaxCodeBufferSize,				(uint16_t)((MaxCodeBufferSize - sizeof(CodeHeader)) / sizeof(CodeParameter)) }
+		};
+
+		uint16_t badCases = 0;
+		for (const auto& c : parameterCases)
+		{
+			if (MaxCodeParameters(c.codeLength) != c.maxParameters)
+			{
+				++badCases;
+			}
+		}
+
+		// The worst case is what matters: a code that carries no parameters at all must not let the walk reach past
+		// the G-code buffer, which is what an unclamped uint8_t would do
+		if (MaxCodeParameters(MaxCodeBufferSize) * sizeof(CodeParameter) + sizeof(CodeHeader) > MaxGCodeLength)
+		{
+			++badCases;
+		}
+		record(SbcRingTest::codeParameterBound, badCases == 0, badCases, 0, 0);
 	}
 
 	unsigned int numRun = 0, numPassed = 0;

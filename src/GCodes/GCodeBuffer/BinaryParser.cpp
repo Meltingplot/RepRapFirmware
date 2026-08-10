@@ -34,6 +34,16 @@ void BinaryParser::Put(const uint32_t *data, size_t len) noexcept
 {
 	memcpyu32(reinterpret_cast<uint32_t *>(gb.buffer), data, len);
 	bufferLength = len * sizeof(uint32_t);
+
+	// Bound numParameters against the code we have just copied, see MaxCodeParameters. Clamping it is safe because
+	// this is our own copy of the code, and a header that claims more parameters than the code carries is malformed
+	// either way; we cannot report it from here because the task scheduler may be suspended.
+	const size_t maxParameters = MaxCodeParameters(bufferLength);
+	if (header->numParameters > maxParameters)
+	{
+		header->numParameters = (uint8_t)maxParameters;
+	}
+
 	gb.bufferState = GCodeBufferState::parsingGCode;
 	gb.LatestMachineState().g53Active = (header->flags & CodeFlags::EnforceAbsolutePosition) != 0;
 	gb.CurrentFileMachineState().lineNumber = header->lineNumber;

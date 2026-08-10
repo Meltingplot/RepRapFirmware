@@ -539,12 +539,27 @@ void DataTransfer::Diagnostics(const StringRef& reply) noexcept
 
 const PacketHeader *DataTransfer::ReadPacket() noexcept
 {
-	if (rxPointer >= rxHeader.dataLength)
+	// The header itself must lie inside the data the SBC actually sent before we may read the length out of it. The
+	// old test of rxPointer against dataLength alone let a header that straddles the end be read, and with
+	// dataLength == SbcTransferBufferSize that reads past the end of rxBuffer.
+	if (rxPointer + sizeof(PacketHeader) > rxHeader.dataLength)
 	{
 		return nullptr;
 	}
 
-	const PacketHeader *header = reinterpret_cast<const PacketHeader*>(rxBuffer + rxPointer);
+	const PacketHeader * const header = reinterpret_cast<const PacketHeader*>(rxBuffer + rxPointer);
+
+	// The payload must fit too. Checking it here rather than in ReadData covers every request type in one place,
+	// including the ones that consume their payload through ReadDataHeader, and keeps ReadData returning a plain
+	// pointer that a dozen call sites do not have to null-check. Note that this is the check the length test in
+	// SbcInterface::ExchangeData cannot make: that one bounds how much is read from the pointer, not where the
+	// pointer lands. Refusing here drops the rest of the transfer, which is the right outcome - once one declared
+	// length is wrong there is no way to find where the next packet starts.
+	if (!PacketFitsInTransfer(rxPointer, header->length, rxHeader.dataLength))
+	{
+		return nullptr;
+	}
+
 	rxPointer += sizeof(PacketHeader);
 	return header;
 }
@@ -571,6 +586,18 @@ bool DataTransfer::ReadBoolean() noexcept
 
 void DataTransfer::ReadGetObjectModel(size_t packetLength, const StringRef &key, const StringRef &flags) noexcept
 {
+	// packetLength comes from the packet header. ReadPacket has checked that it fits in the transfer, but not that it
+	// is long enough for the fixed header we are about to consume - and if it is not, the subtraction below wraps to
+	// nearly 4GB and hands that to ReadData. Consume the payload before bailing out, because leaving it in place
+	// would make the next ReadPacket parse it as a packet header.
+	if (packetLength < sizeof(GetObjectModelHeader))
+	{
+		(void)ReadData(packetLength);
+		key.Clear();
+		flags.Clear();
+		return;
+	}
+
 	// Read header
 	const GetObjectModelHeader *header = ReadDataHeader<GetObjectModelHeader>();
 	const char *data = ReadData(packetLength - sizeof(GetObjectModelHeader));
@@ -585,10 +612,21 @@ void DataTransfer::ReadGetObjectModel(size_t packetLength, const StringRef &key,
 
 void DataTransfer::ReadPrintStartedInfo(size_t packetLength, const StringRef& filename, GCodeFileInfo& info) noexcept
 {
+	// Same as in ReadGetObjectModel: too short a packet would wrap the subtraction further down
+	if (packetLength < sizeof(PrintStartedHeader))
+	{
+		(void)ReadData(packetLength);
+		info.Init();
+		filename.Clear();
+		return;
+	}
+
 	// Read header
 	const PrintStartedHeader *header = ReadDataHeader<PrintStartedHeader>();
 	info.Init();
-	info.numFilaments = header->numFilaments;
+	// numFilaments arrives from the SBC and filamentNeeded below is a fixed array, so an over-large count writes past
+	// it. Bounding the stored value bounds both the copy and the pointer advance that follows it.
+	info.numFilaments = min<unsigned int>(header->numFilaments, MaxFilaments);
 	info.numLayers = header->numLayers;
 	info.lastModifiedTime = header->lastModifiedTime;
 	info.fileSize = header->fileSize;
@@ -634,6 +672,17 @@ GCodeChannel DataTransfer::ReadCodeChannel() noexcept
 
 GCodeChannel DataTransfer::ReadEvaluateExpression(size_t packetLength, const StringRef& expression) noexcept
 {
+	// Same as in ReadGetObjectModel: too short a packet would wrap the subtraction further down. We return a valid
+	// channel with an empty expression rather than an invalid one, because the caller only sends a reply when the
+	// channel is valid - and an empty expression makes the parser throw, so DSF gets a proper evaluation error back
+	// instead of waiting for a response that never comes. The real channel is in the header we just refused to read.
+	if (packetLength < sizeof(CodeChannelHeader))
+	{
+		(void)ReadData(packetLength);
+		expression.Clear();
+		return GCodeChannel(GCodeChannel::SBC);
+	}
+
 	// Read header
 	const CodeChannelHeader *header = ReadDataHeader<CodeChannelHeader>();
 

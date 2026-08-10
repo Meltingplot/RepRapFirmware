@@ -20,6 +20,15 @@ class GCodeBuffer;
 class IPAddress;
 class MacAddress;
 
+// The number of parameters that a binary code of the given length can actually carry. CodeHeader::numParameters is a
+// uint8_t that arrives from the SBC inside the code itself and is validated nowhere, yet every parameter walk in
+// BinaryParser starts at gb.buffer + sizeof(CodeHeader) and steps that many times: 255 parameters reach 2060 bytes
+// into a buffer of MaxGCodeLength bytes, past the end and into the fields that follow it.
+static inline constexpr size_t MaxCodeParameters(size_t codeLength) noexcept
+{
+	return (codeLength > sizeof(CodeHeader)) ? (codeLength - sizeof(CodeHeader)) / sizeof(CodeParameter) : 0;
+}
+
 class BinaryParser
 {
 public:
