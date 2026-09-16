@@ -19,15 +19,8 @@ jobs:
     env:
       ARM_TOOLCHAIN: arm-gnu-toolchain-15.2.rel1-x86_64-arm-none-eabi
       UPSTREAM_BRANCH: 3.7-dev
-      # Library commits are pinned: branch tips can break the build (the CANlib 3.7-dev tip did on 2026-09-16).
-      # Bump these together with the workspace when the firmware needs newer libraries.
-      CANLIB_REF: 4ce319398870a7d4c7ba2fd8dd7e314adc318cce                # 3.7-dev
-      CORE_REF: 953e8f2ddded9f47f74658336a4799598c707c65                  # CoreN2G 3.7-dev
-      FREERTOS_REF: 3c8f655d86198f45fea7413f4d4452ddca8465a2              # 3.7-dev
-      LIBTINYUSB_REF: f748f344a3c6e6a4348d354a0022a6f96e89cfca            # 3.7-dev
-      LIBMBEDTLS_REF: a35987edf0631612ca15fba3f3e42bee7f651959            # master
-      RRFLIBS_REF: b92f3a47ef63b41456a08ff41071bf8a1ce12f38               # RRFLibraries 3.7-dev
-      WIFI_REF: 3c3da80566d4b8b36cfbb019d3e7113f4aa2df7a                  # WiFiSocketServerRTOS tls_support
+      # Libraries come from the Meltingplot forks so that fixes can be applied there before upstream
+      # accepts them. The release notes list the commits that were built.
     steps:
       - name: "Check out RepRapFirmware"
         uses: actions/checkout@v6
@@ -38,51 +31,51 @@ jobs:
       - name: "Check out CANlib"
         uses: actions/checkout@v6
         with:
-          repository: "Duet3D/CANlib"
-          ref: ${{ env.CANLIB_REF }}
+          repository: "Meltingplot/CANlib"
+          ref: "3.7-dev"
           path: "./CANlib"
 
       - name: "Check out CoreN2G"
         uses: actions/checkout@v6
         with:
-          repository: "Duet3D/CoreN2G"
-          ref: ${{ env.CORE_REF }}
+          repository: "Meltingplot/CoreN2G"
+          ref: "3.7-dev"
           path: "./CoreN2G"
 
       - name: "Check out FreeRTOS"
         uses: actions/checkout@v6
         with:
-          repository: "Duet3D/FreeRTOS"
-          ref: ${{ env.FREERTOS_REF }}
+          repository: "Meltingplot/FreeRTOS"
+          ref: "3.7-dev"
           path: "./FreeRTOS"
 
       - name: "Check out LibTinyusb"
         uses: actions/checkout@v6
         with:
-          repository: "Duet3D/LibTinyusb"
-          ref: ${{ env.LIBTINYUSB_REF }}
+          repository: "Meltingplot/LibTinyusb"
+          ref: "3.7-dev"
           path: "./LibTinyusb"
           submodules: "recursive"
 
       - name: "Check out LibMbedTls"
         uses: actions/checkout@v6
         with:
-          repository: "Duet3D/LibMbedTls"
-          ref: ${{ env.LIBMBEDTLS_REF }}
+          repository: "Meltingplot/LibMbedTls"
+          ref: "master"
           path: "./LibMbedTls"
 
       - name: "Check out RRFLibraries"
         uses: actions/checkout@v6
         with:
-          repository: "Duet3D/RRFLibraries"
-          ref: ${{ env.RRFLIBS_REF }}
+          repository: "Meltingplot/RRFLibraries"
+          ref: "3.7-dev"
           path: "./RRFLibraries"
 
       - name: "Check out WiFiSocketServerRTOS"
         uses: actions/checkout@v6
         with:
-          repository: "Duet3D/WiFiSocketServerRTOS"
-          ref: ${{ env.WIFI_REF }}
+          repository: "Meltingplot/WiFiSocketServerRTOS"
+          ref: "tls_support"
           path: "./WiFiSocketServerRTOS"
 
       - name: "Read version"
@@ -150,7 +143,7 @@ jobs:
             for lib in CANlib CoreN2G FreeRTOS LibTinyusb LibMbedTls RRFLibraries WiFiSocketServerRTOS; do
               libs="$libs, $lib $(git -C ./$lib rev-parse --short HEAD)"
             done
-            echo "- Libraries (pinned in the workflow): ${libs#, }"
+            echo "- Libraries (Meltingplot forks): ${libs#, }"
             for bin in ./upload/Duet3Firmware_*.bin; do
               name=$(basename "$bin" .bin)
               elf=$(ls ./RepRapFirmware/*/"$name".elf | head -n 1)
