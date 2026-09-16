@@ -179,7 +179,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --prerelease --verify-tag \
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --prerelease --verify-tag \
             --title "Duet 3 MB6HC + MB6XD + Mini5plus $VERSION" \
             --notes-file ./notes.md \
             ./upload/*.bin ./upload/*.uf2 ./upload/SHA256SUMS.txt
