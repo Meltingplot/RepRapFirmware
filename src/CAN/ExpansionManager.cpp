@@ -242,6 +242,13 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 				}
 				board.driverData = new DriverData[board.numDrivers];
 			}
+			if (isNewFormat && board.driverData != nullptr)
+			{
+				for (size_t driver = 0; driver < board.numDrivers; driver++)
+				{
+					board.driverData[driver].StoreIsSmartDriver(!buf->msg.announceV1.noSmartDrivers);
+				}
+			}
 			UpdateBoardState(src, BoardState::running);
 		}
 
@@ -610,14 +617,18 @@ GCodeResult ExpansionManager::ConfigureConnectionTimeout(GCodeBuffer& gb, const 
 		if (gb.Seen('T'))
 		{
 			const uint32_t timeout = gb.GetLimitedUIValue('T', MinConnectionTimeoutSeconds, std::numeric_limits<uint16_t>::max() + 1);
-			{
-				WriteLocker lock(boardsLock);
-				boards[address].connectionTimeoutSeconds = (uint16_t)timeout;
-			}
-			reprap.BoardsUpdated();
 			CanMessageGenericConstructor cons(M959Params);
 			cons.PopulateFromCommand(gb);
-			return cons.SendAndGetResponse(CanMessageType::setConnectionTimeout, (CanAddress)address, reply);
+			const GCodeResult rslt = cons.SendAndGetResponse(CanMessageType::setConnectionTimeout, (CanAddress)address, reply);
+			if (rslt == GCodeResult::ok)						// only adopt the new timeout if the board did, otherwise the two ends would disagree
+			{
+				{
+					WriteLocker lock(boardsLock);
+					boards[address].connectionTimeoutSeconds = (uint16_t)timeout;
+				}
+				reprap.BoardsUpdated();
+			}
+			return rslt;
 		}
 		reply.printf("Board %u connection timeout %u seconds", (unsigned int)address, boards[address].connectionTimeoutSeconds);
 		return GCodeResult::ok;

@@ -745,7 +745,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 			&& code != 558
 #endif
 			&& code != 569 && code != 576 && code != 581 && code != 586 && code != 587		// these are the only M-codes we implement that can have fractional parts
-#if SUPPORT_PHASE_STEPPING
+#if SUPPORT_PHASE_STEPPING || SUPPORT_CAN_EXPANSION
 			&& code != 970
 #endif
 		)
@@ -2655,9 +2655,25 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 					}
 
 #if SUPPORT_3RD_ORDER
-					if (frac < 1 && move.AccelerationTime() != 0.0 && !move.IsUsingSCurve())
+					if (frac < 1 && move.AccelerationTime() != 0.0)
 					{
-						reply.lcat("Acceleration time (S-curve acceleration) is disabled because phase stepping is not enabled");
+						if (!move.IsUsingSCurve())
+						{
+							reply.lcat("Acceleration time (S-curve acceleration) is disabled because phase stepping is not enabled");
+							result = GCodeResult::warning;
+						}
+# if SUPPORT_CAN_EXPANSION
+						if (move.AnyDriveHasRemoteDriver())
+						{
+							reply.lcat("S-curve acceleration is not applied to CAN-connected drivers");
+							result = GCodeResult::warning;
+						}
+# endif
+					}
+#else
+					if (frac < 1 && gb.Seen('T'))
+					{
+						reply.lcat("S-curve acceleration (T parameter) is not supported on this board");
 						result = GCodeResult::warning;
 					}
 #endif
@@ -4696,7 +4712,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 				break;
 #endif
 
-#if SUPPORT_PHASE_STEPPING
+#if SUPPORT_PHASE_STEPPING || SUPPORT_CAN_EXPANSION
 			case 970:	// configure step mode (phase stepping)
 				result = ConfigureStepMode(gb, reply);
 				break;
