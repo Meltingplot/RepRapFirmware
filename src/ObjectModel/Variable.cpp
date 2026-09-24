@@ -118,15 +118,31 @@ void Variable::AssignArray(size_t numElements, function_ref<ExpressionValue(size
 }
 
 // Members of class VariableSet
+
+// Hash a variable name (FNV-1a). Stop at a null character like the copy of the name that the variable stores.
+uint32_t VariableSet::HashName(const char *_ecv_array str, size_t strLen) noexcept
+{
+	uint32_t hash = 2166136261u;
+	for (size_t i = 0; i < strLen && str[i] != 0; ++i)
+	{
+		hash = (hash ^ (uint8_t)str[i]) * 16777619u;
+	}
+	return hash;
+}
+
 Variable *_ecv_null VariableSet::Lookup(const char *_ecv_array str, bool wantParameter) noexcept
 {
+	const uint32_t hash = HashName(str, strlen(str));
 	LinkedVariable *lv;
 	for (lv = root; lv != nullptr; lv = lv->next)
 	{
-		auto vname = lv->v.GetName();
-		if (strcmp(vname.Ptr(), str) == 0 && (wantParameter == (lv->v.GetScope() == -1)))
+		if (lv->nameHash == hash && (wantParameter == (lv->v.GetScope() == -1)))
 		{
-			return &(lv->v);
+			auto vname = lv->v.GetName();
+			if (strcmp(vname.Ptr(), str) == 0)
+			{
+				return &(lv->v);
+			}
 		}
 	}
 	return nullptr;
@@ -134,13 +150,17 @@ Variable *_ecv_null VariableSet::Lookup(const char *_ecv_array str, bool wantPar
 
 const Variable *_ecv_null VariableSet::Lookup(const char *_ecv_array str, size_t length, bool wantParameter) const noexcept
 {
+	const uint32_t hash = HashName(str, length);
 	const LinkedVariable *lv;
 	for (lv = root; lv != nullptr; lv = lv->next)
 	{
-		auto vname = lv->v.GetName();
-		if (strlen(vname.Ptr()) == length && memcmp(vname.Ptr(), str, length) == 0 && (wantParameter == (lv->v.GetScope() == -1)))
+		if (lv->nameHash == hash && (wantParameter == (lv->v.GetScope() == -1)))
 		{
-			return &(lv->v);
+			auto vname = lv->v.GetName();
+			if (strlen(vname.Ptr()) == length && memcmp(vname.Ptr(), str, length) == 0)
+			{
+				return &(lv->v);
+			}
 		}
 	}
 	return nullptr;
