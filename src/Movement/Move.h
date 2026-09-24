@@ -317,6 +317,9 @@ public:
 	void ClearExtruderMovementPending(size_t extruder) noexcept;
 	float GetPressureAdvanceClocksForLogicalDrive(size_t drive) const noexcept;
 	float GetPressureAdvanceClocksForExtruder(size_t extruder) const noexcept;
+	float GetMaxExtrusionSpeedForExtruder(size_t extruder) const noexcept;
+	void SetMaxExtrusionSpeedForExtruder(size_t extruder, float speed) noexcept;
+	GCodeResult ConfigureExtrusionSpeedLimit(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);	// process M203.1
 
 #if SUPPORT_REMOTE_COMMANDS
 	GCodeResult EutSetMotorCurrents(const CanMessageMultipleDrivesRequest<float>& msg, size_t dataLength, const StringRef& reply) noexcept;
@@ -710,6 +713,7 @@ private:
 
 	volatile DriverStatus driverState[MaxAxesPlusExtruders];
 	float maxFeedrates[MaxAxesPlusExtruders];				// max feed rates in mm per step clock
+	float maxExtrusionFeedrates[MaxExtruders];				// max extrusion feed rates in mm per step clock, only applied during printing moves (0 = unlimited)
 	float normalAccelerations[MaxAxesPlusExtruders];		// max accelerations in mm per step clock squared for normal moves
 	float reducedAccelerations[MaxAxesPlusExtruders];		// max accelerations in mm per step clock squared for probing and stall detection moves
 	float printingInstantDvs[MaxAxesPlusExtruders];			// current max jerk in mm per step clock (changed by M205 and M206)
@@ -927,6 +931,16 @@ inline float Move::GetPressureAdvanceClocksForLogicalDrive(size_t drive) const n
 inline float Move::GetPressureAdvanceClocksForExtruder(size_t extruder) const noexcept
 {
 	return (extruder < MaxExtruders) ? GetPressureAdvanceClocksForLogicalDrive(ExtruderToLogicalDrive(extruder)) : 0.0;
+}
+
+inline float Move::GetMaxExtrusionSpeedForExtruder(size_t extruder) const noexcept
+{
+	return (extruder < MaxExtruders) ? maxExtrusionFeedrates[extruder] : 0.0;
+}
+
+inline void Move::SetMaxExtrusionSpeedForExtruder(size_t extruder, float speed) noexcept
+{
+	if (extruder < MaxExtruders) { maxExtrusionFeedrates[extruder] = speed; }
 }
 
 // Schedule the next interrupt, returning true if we can't because it is already due

@@ -401,6 +401,11 @@ void Move::Init() noexcept
 		printingInstantDvs[drive] = maxInstantDvs[drive] = ConvertSpeedFromMmPerSec(DefaultEInstantDv);
 	}
 
+	for (size_t e = 0; e < MaxExtruders; ++e)
+	{
+		maxExtrusionFeedrates[e] = 0.0;				// 0 means unlimited
+	}
+
 	minimumMovementSpeed = ConvertSpeedFromMmPerSec(DefaultMinFeedrate);
 	axisMaximaProbed.Clear();
 	axisMinimaProbed.Clear();
