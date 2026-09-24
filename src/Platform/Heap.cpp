@@ -58,6 +58,8 @@ namespace Heap
 	size_t heapUsed = 0;
 	std::atomic<size_t> heapToRecycle = 0;
 	unsigned int gcCyclesDone = 0;
+	StorageSpace *_ecv_null lastSpace = nullptr;		// the most recent allocation, so that the next allocation can reuse its space if it has already been released
+	HeapBlock *_ecv_null lastSpaceBlock = nullptr;		// the heap block that lastSpace is in
 }
 
 ReadWriteLock Heap::heapLock;
@@ -141,6 +143,7 @@ void Heap::GarbageCollectInternal() noexcept
 	}
 
 	heapToRecycle = 0;
+	lastSpace = nullptr;								// garbage collection may have moved it
 	++gcCyclesDone;
 }
 
@@ -294,6 +297,20 @@ Heap::StorageSpace *Heap::AllocateSpace(size_t length) noexcept
 
 	length = min<size_t>((length + 3u) & (~3u), HeapBlockSize);			// round to make the length field a multiple of 4 and limit to max size
 
+	// If the most recent allocation has already been released and is still at the end of its block, take its space back.
+	// This avoids frequent garbage collections when strings are created and released in turn, e.g. the string literals in a trigger expression that is evaluated on every spin.
+	if (lastSpace != nullptr)
+	{
+		const size_t lastLength = lastSpace->length;
+		if ((lastLength & 1u) != 0 && (char *_ecv_array)lastSpace + (lastLength & ~1u) == lastSpaceBlock->data + lastSpaceBlock->allocated)
+		{
+			lastSpaceBlock->allocated -= lastLength & ~1u;
+			heapUsed -= lastLength & ~1u;
+			heapToRecycle -= lastLength & ~1u;
+		}
+		lastSpace = nullptr;
+	}
+
 	bool collected = false;
 	do
 	{
@@ -305,6 +322,8 @@ Heap::StorageSpace *Heap::AllocateSpace(size_t length) noexcept
 				ret->length = length;
 				currentBlock->allocated += length;
 				heapUsed += length;
+				lastSpace = ret;
+				lastSpaceBlock = currentBlock;
 				return ret;
 			}
 		}
@@ -325,6 +344,8 @@ Heap::StorageSpace *Heap::AllocateSpace(size_t length) noexcept
 	StorageSpace * const ret2 = reinterpret_cast<StorageSpace*>(heapRoot->data);
 	ret2->length = length;
 	heapRoot->allocated = length;
+	lastSpace = ret2;
+	lastSpaceBlock = heapRoot;
 	return ret2;
 }
 
