@@ -61,14 +61,17 @@ public:
 	void IterateWhile(function_ref_noexcept<bool(unsigned int index, const Variable& v) noexcept> func) const noexcept;
 
 private:
+	static uint32_t HashName(const char *_ecv_array str, size_t strLen) noexcept;
+
 	struct LinkedVariable
 	{
 		DECLARE_FREELIST_NEW_DELETE(LinkedVariable)
 
 		LinkedVariable(const char *_ecv_array str, size_t strLen, ExpressionValue pVal, int16_t pScope, LinkedVariable *p_next) THROWS(GCodeException)
-			: next(p_next), v(str, strLen, pVal, pScope) {}
+			: next(p_next), nameHash(HashName(str, strLen)), v(str, strLen, pVal, pScope) {}
 
 		LinkedVariable * null next;
+		uint32_t nameHash;						// lets Lookup skip non-matching variables without locking the heap to fetch their names
 		Variable v;
 	};
 
