@@ -133,7 +133,7 @@ jobs:
             echo
             echo "**Changes over upstream $UPSTREAM_VERSION**"
             echo
-            git -C ./RepRapFirmware log --format='- %s' --no-merges "$BASE..HEAD" | grep -v '^- Version: ' || true
+            git -C ./RepRapFirmware log --format='- %s' --no-merges --full-history "$BASE..HEAD" -- $(git -C ./RepRapFirmware diff --name-only "$BASE" HEAD) | grep -v '^- Version: ' || true
             echo
             echo "**Build**"
             echo
