@@ -1130,13 +1130,17 @@ void SbcInterface::ExchangeData() noexcept
 		// Result of a file read request
 		case SbcRequest::FileReadResult:
 		{
-			int bytesRead = transfer.ReadFileData(fileReadBuffer, fileBufferLength);
 			if (fileOperation == FileOperation::read)
 			{
+				int bytesRead = transfer.ReadFileData(fileReadBuffer, fileBufferLength);
 				fileSuccess = bytesRead >= 0;
 				fileOffset = fileSuccess ? bytesRead : 0;
 				fileOperation = FileOperation::none;
 				fileSemaphore.Give();
+			}
+			else
+			{
+				(void)transfer.ReadData(packet->length);		// late reply to a request that timed out, its buffer may have been released
 			}
 			break;
 		}
@@ -1144,15 +1148,19 @@ void SbcInterface::ExchangeData() noexcept
 		// Result of a directory listing request
 		case SbcRequest::FileListResult:
 		{
-			bool endOfList;
-			const size_t bytesRead = transfer.ReadFileList(fileReadBuffer, fileBufferLength, endOfList);
 			if (fileOperation == FileOperation::getFileList)
 			{
+				bool endOfList;
+				const size_t bytesRead = transfer.ReadFileList(fileReadBuffer, fileBufferLength, endOfList);
 				fileSuccess = true;
 				fileBufferLength = bytesRead;
 				fileListEndOfList = endOfList;
 				fileOperation = FileOperation::none;
 				fileSemaphore.Give();
+			}
+			else
+			{
+				(void)transfer.ReadData(packet->length);		// late reply to a request that timed out, its buffer may have been released
 			}
 			break;
 		}
@@ -2253,6 +2261,7 @@ bool SbcInterface::DoFileOperation(FileOperation f) noexcept
 	{
 		fileOperation = FileOperation::none;
 		fileOperationPending.store(false, std::memory_order_release);
+		return fileSemaphore.Take(0);		// a reply that came in before fileOperation was cleared still answers this request
 	}
 	return rslt;
 }
