@@ -754,15 +754,31 @@ void SbcInterface::ExchangeData() noexcept
 								GCodeBuffer *const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(channel));
 								if (gb != nullptr && gb->IsExecutingOnSbc())
 								{
-									gb->SetFinished(true);
+									// The main task may be spinning this channel, so take its mutex. If we can't get it, we will get the message again
+									MutexLocker locker(gb->mutex, SbcYieldTimeout);
+									if (!locker.IsAcquired())
+									{
+										packetAcknowledged = false;
+									}
+									else if (gb->IsExecutingOnSbc())
+									{
+										gb->SetFinished(true);
+									}
 								}
 								break;
 							}
 						}
 					}
 
-					// Output message to the target
-					reprap.GetPlatform().Message(type, buf);
+					if (packetAcknowledged)
+					{
+						// Output message to the target
+						reprap.GetPlatform().Message(type, buf);
+					}
+					else
+					{
+						OutputBuffer::ReleaseAll(buf);
+					}
 				}
 				else
 				{
