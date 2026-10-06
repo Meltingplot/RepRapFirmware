@@ -66,6 +66,15 @@ void GCodes::CommandEmergencyStop(AsyncSerial *p) noexcept
 }
 #endif
 
+// Requests from other tasks. The main task carries them out at the start of its next spin.
+// Only the main task may do these things itself: they change the state of every channel, which the main task may be in the middle of changing.
+constexpr uint32_t EmergencyStopRequest = 1u << 0;
+constexpr uint32_t ResetRequest = 1u << 1;
+constexpr uint32_t CancelWaitRequest = 1u << 2;
+constexpr uint32_t CancelPrintFileWaitRequest = 1u << 3;
+constexpr uint32_t AxesNotHomedRequest = 1u << 4;
+static std::atomic<uint32_t> requestsFromOtherTasks = 0;
+
 GCodes::GCodes(Platform& p) noexcept :
 #if NUM_ASYNC_CHANNELS != 0 && ALLOW_ARBITRARY_PANELDUE_PORT
 	serialChannelForPanelDueFlashing(1),
@@ -214,6 +223,12 @@ void GCodes::Init() noexcept
 // This is called from Init and when doing an emergency stop
 void GCodes::Reset() noexcept
 {
+	if (RTOSIface::GetCurrentTask() != Tasks::GetMainTask())
+	{
+		requestsFromOtherTasks |= ResetRequest;				// e.g. M112 received by the network task
+		return;
+	}
+
 	// Here we could reset the input sources as well, but this would mess up M122\nM999
 	// because both codes are sent at once from the web interface. Hence we don't do this here.
 	for (GCodeBuffer *_ecv_null gb : gcodeSources)
@@ -439,6 +454,32 @@ void GCodes::Spin() noexcept
 	if (!active)
 	{
 		return;
+	}
+
+	// Carry out what other tasks have asked for. An emergency stop has already stopped the hardware.
+	const uint32_t requests = requestsFromOtherTasks.exchange(0);
+	if (requests != 0)
+	{
+		if (requests & EmergencyStopRequest)
+		{
+			EmergencyStop();
+		}
+		if (requests & ResetRequest)
+		{
+			Reset();
+		}
+		if (requests & CancelWaitRequest)
+		{
+			CancelWaitForTemperatures(false);
+		}
+		if (requests & CancelPrintFileWaitRequest)
+		{
+			CancelWaitForTemperatures(true);
+		}
+		if (requests & AxesNotHomedRequest)
+		{
+			SetAllAxesNotHomed();
+		}
 	}
 
 #if NUM_ASYNC_CHANNELS != 0
@@ -976,6 +1017,12 @@ void GCodes::DoEmergencyStop() noexcept
 // reprap.EmergencyStop calls this to shut down this module
 void GCodes::EmergencyStop() noexcept
 {
+	if (RTOSIface::GetCurrentTask() != Tasks::GetMainTask())
+	{
+		requestsFromOtherTasks |= EmergencyStopRequest;		// called by the SBC, network or CAN task, which has already stopped the hardware
+		return;
+	}
+
 	for (GCodeBuffer *_ecv_null gbp : gcodeSources)
 	{
 		if (gbp != nullptr)
@@ -1284,6 +1331,12 @@ bool GCodes::IsHeatingUp() const noexcept
 // Stop waiting for temperatures to be reached, optionally just in the file(s) being printed
 void GCodes::CancelWaitForTemperatures(bool onlyInPrintFiles) noexcept
 {
+	if (RTOSIface::GetCurrentTask() != Tasks::GetMainTask())
+	{
+		requestsFromOtherTasks |= (onlyInPrintFiles) ? CancelPrintFileWaitRequest : CancelWaitRequest;	// e.g. M108 received by the network task
+		return;
+	}
+
 	for (GCodeBuffer *_ecv_null gb : gcodeSources)
 	{
 		if (gb != nullptr && gb->IsWaitingForTemperatures() && (!onlyInPrintFiles || (gb->IsFileChannel() && (!gb->IsDoingFileMacro() || gb->LatestMachineState().CanRestartMacro()))))
@@ -5128,6 +5181,12 @@ void GCodes::SetAxisNotHomed(unsigned int axis) noexcept
 // Flag all axes as not homed
 void GCodes::SetAllAxesNotHomed() noexcept
 {
+	if (RTOSIface::GetCurrentTask() != Tasks::GetMainTask())
+	{
+		requestsFromOtherTasks |= AxesNotHomedRequest;		// the Move task puts the drivers into idle with an idle current of zero
+		return;
+	}
+
 	if (!IsSimulating())
 	{
 		axesHomed.Clear();
