@@ -397,15 +397,18 @@ private:
 	// Accessed only when the GB mutex is acquired
 	String<MaxFilenameLength> requestedMacroFile;
 	bool isBinaryBuffer;
-	uint8_t
-		macroJustStarted : 1,		// Whether the GB has just started a macro file
-		macroFileError : 1,			// Whether the macro file could be opened or if an error occurred
-		macroFileEmpty : 1,			// Whether the macro file is actually empty
-		abortFile : 1,				// Whether to abort the last file on the stack
-		abortAllFiles : 1,			// Whether to abort all opened files
-		sendToSbc : 1,				// Indicates if the GB string content is supposed to be sent to the SBC
-		messagePromptPending : 1,	// Has the SBC been notified about a message waiting for acknowledgement?
-		messageAcknowledged : 1;	// Last message has been acknowledged
+
+	// Not every writer of these holds the GB mutex (e.g. MessageAcknowledged on every channel, AbortFile from another channel), so each has a byte of its own:
+	// in a shared bitfield a read-modify-write by one task could undo a change that the other task made in between
+	// macroFileError and macroFileEmpty would not need one (the SBC task writes them only while the main task waits for the macro file), but Reset() sets all eight in one chain, which does not build when it mixes bools and bitfields
+	bool macroJustStarted;			// Whether the GB has just started a macro file
+	bool macroFileError;			// Whether the macro file could be opened or if an error occurred
+	bool macroFileEmpty;			// Whether the macro file is actually empty
+	bool abortFile;					// Whether to abort the last file on the stack
+	bool abortAllFiles;				// Whether to abort all opened files
+	bool sendToSbc;					// Indicates if the GB string content is supposed to be sent to the SBC
+	bool messagePromptPending;		// Has the SBC been notified about a message waiting for acknowledgement?
+	bool messageAcknowledged;		// Last message has been acknowledged
 
 	// Accessed only by the SBC task
 	bool invalidated;				// Set to true if the GB content is not valid and about to be cleared
