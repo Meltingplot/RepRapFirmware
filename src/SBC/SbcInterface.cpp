@@ -220,6 +220,9 @@ static void SendUsbInitMessage(SerialCDC *dev) noexcept
 				reprap.GetPlatform().Message(NetworkInfoMessage, "Lost connection to SBC (connection reset)\n");
 			}
 
+			// Whatever connects next, possibly a restarted DCS, cannot know the state left behind, so stop until the controller is reset
+			reprap.EmergencyStop();
+
 			// Invalidate local resources
 			InvalidateResources();
 			if (hadReset)
