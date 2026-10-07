@@ -567,6 +567,11 @@ void GCodes::Spin() noexcept
 // Do some work on an input channel, returning true if we did something significant
 bool GCodes::SpinGCodeBuffer(GCodeBuffer& gb) noexcept
 {
+	if (requestsFromOtherTasks != 0)
+	{
+		return false;		// e.g. an emergency stop came in during this spin: start no further code or state machine step before the next spin has carried it out
+	}
+
 	// Set up a buffer for the reply
 	String<GCodeReplyLength> reply;
 	bool result;
