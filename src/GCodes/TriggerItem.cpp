@@ -116,9 +116,16 @@ bool TriggerItem::Check(unsigned int number) noexcept
 		}
 		catch (const GCodeException& e)
 		{
-			condition = -1;
 			String<StringLength256> errorMessage;
 			e.GetMessage(errorMessage.GetRef(), nullptr);
+			if (number == 0)
+			{
+				// Trigger 0 is the emergency stop: if its expression cannot be evaluated, fire it rather than disable it
+				errorMessage.cat("\nTrigger 0 fired\n");
+				reprap.GetPlatform().Message(ErrorMessage, errorMessage.c_str());
+				return true;
+			}
+			condition = -1;
 			errorMessage.catf("\nTrigger %u disabled\n", number);
 			reprap.GetPlatform().Message(ErrorMessage, errorMessage.c_str());
 		}
@@ -248,7 +255,10 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 			}
 			catch (const GCodeException&)
 			{
-				Init();											// clear the trigger
+				if (number != 0)								// keep the emergency stop trigger, so that its next check fires it
+				{
+					Init();										// clear the trigger
+				}
 				throw;											// report the error
 			}
 		}
