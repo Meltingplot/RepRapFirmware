@@ -1048,8 +1048,8 @@ void RepRap::EmergencyStop() noexcept
 
 	stopped = true;									// a useful side effect of setting this is that it prevents Platform::Tick being called, which is needed when loading IAP into RAM
 
-	// Do not turn off ATX power here. If the nozzles are still hot, don't risk melting any surrounding parts by turning fans off.
-	//platform->SetAtxPower(false);
+	// Turn off ATX power, so that a motor supply switched by it is cut in hardware too. Fans on that supply stop as well, even if the nozzles are still hot.
+	platform->AtxPowerOff();
 
 	move->EmergencyDisableDrivers();				// disable all local drivers - need to do this to ensure that any motor brakes are re-engaged
 
