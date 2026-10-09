@@ -245,6 +245,7 @@ void GCodes::Reset() noexcept
 	}
 
 	nextGcodeSource = 0;
+	triggerActionRunning = false;
 
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
 	fileToPrint.Close();
@@ -422,8 +423,11 @@ bool GCodes::RunConfigFile(const char *_ecv_array fileName, bool isMainConfigFil
 bool GCodes::IsTriggerBusy() const noexcept
 {
 	return TriggerGCode()->IsDoingFile()
+			|| !TriggerGCode()->IsIdle()				// a line of a trigger action is still running
+			|| TriggerGCode()->LatestMachineState().waitingForAcknowledgement	// a message box of a trigger action is open
 #if HAS_SBC_INTERFACE
 			|| TriggerGCode()->IsAbortRequested()		// DSF keeps the aborted file on its stack until the abort has been sent
+			|| TriggerGCode()->IsSendRequested() || TriggerGCode()->IsExecutingOnSbc()	// a line of a trigger action is with DSF
 #endif
 		;
 }
@@ -973,7 +977,7 @@ void GCodes::CheckTriggers() noexcept
 	{
 		if (!triggersPending.IsBitSet(i) && triggers[i].Check(i))
 		{
-			triggersPending.SetBit(i);
+			triggersPending.SetBit((triggers[i].IsEmergencyStop()) ? 0 : i);		// a trigger whose action is M112 fires as trigger 0
 		}
 	}
 
@@ -1003,11 +1007,50 @@ void GCodes::CheckTriggers() noexcept
 			else
 			{
 				triggersPending.ClearBit(lowestTriggerPending);							// clear the trigger
-				String<StringLength20> filename;
-				filename.printf("trigger%u.g", lowestTriggerPending);
-				DoFileMacro(*TriggerGCode(), filename.c_str(), true, AsyncSystemMacroCode);
+				if (triggers[lowestTriggerPending].HasAction())
+				{
+					// Run the action instead of triggerN.g. Like the M911 script it is one line, which is copied into the trigger channel's buffer.
+					GCodeBuffer& gb = *TriggerGCode();
+					MutexLocker gbLock(gb.mutex);													// the SBC task changes this buffer under its mutex
+					String<GCodeReplyLength> reply;
+					triggers[lowestTriggerPending].GetAction(reply.GetRef());
+					const size_t indent = strspn(reply.c_str(), " \t");
+					if (reply[indent] != 0 && reply[indent] != ';' && reply[indent] != '(')		// PutAndDecode would run the previous line again for a blank or comment line
+					{
+						gb.PutAndDecode(reply.c_str());
+						reply.Clear();
+						try
+						{
+							if (gb.CheckMetaCommand(reply.GetRef()))
+							{
+								HandleReplyPreserveResult(gb, GCodeResult::ok, reply.c_str());
+							}
+							else
+							{
+								triggerActionRunning = true;										// regular commands, which run when the trigger channel is spun
+							}
+						}
+						catch (const GCodeException& e)
+						{
+							e.GetMessage(reply.GetRef(), &gb);
+							HandleReplyPreserveResult(gb, GCodeResult::error, reply.c_str());
+							gb.Init();
+						}
+					}
+				}
+				else
+				{
+					String<StringLength20> filename;
+					filename.printf("trigger%u.g", lowestTriggerPending);
+					DoFileMacro(*TriggerGCode(), filename.c_str(), true, AsyncSystemMacroCode);
+				}
 			}
 		}
+	}
+
+	if (triggerActionRunning && !IsTriggerBusy() && TriggerGCode()->GetState() == GCodeState::normal)
+	{
+		triggerActionRunning = false;																// the commands of the trigger action have finished
 	}
 }
 

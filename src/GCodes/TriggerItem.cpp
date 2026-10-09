@@ -24,6 +24,11 @@ void TriggerItem::Init() noexcept
 	highLevelInputs.Clear();
 	lowLevelInputs.Clear();
 	expr.Delete();
+	action.Delete();
+	confirmMillis = 0;
+	confirming = false;
+	actionIsEmergencyStop = false;
+	locked = false;											// only at a restart: a locked trigger cannot be deleted with P-1
 	condition = -1;
 }
 
@@ -112,16 +117,29 @@ bool TriggerItem::Check(unsigned int number) noexcept
 		{
 			const bool oldVal = exprResult;
 			exprResult = EvaluateExpression();
-			triggered = exprResult && !oldVal;
+			if (!exprResult)
+			{
+				confirming = false;
+			}
+			else if (!oldVal && !confirming)
+			{
+				confirming = true;							// the expression has become true, so it must now stay true for confirmMillis
+				whenBecameTrue = millis();
+			}
+			triggered = confirming && millis() - whenBecameTrue >= confirmMillis;
+			if (triggered)
+			{
+				confirming = false;
+			}
 		}
 		catch (const GCodeException& e)
 		{
 			String<StringLength256> errorMessage;
 			e.GetMessage(errorMessage.GetRef(), nullptr);
-			if (number == 0)
+			if (number == 0 || actionIsEmergencyStop)
 			{
-				// Trigger 0 is the emergency stop: if its expression cannot be evaluated, fire it rather than disable it
-				errorMessage.cat("\nTrigger 0 fired\n");
+				// Trigger 0 and triggers whose action is M112 are emergency stops: if the expression cannot be evaluated, fire rather than disable
+				errorMessage.catf("\nTrigger %u fired\n", number);
 				reprap.GetPlatform().Message(ErrorMessage, errorMessage.c_str());
 				return true;
 			}
@@ -140,6 +158,22 @@ bool TriggerItem::Check(unsigned int number) noexcept
 // Handle M581 and M581.1 for this trigger. We have already checked that gb.GetCommandFraction() returns <= 1.
 GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const StringRef &reply) THROWS(GCodeException)
 {
+	// Once configured, trigger 0 and triggers with an action can only be reported until the next restart. They run without the SBC because they are
+	// safety functions, such as the door check, and nobody may change or delete those while the machine runs.
+	if (locked)
+	{
+		bool change = gb.Seen('P') || gb.Seen('U') || gb.Seen('D') || gb.Seen('R') || gb.Seen('S');
+		for (size_t axis = 0; axis < reprap.GetGCodes().GetTotalAxes(); ++axis)
+		{
+			change = change || gb.Seen(reprap.GetGCodes().GetAxisLetters()[axis]);
+		}
+		if (change)
+		{
+			reply.printf("Trigger %u is locked until the next restart", number);
+			return GCodeResult::error;
+		}
+	}
+
 	// We allow the P-1 parameter to be used with both M581 and M581.1
 	bool seen = gb.Seen('P');
 	if (seen)
@@ -161,15 +195,51 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 	switch (gb.GetCommandFraction())
 	{
 	case 1:									// trigger on an expression
-		if (gb.Seen('P'))
 		{
-			highLevelInputs.Clear();
-			lowLevelInputs.Clear();
-			highLevelEndstops.Clear();
-			lowLevelEndstops.Clear();
-			String<StringLength256> conditionString;
-			gb.GetQuotedString(conditionString.GetRef(), false);		// may throw
-			expr.Assign(conditionString.c_str());
+			// Read U and D before anything is changed, so that an error in them leaves the trigger as it was.
+			// The U parameter is one line of G-code to run instead of triggerN.g. An action that is just M112 is an emergency stop.
+			const bool seenAction = gb.Seen('U');
+			if (seenAction && number < 2)
+			{
+				reply.copy("Triggers 0 and 1 cannot have an action");
+				return GCodeResult::error;
+			}
+			String<StringLength256> actionString;
+			if (seenAction)
+			{
+				gb.GetQuotedString(actionString.GetRef(), true);		// may throw
+				if (!IsAllowedAction(actionString.c_str()))
+				{
+					reply.printf("not allowed in an action, put it in trigger%u.g: %.50s", number, actionString.c_str());
+					return GCodeResult::error;
+				}
+			}
+			uint32_t confirmTime = confirmMillis;
+			(void)gb.TryGetLimitedUIValue('D', confirmTime, seen, 65536);	// may throw
+
+			if (gb.Seen('P'))
+			{
+				highLevelInputs.Clear();
+				lowLevelInputs.Clear();
+				highLevelEndstops.Clear();
+				lowLevelEndstops.Clear();
+				String<StringLength256> conditionString;
+				gb.GetQuotedString(conditionString.GetRef(), false);		// may throw
+				expr.Assign(conditionString.c_str());
+			}
+			if (seenAction)
+			{
+				action.Assign(actionString.c_str());						// U"" deletes the action, so that triggerN.g runs again
+				const char *_ecv_array p = actionString.c_str() + strspn(actionString.c_str(), " \t");
+				actionIsEmergencyStop = StringStartsWithIgnoreCase(p, "M112");
+				if (actionIsEmergencyStop)
+				{
+					p += 4 + strspn(p + 4, " \t");
+					actionIsEmergencyStop = (*p == 0 || *p == ';');			// M112 with nothing but spaces or a comment around it
+				}
+				seen = true;
+			}
+			confirmMillis = (uint16_t)confirmTime;
 		}
 		break;
 
@@ -221,6 +291,12 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 					}
 				}
 			}
+
+			if (seen)
+			{
+				action.Delete();									// a trigger on inputs or endstops runs triggerN.g
+				actionIsEmergencyStop = false;
+			}
 		}
 	}
 
@@ -249,19 +325,21 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 		else
 		{
 			// Get the initial value of the expression
+			confirming = false;
 			try
 			{
 				exprResult = EvaluateExpression();				// may throw
 			}
 			catch (const GCodeException&)
 			{
-				if (number != 0)								// keep the emergency stop trigger, so that its next check fires it
+				if (number != 0 && !actionIsEmergencyStop)		// keep an emergency stop trigger, so that its next check fires it
 				{
 					Init();										// clear the trigger
 				}
 				throw;											// report the error
 			}
 		}
+		locked = !IsUnused() && (number == 0 || !action.IsNull());	// see the start of this function
 	}
 	else
 	{
@@ -314,6 +392,18 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 				const auto ptr = expr.Get();
 				reply.catf(" expression {%s} becomes true", ptr.Ptr());
 			}
+			if (confirmMillis != 0)
+			{
+				reply.catf(" and stays true for %ums", (unsigned int)confirmMillis);
+			}
+			if (!action.IsNull())
+			{
+				reply.catf(", action \"%s\"", action.Get().Ptr());
+			}
+			if (locked)
+			{
+				reply.cat(", locked until restart");
+			}
 		}
 	}
 	return GCodeResult::ok;
@@ -325,7 +415,15 @@ bool TriggerItem::CheckLevel(unsigned int number) noexcept
 	endstopStates = lowLevelEndstops;
 	inputStates = lowLevelInputs;
 	exprResult = false;
+	confirming = true;										// M582 checks the level without waiting for confirmMillis
+	whenBecameTrue = millis() - confirmMillis;
 	return Check(number);
+}
+
+// Copy the action of this trigger. It is copied out of the heap while the heap is read-locked, as EvaluateExpression does.
+void TriggerItem::GetAction(const StringRef& str) const noexcept
+{
+	str.copy((action.IsNull()) ? "" : action.Get().Ptr());
 }
 
 void TriggerItem::AppendInputNames(AxesBitmap endstops, InputPortsBitmap inputs, const StringRef &reply) noexcept
@@ -340,6 +438,49 @@ void TriggerItem::AppendInputNames(AxesBitmap endstops, InputPortsBitmap inputs,
 		endstops.Iterate([axisLetters, &reply](unsigned int axis, unsigned int) noexcept { reply.catf(" %c", axisLetters[axis]); } );
 		inputs.Iterate([&reply](unsigned int port, unsigned int) noexcept { reply.catf(" %d", port); } );
 	}
+}
+
+// Return true if an action may contain this command. Actions only contain commands that RRF executes itself and at once:
+// nothing that SBC mode passes to DSF or that runs a macro (that belongs in triggerN.g), nothing that waits, and no motion.
+bool TriggerItem::IsAllowedInAction(char letter, int number) noexcept
+{
+	static constexpr int16_t AllowedMCodes[] = { 42, 81, 106, 107, 112, 117, 118, 140, 141, 143, 150, 302, 568, 599 };
+	if (letter == 'M')
+	{
+		for (int16_t code : AllowedMCodes)
+		{
+			if (code == number)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// Check how an action starts. Besides the commands of IsAllowedInAction it may be set, echo without redirection to a file, or a comment.
+// Further commands on the line are checked when they run.
+bool TriggerItem::IsAllowedAction(const char *_ecv_array s) noexcept
+{
+	s += strspn(s, " \t");
+	if (*s == 0 || *s == ';' || *s == '(')
+	{
+		return true;
+	}
+	if (StringStartsWith(s, "set") && (s[3] == ' ' || s[3] == '\t'))
+	{
+		return true;
+	}
+	if (StringStartsWith(s, "echo") && (s[4] == ' ' || s[4] == '\t'))
+	{
+		return s[4 + strspn(s + 4, " \t")] != '>';
+	}
+	if (toupper(*s) == 'M' && isDigit(s[1]))
+	{
+		const char *_ecv_array end;
+		return IsAllowedInAction('M', (int)StrToU32(s + 1, &end)) && (*end == 0 || *end == ' ' || *end == '\t' || *end == ';');
+	}
+	return false;
 }
 
 bool TriggerItem::EvaluateExpression() THROWS(GCodeException)

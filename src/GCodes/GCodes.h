@@ -744,6 +744,7 @@ private:
 	// Triggers
 	TriggerItem triggers[MaxTriggers];				// Trigger conditions
 	TriggerNumbersBitmap triggersPending;		// Bitmap of triggers pending but not yet executed
+	bool triggerActionRunning;					// The commands of a trigger action are running on the trigger channel
 
 	// Firmware update
 	Bitmap<uint8_t> firmwareUpdateModuleMap;	// Bitmap of firmware modules to be updated
