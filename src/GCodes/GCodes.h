@@ -744,6 +744,8 @@ private:
 	// Triggers
 	TriggerItem triggers[MaxTriggers];				// Trigger conditions
 	TriggerNumbersBitmap triggersPending;		// Bitmap of triggers pending but not yet executed
+	uint8_t triggerActionNumber;				// The trigger whose action is running, or 0 if none (triggers 0 and 1 have no action)
+	uint8_t triggerActionOffset;				// The offset in that action of its next line
 
 	// Firmware update
 	Bitmap<uint8_t> firmwareUpdateModuleMap;	// Bitmap of firmware modules to be updated

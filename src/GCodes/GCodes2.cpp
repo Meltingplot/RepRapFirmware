@@ -121,6 +121,12 @@ bool GCodes::ActOnCode(GCodeBuffer& gb, const StringRef& reply) noexcept
 			throw GCodeException("GCode command too long");
 		}
 #endif
+		if (   triggerActionNumber != 0 && &gb == TriggerGCode()				// a line of a trigger action can hold more commands than M581.1 checked
+			&& !TriggerItem::IsAllowedInAction(gb.GetCommandLetter(), (gb.HasCommandNumber()) ? gb.GetCommandNumber() : -1)
+		   )
+		{
+			throw GCodeException(&gb, -1, "not allowed in a trigger action, put it in the trigger macro");
+		}
 		switch (gb.GetCommandLetter())
 		{
 		case 'G':
@@ -704,6 +710,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 	// Pass file- and system-related commands to the SBC service if they came from somewhere else.
 	// They will be passed back to us via a binary buffer or separate SPI message if necessary.
 	if (   reprap.UsingSbcInterface() && reprap.GetSbcInterface().IsConnected() && !gb.IsBinary()
+		&& (code != 112 || gb.GetChannel() != GCodeChannel::Trigger)		// an M112 in a trigger action stops the machine here, without DSF
 		&& (   (code >=  0 && code <= 2)
 			|| (code >= 20 && code <= 24) || (code >= 26 && code <= 30)
 			||  code == 32 || (code >= 36 && code <= 39)

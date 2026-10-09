@@ -24,6 +24,10 @@ void TriggerItem::Init() noexcept
 	highLevelInputs.Clear();
 	lowLevelInputs.Clear();
 	expr.Delete();
+	action.Delete();
+	confirmMillis = 0;
+	confirming = false;
+	actionIsEmergencyStop = false;
 	condition = -1;
 }
 
@@ -112,16 +116,29 @@ bool TriggerItem::Check(unsigned int number) noexcept
 		{
 			const bool oldVal = exprResult;
 			exprResult = EvaluateExpression();
-			triggered = exprResult && !oldVal;
+			if (!exprResult)
+			{
+				confirming = false;
+			}
+			else if (!oldVal && !confirming)
+			{
+				confirming = true;							// the expression has become true, so it must now stay true for confirmMillis
+				whenBecameTrue = millis();
+			}
+			triggered = confirming && millis() - whenBecameTrue >= confirmMillis;
+			if (triggered)
+			{
+				confirming = false;
+			}
 		}
 		catch (const GCodeException& e)
 		{
 			String<StringLength256> errorMessage;
 			e.GetMessage(errorMessage.GetRef(), nullptr);
-			if (number == 0)
+			if (number == 0 || actionIsEmergencyStop)
 			{
-				// Trigger 0 is the emergency stop: if its expression cannot be evaluated, fire it rather than disable it
-				errorMessage.cat("\nTrigger 0 fired\n");
+				// Trigger 0 and triggers whose action is M112 are emergency stops: if the expression cannot be evaluated, fire rather than disable
+				errorMessage.catf("\nTrigger %u fired\n", number);
 				reprap.GetPlatform().Message(ErrorMessage, errorMessage.c_str());
 				return true;
 			}
@@ -161,15 +178,53 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 	switch (gb.GetCommandFraction())
 	{
 	case 1:									// trigger on an expression
-		if (gb.Seen('P'))
 		{
-			highLevelInputs.Clear();
-			lowLevelInputs.Clear();
-			highLevelEndstops.Clear();
-			lowLevelEndstops.Clear();
-			String<StringLength256> conditionString;
-			gb.GetQuotedString(conditionString.GetRef(), false);		// may throw
-			expr.Assign(conditionString.c_str());
+			// Read U and D before anything is changed, so that an error in them leaves the trigger as it was.
+			// The U parameter is G-code to run instead of triggerN.g; "\n" separates its lines. An action that is just M112 is an emergency stop.
+			const bool seenAction = gb.Seen('U');
+			if (seenAction && number < 2)
+			{
+				reply.copy("Triggers 0 and 1 cannot have an action");
+				return GCodeResult::error;
+			}
+			String<StringLength256> actionString;
+			if (seenAction)
+			{
+				gb.GetQuotedString(actionString.GetRef(), true);		// may throw
+				const char *_ecv_array _ecv_null const badLine = FindDisallowedLine(actionString.c_str());
+				if (badLine != nullptr)
+				{
+					const char *_ecv_array const badLineEnd = strstr(badLine, "\\n");
+					reply.printf("not allowed in an action, put it in trigger%u.g: %.*s", number, (badLineEnd == nullptr) ? 50 : min<int>(badLineEnd - badLine, 50), badLine);
+					return GCodeResult::error;
+				}
+			}
+			uint32_t confirmTime = confirmMillis;
+			(void)gb.TryGetLimitedUIValue('D', confirmTime, seen, 65536);	// may throw
+
+			if (gb.Seen('P'))
+			{
+				highLevelInputs.Clear();
+				lowLevelInputs.Clear();
+				highLevelEndstops.Clear();
+				lowLevelEndstops.Clear();
+				String<StringLength256> conditionString;
+				gb.GetQuotedString(conditionString.GetRef(), false);		// may throw
+				expr.Assign(conditionString.c_str());
+			}
+			if (seenAction)
+			{
+				action.Assign(actionString.c_str());						// U"" deletes the action, so that triggerN.g runs again
+				const char *_ecv_array p = actionString.c_str() + strspn(actionString.c_str(), " \t");
+				actionIsEmergencyStop = StringStartsWithIgnoreCase(p, "M112");
+				if (actionIsEmergencyStop)
+				{
+					p += 4 + strspn(p + 4, " \t");
+					actionIsEmergencyStop = (*p == 0 || *p == ';');			// M112 with nothing but spaces or a comment around it
+				}
+				seen = true;
+			}
+			confirmMillis = (uint16_t)confirmTime;
 		}
 		break;
 
@@ -221,6 +276,12 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 					}
 				}
 			}
+
+			if (seen)
+			{
+				action.Delete();									// a trigger on inputs or endstops runs triggerN.g
+				actionIsEmergencyStop = false;
+			}
 		}
 	}
 
@@ -249,13 +310,14 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 		else
 		{
 			// Get the initial value of the expression
+			confirming = false;
 			try
 			{
 				exprResult = EvaluateExpression();				// may throw
 			}
 			catch (const GCodeException&)
 			{
-				if (number != 0)								// keep the emergency stop trigger, so that its next check fires it
+				if (number != 0 && !actionIsEmergencyStop)		// keep an emergency stop trigger, so that its next check fires it
 				{
 					Init();										// clear the trigger
 				}
@@ -314,6 +376,14 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 				const auto ptr = expr.Get();
 				reply.catf(" expression {%s} becomes true", ptr.Ptr());
 			}
+			if (confirmMillis != 0)
+			{
+				reply.catf(" and stays true for %ums", (unsigned int)confirmMillis);
+			}
+			if (!action.IsNull())
+			{
+				reply.catf(", action \"%s\"", action.Get().Ptr());
+			}
 		}
 	}
 	return GCodeResult::ok;
@@ -325,7 +395,31 @@ bool TriggerItem::CheckLevel(unsigned int number) noexcept
 	endstopStates = lowLevelEndstops;
 	inputStates = lowLevelInputs;
 	exprResult = false;
+	confirming = true;										// M582 checks the level without waiting for confirmMillis
+	whenBecameTrue = millis() - confirmMillis;
 	return Check(number);
+}
+
+// Copy the line of the action that starts at 'offset' and advance 'offset' to the next line, returning false if there is no line left.
+// The line is copied out while the heap is read-locked, as EvaluateExpression does, so the caller keeps no pointer into the heap.
+bool TriggerItem::GetActionLine(uint8_t& offset, const StringRef& line) const noexcept
+{
+	if (action.IsNull())
+	{
+		return false;
+	}
+	const auto ptr = action.Get();
+	const size_t length = strlen(ptr.Ptr());
+	if (offset >= length)
+	{
+		return false;
+	}
+	const char *_ecv_array const lineStart = ptr.Ptr() + offset;
+	const char *_ecv_array const lineEnd = strstr(lineStart, "\\n");
+	const size_t lineLength = (lineEnd == nullptr) ? length - offset : (size_t)(lineEnd - lineStart);
+	line.copy(lineStart, lineLength);
+	offset = (uint8_t)((lineEnd == nullptr) ? length : (size_t)(lineEnd - ptr.Ptr()) + 2);	// an action has at most 255 characters
+	return true;
 }
 
 void TriggerItem::AppendInputNames(AxesBitmap endstops, InputPortsBitmap inputs, const StringRef &reply) noexcept
@@ -339,6 +433,62 @@ void TriggerItem::AppendInputNames(AxesBitmap endstops, InputPortsBitmap inputs,
 		const char *_ecv_array const axisLetters = reprap.GetGCodes().GetAxisLetters();
 		endstops.Iterate([axisLetters, &reply](unsigned int axis, unsigned int) noexcept { reply.catf(" %c", axisLetters[axis]); } );
 		inputs.Iterate([&reply](unsigned int port, unsigned int) noexcept { reply.catf(" %d", port); } );
+	}
+}
+
+// Return true if an action may contain this command. Actions only contain commands that RRF executes itself and at once:
+// nothing that SBC mode passes to DSF or that runs a macro (that belongs in triggerN.g), nothing that waits, and no motion.
+bool TriggerItem::IsAllowedInAction(char letter, int number) noexcept
+{
+	static constexpr int16_t AllowedMCodes[] = { 42, 81, 106, 107, 112, 117, 118, 140, 141, 143, 150, 302, 568, 599 };
+	if (letter == 'M')
+	{
+		for (int16_t code : AllowedMCodes)
+		{
+			if (code == number)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// Check the lines of an action, returning the first one that it may not contain, or nullptr if they are all allowed.
+// Besides the commands of IsAllowedInAction an action may contain set, echo without redirection to a file, comments and blank lines.
+const char *_ecv_array _ecv_null TriggerItem::FindDisallowedLine(const char *_ecv_array s) noexcept
+{
+	for (;;)
+	{
+		const char *_ecv_array const line = s;
+		s += strspn(s, " \t");
+		const char *_ecv_array const lineEnd = strstr(s, "\\n");
+		if (*s != 0 && *s != ';' && *s != '(' && s != lineEnd)
+		{
+			bool allowed = false;
+			if (StringStartsWith(s, "set") && (s[3] == ' ' || s[3] == '\t'))
+			{
+				allowed = true;
+			}
+			else if (StringStartsWith(s, "echo") && (s[4] == ' ' || s[4] == '\t'))
+			{
+				allowed = s[4 + strspn(s + 4, " \t")] != '>';
+			}
+			else if (toupper(*s) == 'M' && isDigit(s[1]))
+			{
+				const char *_ecv_array end;
+				allowed = IsAllowedInAction('M', (int)StrToU32(s + 1, &end)) && (*end == 0 || *end == ' ' || *end == '\t' || *end == ';' || end == lineEnd);
+			}
+			if (!allowed)
+			{
+				return line;
+			}
+		}
+		if (lineEnd == nullptr)
+		{
+			return nullptr;
+		}
+		s = lineEnd + 2;
 	}
 }
 
