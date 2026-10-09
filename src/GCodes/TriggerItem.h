@@ -58,6 +58,7 @@ private:
 	bool exprResult;						// the value of the expression when we last evaluated it
 	bool confirming;						// the expression has become true and has not stayed true for confirmMillis yet
 	bool actionIsEmergencyStop;				// the action is M112
+	bool locked;							// the trigger cannot be changed until the next restart (L1)
 };
 
 #endif /* SRC_GCODES_TRIGGERITEM_H_ */

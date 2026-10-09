@@ -28,6 +28,7 @@ void TriggerItem::Init() noexcept
 	confirmMillis = 0;
 	confirming = false;
 	actionIsEmergencyStop = false;
+	locked = false;											// only at a restart: a locked trigger cannot be deleted with P-1
 	condition = -1;
 }
 
@@ -157,6 +158,24 @@ bool TriggerItem::Check(unsigned int number) noexcept
 // Handle M581 and M581.1 for this trigger. We have already checked that gb.GetCommandFraction() returns <= 1.
 GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const StringRef &reply) THROWS(GCodeException)
 {
+	// A trigger locked with L1 can only be reported until the next restart, so that nobody can change or delete a safety function while the machine runs
+	if (locked)
+	{
+		bool change = gb.Seen('P') || gb.Seen('U') || gb.Seen('D') || gb.Seen('R') || gb.Seen('S') || gb.Seen('L');
+		for (size_t axis = 0; axis < reprap.GetGCodes().GetTotalAxes(); ++axis)
+		{
+			change = change || gb.Seen(reprap.GetGCodes().GetAxisLetters()[axis]);
+		}
+		if (change)
+		{
+			reply.printf("Trigger %u is locked until the next restart", number);
+			return GCodeResult::error;
+		}
+	}
+	uint32_t lock = 0;
+	bool seenLock = false;
+	(void)gb.TryGetUIValue('L', lock, seenLock);				// may throw, so read it before anything is changed
+
 	// We allow the P-1 parameter to be used with both M581 and M581.1
 	bool seen = gb.Seen('P');
 	if (seen)
@@ -296,6 +315,12 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 		}
 	}
 
+	if (seenLock)
+	{
+		locked = (lock != 0);									// L1 locks the trigger as it is configured now
+		seen = true;
+	}
+
 	if (seen)
 	{
 		// If trigger inputs or the enable condition have been changed, determine the initial state
@@ -381,6 +406,10 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 			if (!action.IsNull())
 			{
 				reply.catf(", action \"%s\"", action.Get().Ptr());
+			}
+			if (locked)
+			{
+				reply.cat(", locked until restart");
 			}
 		}
 	}
