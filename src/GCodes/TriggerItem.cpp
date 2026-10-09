@@ -158,10 +158,11 @@ bool TriggerItem::Check(unsigned int number) noexcept
 // Handle M581 and M581.1 for this trigger. We have already checked that gb.GetCommandFraction() returns <= 1.
 GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const StringRef &reply) THROWS(GCodeException)
 {
-	// A trigger locked with L1 can only be reported until the next restart, so that nobody can change or delete a safety function while the machine runs
+	// Once configured, trigger 0 and triggers with an action can only be reported until the next restart. They run without the SBC because they are
+	// safety functions, such as the door check, and nobody may change or delete those while the machine runs.
 	if (locked)
 	{
-		bool change = gb.Seen('P') || gb.Seen('U') || gb.Seen('D') || gb.Seen('R') || gb.Seen('S') || gb.Seen('L');
+		bool change = gb.Seen('P') || gb.Seen('U') || gb.Seen('D') || gb.Seen('R') || gb.Seen('S');
 		for (size_t axis = 0; axis < reprap.GetGCodes().GetTotalAxes(); ++axis)
 		{
 			change = change || gb.Seen(reprap.GetGCodes().GetAxisLetters()[axis]);
@@ -172,9 +173,6 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 			return GCodeResult::error;
 		}
 	}
-	uint32_t lock = 0;
-	bool seenLock = false;
-	(void)gb.TryGetUIValue('L', lock, seenLock);				// may throw, so read it before anything is changed
 
 	// We allow the P-1 parameter to be used with both M581 and M581.1
 	bool seen = gb.Seen('P');
@@ -315,12 +313,6 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 		}
 	}
 
-	if (seenLock)
-	{
-		locked = (lock != 0);									// L1 locks the trigger as it is configured now
-		seen = true;
-	}
-
 	if (seen)
 	{
 		// If trigger inputs or the enable condition have been changed, determine the initial state
@@ -347,6 +339,7 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 				throw;											// report the error
 			}
 		}
+		locked = !IsUnused() && (number == 0 || !action.IsNull());	// see the start of this function
 	}
 	else
 	{
