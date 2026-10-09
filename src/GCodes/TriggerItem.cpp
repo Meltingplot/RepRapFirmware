@@ -180,7 +180,7 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 	case 1:									// trigger on an expression
 		{
 			// Read U and D before anything is changed, so that an error in them leaves the trigger as it was.
-			// The U parameter is G-code to run instead of triggerN.g; "\n" separates its lines. An action that is just M112 is an emergency stop.
+			// The U parameter is one line of G-code to run instead of triggerN.g. An action that is just M112 is an emergency stop.
 			const bool seenAction = gb.Seen('U');
 			if (seenAction && number < 2)
 			{
@@ -191,11 +191,9 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 			if (seenAction)
 			{
 				gb.GetQuotedString(actionString.GetRef(), true);		// may throw
-				const char *_ecv_array _ecv_null const badLine = FindDisallowedLine(actionString.c_str());
-				if (badLine != nullptr)
+				if (!IsAllowedAction(actionString.c_str()))
 				{
-					const char *_ecv_array const badLineEnd = strstr(badLine, "\\n");
-					reply.printf("not allowed in an action, put it in trigger%u.g: %.*s", number, (badLineEnd == nullptr) ? 50 : min<int>(badLineEnd - badLine, 50), badLine);
+					reply.printf("not allowed in an action, put it in trigger%u.g: %.50s", number, actionString.c_str());
 					return GCodeResult::error;
 				}
 			}
@@ -400,26 +398,10 @@ bool TriggerItem::CheckLevel(unsigned int number) noexcept
 	return Check(number);
 }
 
-// Copy the line of the action that starts at 'offset' and advance 'offset' to the next line, returning false if there is no line left.
-// The line is copied out while the heap is read-locked, as EvaluateExpression does, so the caller keeps no pointer into the heap.
-bool TriggerItem::GetActionLine(uint8_t& offset, const StringRef& line) const noexcept
+// Copy the action of this trigger. It is copied out of the heap while the heap is read-locked, as EvaluateExpression does.
+void TriggerItem::GetAction(const StringRef& str) const noexcept
 {
-	if (action.IsNull())
-	{
-		return false;
-	}
-	const auto ptr = action.Get();
-	const size_t length = strlen(ptr.Ptr());
-	if (offset >= length)
-	{
-		return false;
-	}
-	const char *_ecv_array const lineStart = ptr.Ptr() + offset;
-	const char *_ecv_array const lineEnd = strstr(lineStart, "\\n");
-	const size_t lineLength = (lineEnd == nullptr) ? length - offset : (size_t)(lineEnd - lineStart);
-	line.copy(lineStart, lineLength);
-	offset = (uint8_t)((lineEnd == nullptr) ? length : (size_t)(lineEnd - ptr.Ptr()) + 2);	// an action has at most 255 characters
-	return true;
+	str.copy((action.IsNull()) ? "" : action.Get().Ptr());
 }
 
 void TriggerItem::AppendInputNames(AxesBitmap endstops, InputPortsBitmap inputs, const StringRef &reply) noexcept
@@ -454,42 +436,29 @@ bool TriggerItem::IsAllowedInAction(char letter, int number) noexcept
 	return false;
 }
 
-// Check the lines of an action, returning the first one that it may not contain, or nullptr if they are all allowed.
-// Besides the commands of IsAllowedInAction an action may contain set, echo without redirection to a file, comments and blank lines.
-const char *_ecv_array _ecv_null TriggerItem::FindDisallowedLine(const char *_ecv_array s) noexcept
+// Check how an action starts. Besides the commands of IsAllowedInAction it may be set, echo without redirection to a file, or a comment.
+// Further commands on the line are checked when they run.
+bool TriggerItem::IsAllowedAction(const char *_ecv_array s) noexcept
 {
-	for (;;)
+	s += strspn(s, " \t");
+	if (*s == 0 || *s == ';' || *s == '(')
 	{
-		const char *_ecv_array const line = s;
-		s += strspn(s, " \t");
-		const char *_ecv_array const lineEnd = strstr(s, "\\n");
-		if (*s != 0 && *s != ';' && *s != '(' && s != lineEnd)
-		{
-			bool allowed = false;
-			if (StringStartsWith(s, "set") && (s[3] == ' ' || s[3] == '\t'))
-			{
-				allowed = true;
-			}
-			else if (StringStartsWith(s, "echo") && (s[4] == ' ' || s[4] == '\t'))
-			{
-				allowed = s[4 + strspn(s + 4, " \t")] != '>';
-			}
-			else if (toupper(*s) == 'M' && isDigit(s[1]))
-			{
-				const char *_ecv_array end;
-				allowed = IsAllowedInAction('M', (int)StrToU32(s + 1, &end)) && (*end == 0 || *end == ' ' || *end == '\t' || *end == ';' || end == lineEnd);
-			}
-			if (!allowed)
-			{
-				return line;
-			}
-		}
-		if (lineEnd == nullptr)
-		{
-			return nullptr;
-		}
-		s = lineEnd + 2;
+		return true;
 	}
+	if (StringStartsWith(s, "set") && (s[3] == ' ' || s[3] == '\t'))
+	{
+		return true;
+	}
+	if (StringStartsWith(s, "echo") && (s[4] == ' ' || s[4] == '\t'))
+	{
+		return s[4 + strspn(s + 4, " \t")] != '>';
+	}
+	if (toupper(*s) == 'M' && isDigit(s[1]))
+	{
+		const char *_ecv_array end;
+		return IsAllowedInAction('M', (int)StrToU32(s + 1, &end)) && (*end == 0 || *end == ' ' || *end == '\t' || *end == ';');
+	}
+	return false;
 }
 
 bool TriggerItem::EvaluateExpression() THROWS(GCodeException)

@@ -121,7 +121,7 @@ bool GCodes::ActOnCode(GCodeBuffer& gb, const StringRef& reply) noexcept
 			throw GCodeException("GCode command too long");
 		}
 #endif
-		if (   triggerActionNumber != 0 && &gb == TriggerGCode()				// a line of a trigger action can hold more commands than M581.1 checked
+		if (   triggerActionRunning && &gb == TriggerGCode()					// the line of a trigger action can hold more commands than M581.1 checked
 			&& !TriggerItem::IsAllowedInAction(gb.GetCommandLetter(), (gb.HasCommandNumber()) ? gb.GetCommandNumber() : -1)
 		   )
 		{

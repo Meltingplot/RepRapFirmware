@@ -245,7 +245,7 @@ void GCodes::Reset() noexcept
 	}
 
 	nextGcodeSource = 0;
-	triggerActionNumber = 0;									// the trigger channel has been reset, so drop the remaining lines of a trigger action
+	triggerActionRunning = false;
 
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
 	fileToPrint.Close();
@@ -990,7 +990,7 @@ void GCodes::CheckTriggers() noexcept
 			triggersPending.ClearBit(lowestTriggerPending);								// clear the trigger
 			DoEmergencyStop();
 		}
-		else if (triggerActionNumber == 0 && !IsTriggerBusy() && TriggerGCode()->GetState() == GCodeState::normal)	// if we are not already executing a trigger or config.g
+		else if (!IsTriggerBusy() && TriggerGCode()->GetState() == GCodeState::normal)	// if we are not already executing a trigger or config.g
 		{
 			if (lowestTriggerPending == 1)
 			{
@@ -1009,9 +1009,34 @@ void GCodes::CheckTriggers() noexcept
 				triggersPending.ClearBit(lowestTriggerPending);							// clear the trigger
 				if (triggers[lowestTriggerPending].HasAction())
 				{
-					triggerActionNumber = lowestTriggerPending;								// the action is run below instead of triggerN.g
-					triggerActionOffset = 0;
-					TriggerGCode()->SetLastResult(GCodeResult::ok);
+					// Run the action instead of triggerN.g. Like the M911 script it is one line, which is copied into the trigger channel's buffer.
+					GCodeBuffer& gb = *TriggerGCode();
+					MutexLocker gbLock(gb.mutex);													// the SBC task changes this buffer under its mutex
+					String<GCodeReplyLength> reply;
+					triggers[lowestTriggerPending].GetAction(reply.GetRef());
+					const size_t indent = strspn(reply.c_str(), " \t");
+					if (reply[indent] != 0 && reply[indent] != ';' && reply[indent] != '(')		// PutAndDecode would run the previous line again for a blank or comment line
+					{
+						gb.PutAndDecode(reply.c_str());
+						reply.Clear();
+						try
+						{
+							if (gb.CheckMetaCommand(reply.GetRef()))
+							{
+								HandleReplyPreserveResult(gb, GCodeResult::ok, reply.c_str());
+							}
+							else
+							{
+								triggerActionRunning = true;										// regular commands, which run when the trigger channel is spun
+							}
+						}
+						catch (const GCodeException& e)
+						{
+							e.GetMessage(reply.GetRef(), &gb);
+							HandleReplyPreserveResult(gb, GCodeResult::error, reply.c_str());
+							gb.Init();
+						}
+					}
 				}
 				else
 				{
@@ -1023,47 +1048,9 @@ void GCodes::CheckTriggers() noexcept
 		}
 	}
 
-	// Run the lines of a trigger action one after the other on the trigger channel, each once the previous one has finished.
-	// Only the trigger number and the offset of the next line are kept between lines; each line is copied out of the trigger's action when it starts.
-	if (triggerActionNumber != 0)
+	if (triggerActionRunning && !IsTriggerBusy() && TriggerGCode()->GetState() == GCodeState::normal)
 	{
-		GCodeBuffer& gb = *TriggerGCode();
-		MutexLocker gbLock(gb.mutex);															// the SBC task changes this buffer under its mutex
-		String<GCodeReplyLength> reply;
-		while (   triggerActionNumber != 0 && !IsTriggerBusy() && gb.GetState() == GCodeState::normal	// not while a line or a macro it called is running
-			   && requestsFromOtherTasks == 0																// nor once an emergency stop has come in
-			  )
-		{
-			if (   gb.GetLastResult() == GCodeResult::error											// the previous line failed, so skip the remaining ones
-				|| !triggers[triggerActionNumber].GetActionLine(triggerActionOffset, reply.GetRef())	// or the last line has finished
-			   )
-			{
-				triggerActionNumber = 0;
-				break;
-			}
-			const size_t indent = strspn(reply.c_str(), " \t");
-			if (reply[indent] != 0 && reply[indent] != ';' && reply[indent] != '(')			// PutAndDecode would run the previous line again for a blank or comment line
-			{
-				gb.PutAndDecode(reply.c_str());
-				reply.Clear();
-				try
-				{
-					if (!gb.CheckMetaCommand(reply.GetRef()))
-					{
-						break;																	// a regular command, which runs when the trigger channel is spun
-					}
-					HandleReplyPreserveResult(gb, GCodeResult::ok, reply.c_str());
-				}
-				catch (const GCodeException& e)
-				{
-					e.GetMessage(reply.GetRef(), &gb);
-					HandleReplyPreserveResult(gb, GCodeResult::error, reply.c_str());
-					gb.Init();
-					triggerActionNumber = 0;													// skip the remaining lines
-				}
-			}
-			reply.Clear();
-		}
+		triggerActionRunning = false;																// the commands of the trigger action have finished
 	}
 }
 
@@ -1097,7 +1084,6 @@ void GCodes::EmergencyStop() noexcept
 		ms.laserPixelData.Clear();
 	}
 #endif
-	triggerActionNumber = 0;									// don't run the remaining lines of a trigger action
 	stopped = true;
 }
 

@@ -415,10 +415,6 @@ GCodeResult GCodes::ConfigureTrigger(GCodeBuffer& gb, const StringRef& reply) TH
 {
 	if (gb.GetCommandFraction() > 1) { return GCodeResult::errorNotSupported; }
 	const unsigned int triggerNumber = gb.GetLimitedUIValue('T', MaxTriggers);
-	if (triggerNumber == triggerActionNumber)
-	{
-		triggerActionNumber = 0;							// M581 may change or delete the action that is running, so don't run its remaining lines
-	}
 	return triggers[triggerNumber].Configure(triggerNumber, gb, reply);
 }
 
