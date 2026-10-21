@@ -359,7 +359,7 @@ public:
 
 	// Stall endstops
 	GCodeResult SetStallEndstopReporting(const CanMessageEnableStallEndstop& msg, const StringRef& reply) noexcept;
-	void SwitchToExpansionMode() noexcept { inExpansionMode = false; }						// we could consider terminating the Move task too
+	void SwitchToExpansionMode() noexcept { inExpansionMode = true; }						// we could consider terminating the Move task too
 #endif
 
 	AxisShaper& GetAxisShaper() noexcept { return axisShaper; }
@@ -392,8 +392,11 @@ public:
 	bool PausePrint(MovementState& ms) noexcept;											// Pause the print as soon as we can, returning true if we were able to
 #if HAS_VOLTAGE_MONITOR || HAS_STALL_DETECT
 	bool LowPowerOrStallPause(MovementState& ms) noexcept;									// Pause the print immediately, returning true if we were able to
-	void CancelStepping() noexcept;															// Stop generating steps
+	bool CancelStepping(DDA *abandonedMove) noexcept;										// Stop generating steps, returning true if a remote driver was told to stop
 #endif
+
+	static constexpr size_t NumStuckDiagnosticWords = 5;									// how many words GetStuckDiagnostics writes
+	void GetStuckDiagnostics(uint32_t *_ecv_array words) const noexcept;					// collect the movement state that explains a stuck task
 
 	bool NoLiveMovement(size_t msNumber) const noexcept pre(msNumber < NumMovementSystems) { return rings[msNumber].IsIdle(); }		// Is a move running, or are there any queued?
 
@@ -432,7 +435,7 @@ public:
 	FilePosition GetCurrentMoveFilePosition(size_t msNumber) const noexcept pre(msNumber < NumMovementSystems) { return rings[msNumber].GetCurrentMoveFilePosition(); }		// Get the file position of the move being executed, or noFilePosition if there is none
 	float GetTotalExtrusionRate(size_t msNumber) const noexcept pre(msNumber < NumMovementSystems) { return rings[msNumber].GetTotalExtrusionRate(); }
 
-	void UpdateLiveMachineCoordinates(float coords[MaxAxes], const Tool *_ecv_null tool) const noexcept;		// Force an update of the live machine coordinates
+	void UpdateLiveMachineCoordinates(float coords[MaxAxesPlusExtruders], const Tool *_ecv_null tool) const noexcept;		// Force an update of the live machine coordinates, extruders included
 
 	void AdjustLeadscrews(const floatc_t corrections[]) noexcept;							// Called by some Kinematics classes to adjust the leadscrews
 

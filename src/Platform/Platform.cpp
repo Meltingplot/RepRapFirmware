@@ -2137,7 +2137,7 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 				endClocks = StepTimer::GetTimerTicksWhenInterruptsDisabled();
 				endTimeStamp = CanInterface::GetTimeStampCounter();
 			}
-# if SAME70
+# if EXTERNAL_CAN_TIMESTAMP_COUNTER
 			const uint32_t tsDiff = (endTimeStamp - startTimeStamp) & 0xFFFF;
 # else
 			const uint32_t tsDiff = (((endTimeStamp - startTimeStamp) & 0xFFFF) * CanInterface::GetTimeStampPeriod()) >> 6;
@@ -2564,7 +2564,7 @@ GCodeResult Platform::SendI2cOrModbus(GCodeBuffer& gb, const StringRef &reply) T
 	size_t auxChannel = 0;
 	if (gb.GetCommandFraction() > 0)
 	{
-		auxChannel = gb.GetLimitedUIValue('P', 1, NumSerialChannels) - FirstAuxChannel;
+		auxChannel = gb.GetLimitedUIValue('P', FirstAuxChannel, NumSerialChannels) - FirstAuxChannel;
 		if (auxDevices[auxChannel].GetMode() != AuxMode::device)
 		{
 			reply.copy("Port has not been set to device mode");
