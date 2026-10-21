@@ -1,13 +1,14 @@
 name: Meltingplot release
 
 # Builds the Duet 3 main board firmware from this repository and, for a tag named like the
-# firmware version (e.g. 3.7.0-rc.1+2-mp.1), publishes a GitHub pre-release with the binaries
+# firmware version (e.g. 3.7.0+mp.1), publishes a GitHub pre-release with the binaries
 # attached. A manual run only builds and stores the binaries as workflow artifacts.
 
 on:
   push:
     tags:
-      - "*-mp.*"
+      - "*\\+mp.*"   # 3.7.0+mp.1
+      - "*.mp.*"     # 3.7.0-rc.2+1.mp.1, upstream version with build metadata
   workflow_dispatch:
 
 permissions:
@@ -129,7 +130,7 @@ jobs:
           UPSTREAM_VERSION=$(git show "$BASE:src/Version.h" | sed -n 's/^# define MAIN_VERSION\s\+"\(.\+\)"$/\1/p')
           cd ..
           {
-            echo "Duet 3 main board firmware \`$VERSION\` — Meltingplot build of upstream RepRapFirmware \`$UPSTREAM_BRANCH\` ($(git -C ./RepRapFirmware rev-parse --short "$BASE"), version $UPSTREAM_VERSION). The \`-mp.N\` suffix makes the version differ from the upstream string so that DuetSoftwareFramework flashes it on an image update."
+            echo "Duet 3 main board firmware \`$VERSION\` — Meltingplot build of upstream RepRapFirmware \`$UPSTREAM_BRANCH\` ($(git -C ./RepRapFirmware rev-parse --short "$BASE"), version $UPSTREAM_VERSION). The \`mp.N\` build metadata makes the version differ from the upstream string so that DuetSoftwareFramework flashes it on an image update."
             echo
             echo "**Changes over upstream $UPSTREAM_VERSION**"
             echo
