@@ -160,7 +160,8 @@ DUET3MB6XD_CXXFLAGS := -c -std=c++20 \
 	-Wsign-promo \
 	$(DUET3MB6XD_INCLUDES) \
 	$(DUET3MB6XD_DEFINES) \
-	-D_XOPEN_SOURCE
+	-D_XOPEN_SOURCE \
+	$(DEBUG_FLAGS)
 
 # Linker flags - split into LDFLAGS1 (before -o) and LDFLAGS2 (after -o)
 DUET3MB6XD_LDFLAGS1 := --specs=nosys.specs \
@@ -235,10 +236,8 @@ $(DUET3MB6XD_TARGET_ELF): $(DUET3MB6XD_OBJS) $(DUET3MB6XD_CANLIB_LIB) $(DUET3MB6
 $(DUET3MB6XD_TARGET_BIN): $(DUET3MB6XD_TARGET_ELF)
 	$(Q)echo "  OBJCOPY $@"
 	$(Q)$(OBJCOPY) -O binary $< $@
-	$(Q)if command -v CrcAppender >/dev/null 2>&1; then \
-		echo "  CRC     $@"; \
-		CrcAppender $@; \
-	fi
+	$(Q)echo "  CRC     $@"
+	$(Q)$(CRC_APPENDER) $@
 
 # Compile C++ files
 $(DUET3MB6XD_BUILD_DIR)/%.o: %.cpp
