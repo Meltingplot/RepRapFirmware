@@ -1329,21 +1329,27 @@ void SbcInterface::ExchangeData() noexcept
 		burstModeStartTime = 0;
 	}
 
-	// Send code replies and generic messages
-	if (!gcodeReply.IsEmpty())
+	// Send code replies and generic messages. This is repeated before each request that the SBC matches against the order of the codes,
+	// because a reply queued after this point (e.g. for M99 while we wait for a channel mutex) must not be overtaken by such a request
+	const auto sendCodeReplies = [this]() noexcept __attribute__((noinline)) -> bool		// not inlined, it is called before every request below
 	{
-		MutexLocker lock(gcodeReplyMutex);
-		while (!gcodeReply.IsEmpty())
+		if (!gcodeReply.IsEmpty())
 		{
-			const MessageType type = gcodeReply.GetFirstItemType();
-			OutputBuffer *buffer = gcodeReply.GetFirstItem();			// this may be null
-			if (!transfer.WriteCodeReply(type, buffer))					// this handles the null case too
+			MutexLocker lock(gcodeReplyMutex);
+			while (!gcodeReply.IsEmpty())
 			{
-				break;
+				const MessageType type = gcodeReply.GetFirstItemType();
+				OutputBuffer *buffer = gcodeReply.GetFirstItem();			// this may be null
+				if (!transfer.WriteCodeReply(type, buffer))					// this handles the null case too
+				{
+					break;
+				}
+				gcodeReply.SetFirstItem(buffer);							// this does a pop if buffer is null
 			}
-			gcodeReply.SetFirstItem(buffer);							// this does a pop if buffer is null
 		}
-	}
+		return gcodeReply.IsEmpty();									// false if the transfer is full, then the request must wait for the next one
+	};
+	(void)sendCodeReplies();
 
 	// Notify DSF about the available buffer space
 	DefragmentBufferedCodes();
@@ -1461,7 +1467,7 @@ void SbcInterface::ExchangeData() noexcept
 		}
 
 		// Deal with macro files being closed
-		if (gb->IsMacroFileClosed() && transfer.WriteMacroFileClosed(channel))
+		if (gb->IsMacroFileClosed() && sendCodeReplies() && transfer.WriteMacroFileClosed(channel))
 		{
 			// Note this is only sent when a macro file has finished successfully
 			gb->MacroFileClosedSent();
@@ -1472,7 +1478,7 @@ void SbcInterface::ExchangeData() noexcept
 		{
 			const char * const requestedMacroFile = gb->GetRequestedMacroFile();
 			bool fromCode = gb->IsMacroStartedByCode();
-			if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode))
+			if (sendCodeReplies() && transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode))
 			{
 				if (reprap.Debug(Module::SbcInterface))
 				{
@@ -1495,7 +1501,7 @@ void SbcInterface::ExchangeData() noexcept
 				}
 
 				// Handle file abort requests
-				if (gb->IsAbortRequested() && transfer.WriteAbortFileRequest(channel, gb->IsAbortAllRequested()))
+				if (gb->IsAbortRequested() && sendCodeReplies() && transfer.WriteAbortFileRequest(channel, gb->IsAbortAllRequested()))
 				{
 #ifdef TRACK_FILE_CODES
 					if (gb->IsFileChannel())
@@ -1526,12 +1532,12 @@ void SbcInterface::ExchangeData() noexcept
 
 				// Handle blocking messages and their results
 				if (gb->LatestMachineState().waitingForAcknowledgement && gb->IsMessagePromptPending() &&
-					transfer.WriteWaitForAcknowledgement(channel))
+					sendCodeReplies() && transfer.WriteWaitForAcknowledgement(channel))
 				{
 					gb->MessagePromptSent();
 					gb->Invalidate();
 				}
-				else if (gb->IsMessageAcknowledged() && transfer.WriteMessageAcknowledged(channel))
+				else if (gb->IsMessageAcknowledged() && sendCodeReplies() && transfer.WriteMessageAcknowledged(channel))
 				{
 					// Note this is only sent when a message was acknowledged in a regular way (i.e. by M292)
 					gb->MessageAcknowledgementSent();
@@ -1580,7 +1586,7 @@ void SbcInterface::ExchangeData() noexcept
 	}
 
 	// Send pause notification on demand
-	if (reportPause && transfer.WritePrintPaused(pauseFilePosition, pauseFilePosition2, pauseReason))
+	if (reportPause && sendCodeReplies() && transfer.WritePrintPaused(pauseFilePosition, pauseFilePosition2, pauseReason))
 	{
 		reportPause = false;
 	}
