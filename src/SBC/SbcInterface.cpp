@@ -1329,9 +1329,9 @@ void SbcInterface::ExchangeData() noexcept
 		burstModeStartTime = 0;
 	}
 
-	// Send code replies and generic messages. This is repeated before each request that the SBC matches against the order of the codes,
-	// because a reply queued after this point (e.g. for M99 while we wait for a channel mutex) must not be overtaken by such a request
-	const auto sendCodeReplies = [this]() noexcept __attribute__((noinline)) -> bool		// not inlined, it is called before every request below
+	// Send code replies and generic messages. This is repeated before the requests that the SBC matches against the order of the codes and that
+	// can follow a batch of file codes (see DoFilePrint) run while we wait for a channel mutex, so they cannot overtake the replies of that batch
+	const auto sendCodeReplies = [this]() noexcept __attribute__((noinline)) -> bool		// not inlined, it is called before several requests below
 	{
 		if (!gcodeReply.IsEmpty())
 		{
@@ -1467,7 +1467,7 @@ void SbcInterface::ExchangeData() noexcept
 		}
 
 		// Deal with macro files being closed
-		if (gb->IsMacroFileClosed() && sendCodeReplies() && transfer.WriteMacroFileClosed(channel))
+		if (gb->IsMacroFileClosed() && transfer.WriteMacroFileClosed(channel))
 		{
 			// Note this is only sent when a macro file has finished successfully
 			gb->MacroFileClosedSent();
@@ -1478,7 +1478,7 @@ void SbcInterface::ExchangeData() noexcept
 		{
 			const char * const requestedMacroFile = gb->GetRequestedMacroFile();
 			bool fromCode = gb->IsMacroStartedByCode();
-			if (sendCodeReplies() && transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode))
+			if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode))
 			{
 				if (reprap.Debug(Module::SbcInterface))
 				{
@@ -1537,7 +1537,7 @@ void SbcInterface::ExchangeData() noexcept
 					gb->MessagePromptSent();
 					gb->Invalidate();
 				}
-				else if (gb->IsMessageAcknowledged() && sendCodeReplies() && transfer.WriteMessageAcknowledged(channel))
+				else if (gb->IsMessageAcknowledged() && transfer.WriteMessageAcknowledged(channel))
 				{
 					// Note this is only sent when a message was acknowledged in a regular way (i.e. by M292)
 					gb->MessageAcknowledgementSent();
