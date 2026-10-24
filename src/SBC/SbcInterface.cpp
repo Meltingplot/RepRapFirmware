@@ -1329,9 +1329,9 @@ void SbcInterface::ExchangeData() noexcept
 		burstModeStartTime = 0;
 	}
 
-	// Send code replies and generic messages. This is repeated before the requests that the SBC matches against the order of the codes and that
-	// can follow a batch of file codes (see DoFilePrint) run while we wait for a channel mutex, so they cannot overtake the replies of that batch
-	const auto sendCodeReplies = [this]() noexcept __attribute__((noinline)) -> bool		// not inlined, it is called before several requests below
+	// Send code replies and generic messages. This is repeated before the file abort and message prompt requests, which can follow a batch of
+	// file codes (see DoFilePrint) run while we wait for a channel mutex, so they cannot overtake the replies of that batch
+	const auto sendCodeReplies = [this]() noexcept __attribute__((noinline)) -> bool		// not inlined, it is also called before two requests below
 	{
 		if (!gcodeReply.IsEmpty())
 		{
@@ -1586,7 +1586,7 @@ void SbcInterface::ExchangeData() noexcept
 	}
 
 	// Send pause notification on demand
-	if (reportPause && sendCodeReplies() && transfer.WritePrintPaused(pauseFilePosition, pauseFilePosition2, pauseReason))
+	if (reportPause && transfer.WritePrintPaused(pauseFilePosition, pauseFilePosition2, pauseReason))
 	{
 		reportPause = false;
 	}
