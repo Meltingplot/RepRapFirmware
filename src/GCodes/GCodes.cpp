@@ -373,12 +373,12 @@ GCodeBuffer *_ecv_null GCodes::GetSerialGCodeBuffer(size_t serialPortNumber) con
 	}
 }
 
-// Return true if any channel other than the daemon is executing a file macro
+// Return true if any channel other than the daemon and the trigger channel is executing a file macro
 bool GCodes::DoingFileMacro() const noexcept
 {
 	for (const GCodeBuffer *_ecv_null gbp : gcodeSources)
 	{
-		if (gbp != nullptr && gbp != DaemonGCode() && gbp->IsDoingFileMacro())
+		if (gbp != nullptr && gbp != DaemonGCode() && gbp != TriggerGCode() && gbp->IsDoingFileMacro())
 		{
 			return true;
 		}
