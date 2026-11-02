@@ -1121,6 +1121,13 @@ TransferState DataTransfer::DoTransfer() noexcept
 				ExchangeResponse(SpiTransferResponse::BadDataLength);
 				break;
 			}
+			if (IsLinkCapabilityActive(SbcLinkExtendedHeader) && SequenceDistance(rxHeader.sequenceNumber) < 0)
+			{
+				// The SBC has left the extended link, which only a restart or a connection reset does. Leave it as well so that the SBC
+				// understands the responses. The sequence number does not follow ours, so the connection is reset when this transfer ends
+				activeLinkCapabilities = 0;
+				lastTxValid = false;
+			}
 			if (GuardSequence())
 			{
 				break;
