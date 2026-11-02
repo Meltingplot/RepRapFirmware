@@ -321,8 +321,7 @@ constexpr ObjectModelTableEntry RepRap::objectModelTable[] =
 	{ "reportedAxes",			OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxReportedAxes),						ObjectModelEntryFlags::verbose },
 	{ "restorePoints",			OBJECT_MODEL_FUNC_NOSELF((int32_t)NumVisibleRestorePoints),				ObjectModelEntryFlags::verbose },
 #if HAS_SBC_INTERFACE
-	// Not verbose, so that DSF gets it without flags (Meltingplot)
-	{ "sbcLinkCapabilities",	OBJECT_MODEL_FUNC((int32_t)self->sbcInterface->GetDataTransfer().GetOfferedLinkCapabilities()),	ObjectModelEntryFlags::none },
+	{ "sbcLinkCapabilities",	OBJECT_MODEL_FUNC((int32_t)self->sbcInterface->GetDataTransfer().GetOfferedLinkCapabilities()),	ObjectModelEntryFlags::verbose },
 #endif
 	{ "sensors",				OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxSensors),							ObjectModelEntryFlags::verbose },
 	{ "spindles",				OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxSpindles),							ObjectModelEntryFlags::verbose },
