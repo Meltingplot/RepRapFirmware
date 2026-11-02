@@ -430,7 +430,8 @@ DataTransfer::DataTransfer() noexcept : state(InternalTransferState::ExchangingD
 #if SUPPORTS_SBC_OVER_USB
 	usbDevice(nullptr), usbDeviceIndex(0),
 #endif
-	packetId(0)
+	packetId(0), offeredLinkCapabilities(0), activeLinkCapabilities(0), lastTxBuffer(nullptr), pendingTxPointer(0), pendingPacketId(0),
+	lastTxValid(false), resending(false)
 {
 	rxResponse = SpiTransferResponse::Success;
 	txResponse = SpiTransferResponse::Success;
@@ -471,6 +472,11 @@ void DataTransfer::Init() noexcept
 		txBuffer = (mem != nullptr) ? (char *)mem : (char *)new uint32_t[(SbcTransferBufferSize + 3)/4];
 # endif
 	}
+# if SAME70
+	// The link capabilities are offered on the SAME70 only, whose SPI the SBC link census covers. The PBUF pool has room for a third buffer
+	lastTxBuffer = (char *)AllocateFromPbufPool(SbcTransferBufferSize);
+	offeredLinkCapabilities = SbcLinkPhaseGuard | SbcLinkExtendedHeader | ((lastTxBuffer != nullptr) ? SbcLinkSequenceGuard : 0);
+# endif
 #elif SAME70
 # error Must allocate buffers from non-cached RAM
 #else
@@ -812,6 +818,158 @@ GCodeChannel DataTransfer::ReadSetLastCodeResult(GCodeResult& result) noexcept
 	return GCodeChannel(header->channel);
 }
 
+static inline bool IsExtendedSequenceNumber(uint16_t sequenceNumber) noexcept
+{
+	return (sequenceNumber >> SbcExtendedCounterBits) == SbcExtendedActiveStatus;
+}
+
+void DataTransfer::ActivateLinkCapabilities(uint32_t requested) noexcept
+{
+	requested &= offeredLinkCapabilities;
+	if (IsLinkCapabilityActive(SbcLinkExtendedHeader) && (requested & SbcLinkExtendedHeader) == 0)
+	{
+		// Leave the extended link like a connection reset does
+		txHeader.sequenceNumber &= SbcExtendedCounterMask;
+	}
+	activeLinkCapabilities = requested;
+}
+
+// Get the distance from the last transfer number to a received one: 1 for the next transfer, 0 for a repeated one, 2 if one is missing,
+// -1 if the SBC has left the extended link. The SBC switches to the extended link one transfer after us, so both formats are accepted
+int DataTransfer::SequenceDistance(uint16_t received) const noexcept
+{
+	if (IsLinkCapabilityActive(SbcLinkExtendedHeader))
+	{
+		if (IsExtendedSequenceNumber(received))
+		{
+			return (received - lastTransferNumber) & SbcExtendedCounterMask;
+		}
+		if (IsExtendedSequenceNumber(lastTransferNumber))
+		{
+			return -1;
+		}
+	}
+	return (uint16_t)(received - lastTransferNumber);
+}
+
+uint32_t DataTransfer::EncodeResponse(uint32_t response) const noexcept
+{
+	if (IsLinkCapabilityActive(SbcLinkExtendedHeader))
+	{
+		for (const SbcExtendedResponseCode& code : SbcExtendedResponseCodes)
+		{
+			if (code.regular == response)
+			{
+				return code.extended;
+			}
+		}
+	}
+	return response;
+}
+
+// Get the regular code of a received word, which may be an extended code with bit errors, or the word itself if it is no extended code
+uint32_t DataTransfer::DecodeResponse(uint32_t word) const noexcept
+{
+	if (IsLinkCapabilityActive(SbcLinkExtendedHeader))
+	{
+		for (const SbcExtendedResponseCode& code : SbcExtendedResponseCodes)
+		{
+			if ((unsigned int)__builtin_popcount(word ^ code.extended) <= SbcExtendedCorrectableBits)
+			{
+				return code.regular;
+			}
+		}
+	}
+	return word;
+}
+
+// Deal with the SBC being in another phase than we are, as far as what we received shows it. Return true if we went back to the phase of the SBC
+bool DataTransfer::GuardPhase() noexcept
+{
+	if (!IsLinkCapabilityActive(SbcLinkPhaseGuard))
+	{
+		return false;
+	}
+
+	// In a response state, the start of a header means that the SBC is in the header phase. Only 4 bytes of it arrived, so ask for it again
+	if (state == InternalTransferState::ExchangingHeaderResponse || state == InternalTransferState::ExchangingDataResponse)
+	{
+		Cache::InvalidateAfterDMAReceive(&rxResponse, sizeof(rxResponse));
+		if ((rxResponse & 0xFF) == SbcFormatCode)
+		{
+			ExchangeResponse(SpiTransferResponse::BadHeaderChecksum);
+			state = InternalTransferState::ExchangingHeaderResponse;
+			return true;
+		}
+	}
+
+	// In the data phase, a valid header means that the SBC did not get the Success of the header response. It got data instead of a header, so ask for it again
+	if (state == InternalTransferState::ExchangingData)
+	{
+		Cache::InvalidateAfterDMAReceive(rxBuffer, sizeof(SpiTransferHeader));
+		const SpiTransferHeader *const header = reinterpret_cast<const SpiTransferHeader *>(rxBuffer);
+		if (header->formatCode == SbcFormatCode && header->crcHeader == CalcCRC32(rxBuffer, sizeof(SpiTransferHeader) - sizeof(uint32_t)))
+		{
+			rxHeader = *header;
+			ExchangeResponse(SpiTransferResponse::BadHeaderChecksum);
+			state = InternalTransferState::ExchangingHeaderResponse;
+			return true;
+		}
+	}
+	return false;
+}
+
+// Deal with the SBC repeating the last completed transfer. Return true if we asked for the headers to be exchanged again
+bool DataTransfer::GuardSequence() noexcept
+{
+	if (!IsLinkCapabilityActive(SbcLinkSequenceGuard))
+	{
+		return false;
+	}
+
+	// The SBC repeats the transfer we completed last, so it did not complete it. Send that transfer again before the current one
+	if (!resending && lastTxValid && SequenceDistance(rxHeader.sequenceNumber) == 0)
+	{
+		pendingTxHeader = txHeader;
+		pendingTxPointer = txPointer;
+		pendingPacketId = packetId;
+		txHeader = lastTxHeader;
+		std::swap(txBuffer, lastTxBuffer);
+		txPointer = lastTxHeader.dataLength;
+		resending = true;
+
+		// Make both sides exchange the headers again
+		ExchangeResponse(SpiTransferResponse::BadHeaderChecksum);
+		return true;
+	}
+	return false;
+}
+
+// Called when a transfer has been completed. Return true if it was the last transfer sent again, in which case the transfer that waited has been started
+bool DataTransfer::CompleteGuardedTransfer() noexcept
+{
+	if (resending)
+	{
+		// The SBC has completed the transfer it missed. Its data was processed already, so carry on with the transfer that waited
+		txHeader = pendingTxHeader;
+		std::swap(txBuffer, lastTxBuffer);
+		txPointer = pendingTxPointer;
+		packetId = pendingPacketId;
+		resending = false;
+		ExchangeHeader();
+		return true;
+	}
+
+	if (IsLinkCapabilityActive(SbcLinkSequenceGuard))
+	{
+		// Keep this transfer so that it can be sent again
+		lastTxHeader = txHeader;
+		std::swap(txBuffer, lastTxBuffer);
+		lastTxValid = true;
+	}
+	return false;
+}
+
 void DataTransfer::ExchangeHeader() noexcept
 {
 	Cache::FlushBeforeDMASend(&txHeader, sizeof(txHeader));
@@ -821,7 +979,7 @@ void DataTransfer::ExchangeHeader() noexcept
 
 void DataTransfer::ExchangeResponse(uint32_t response) noexcept
 {
-	txResponse = response;
+	txResponse = EncodeResponse(response);
 	Cache::FlushBeforeDMASend(&txResponse, sizeof(txResponse));
 	state = (state == InternalTransferState::ExchangingHeader) ? InternalTransferState::ExchangingHeaderResponse : InternalTransferState::ExchangingDataResponse;
 	setup_spi(&rxResponse, &txResponse, sizeof(uint32_t));
@@ -848,7 +1006,7 @@ void DataTransfer::RestartTransfer(bool ownRequest) noexcept
 		if (rxHeader.dataLength > 0 || txPointer > 0)
 		{
 			// Transfer bad data response and restart the transfer
-			txResponse = SpiTransferResponse::BadResponse;
+			txResponse = EncodeResponse(SpiTransferResponse::BadResponse);
 			Cache::FlushBeforeDMASend(&txResponse, sizeof(txResponse));
 			state = InternalTransferState::Resetting;
 			setup_spi(&rxResponse, &txResponse, sizeof(uint32_t));
@@ -856,7 +1014,9 @@ void DataTransfer::RestartTransfer(bool ownRequest) noexcept
 		else
 		{
 			// No data was transferred so we are still in sync. Continue with the next transfer
-			lastTransferNumber = rxHeader.sequenceNumber - 1;
+			lastTransferNumber = (IsExtendedSequenceNumber(rxHeader.sequenceNumber))
+									? (SbcExtendedActiveStatus << SbcExtendedCounterBits) | ((rxHeader.sequenceNumber - 1) & SbcExtendedCounterMask)
+									: rxHeader.sequenceNumber - 1;
 			ExchangeHeader();
 		}
 	}
@@ -904,13 +1064,26 @@ TransferState DataTransfer::DoTransfer() noexcept
 		// Transfer has finished
 		dataReceived = false;
 
+		if (IsLinkCapabilityActive(SbcLinkExtendedHeader) && state != InternalTransferState::ExchangingHeader && state != InternalTransferState::ExchangingData)
+		{
+			// Responses have been exchanged. Replace the codes of the extended link by the regular ones
+			Cache::InvalidateAfterDMAReceive(&rxResponse, sizeof(rxResponse));
+			rxResponse = DecodeResponse(rxResponse);
+			txResponse = DecodeResponse(txResponse);
+		}
+
+		if (GuardPhase())
+		{
+			return TransferState::doingPartialTransfer;
+		}
+
 		switch (state)
 		{
 		case InternalTransferState::ExchangingHeader:
 		{
 			// (1) Exchanged transfer headers
 			Cache::InvalidateAfterDMAReceive(&rxHeader, sizeof(rxHeader));
-			const uint32_t headerResponse = *reinterpret_cast<const uint32_t*>(&rxHeader);
+			const uint32_t headerResponse = DecodeResponse(*reinterpret_cast<const uint32_t*>(&rxHeader));
 			if (headerResponse == SpiTransferResponse::BadResponse)
 			{
 				// SBC received a bad response code. We must have been happy if we got here, else RRF would have complained
@@ -948,6 +1121,17 @@ TransferState DataTransfer::DoTransfer() noexcept
 				ExchangeResponse(SpiTransferResponse::BadDataLength);
 				break;
 			}
+			if (IsLinkCapabilityActive(SbcLinkExtendedHeader) && SequenceDistance(rxHeader.sequenceNumber) < 0)
+			{
+				// The SBC has left the extended link, which only a restart or a connection reset does. Leave it as well so that the SBC
+				// understands the responses. The sequence number does not follow ours, so the connection is reset when this transfer ends
+				activeLinkCapabilities = 0;
+				lastTxValid = false;
+			}
+			if (GuardSequence())
+			{
+				break;
+			}
 
 			ExchangeResponse(SpiTransferResponse::Success);
 			break;
@@ -966,6 +1150,10 @@ TransferState DataTransfer::DoTransfer() noexcept
 				else
 				{
 					// Everything OK
+					if (CompleteGuardedTransfer())
+					{
+						return TransferState::doingFullTransfer;
+					}
 					rxPointer = txPointer = 0;
 					packetId = 0;
 					state = InternalTransferState::ProcessingData;
@@ -1016,6 +1204,10 @@ TransferState DataTransfer::DoTransfer() noexcept
 			if (rxResponse == SpiTransferResponse::Success && txResponse == SpiTransferResponse::Success)
 			{
 				// Everything OK
+				if (CompleteGuardedTransfer())
+				{
+					return TransferState::doingFullTransfer;
+				}
 				rxPointer = txPointer = 0;
 				packetId = 0;
 				state = InternalTransferState::ProcessingData;
@@ -1189,7 +1381,9 @@ void DataTransfer::StartNextTransfer() noexcept
 
 	// Set up TX transfer header
 	txHeader.numPackets = packetId;
-	txHeader.sequenceNumber++;
+	txHeader.sequenceNumber = (IsLinkCapabilityActive(SbcLinkExtendedHeader))
+								? (SbcExtendedActiveStatus << SbcExtendedCounterBits) | ((txHeader.sequenceNumber + 1) & SbcExtendedCounterMask)
+								: txHeader.sequenceNumber + 1;
 	txHeader.dataLength = txPointer;
 	txHeader.crcData = CalcCRC32(txBuffer, txPointer);
 	txHeader.crcHeader = CalcCRC32(reinterpret_cast<const char *>(&txHeader), sizeof(SpiTransferHeader) - sizeof(uint32_t));
@@ -1227,6 +1421,14 @@ void DataTransfer::ResetConnection(bool fullReset) noexcept
 	dataReceived = false;
 	rxPointer = txPointer = 0;
 	packetId = 0;
+
+	// The link capabilities end with the connection. Numbering from the counter on gives status 0, which tells the SBC that we left the extended link
+	if (IsLinkCapabilityActive(SbcLinkExtendedHeader))
+	{
+		txHeader.sequenceNumber &= SbcExtendedCounterMask;
+	}
+	activeLinkCapabilities = 0;
+	lastTxValid = resending = false;
 
 	// Reset the TfrRdy pin level and the seq numbers only if no communication is taking place
 	if (fullReset)
