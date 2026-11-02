@@ -135,6 +135,40 @@ enum SpiTransferResponse : uint32_t
 	BadResponse = 0xFEFEFEFEu
 };
 
+// Capabilities of the SPI link, offered in limits.sbcLinkCapabilities and activated per connection by SbcRequest::ActivateLinkCapabilities (Meltingplot)
+enum SbcLinkCapabilities : uint32_t
+{
+	SbcLinkPhaseGuard = 1,				// go back to the phase of the SBC when what we receive shows that it is in another one
+	SbcLinkSequenceGuard = 2,			// send the last completed transfer again when the SBC repeats it, wait when the SBC is a transfer ahead
+	SbcLinkExtendedHeader = 4			// sequence numbers with a session status and response codes that tolerate bit errors
+};
+
+// Sequence numbers of the extended link: a counter in the low bits and a status in the others. A side that leaves the extended link numbers from the counter on
+constexpr unsigned int SbcExtendedCounterBits = 5;
+constexpr uint16_t SbcExtendedCounterMask = (1u << SbcExtendedCounterBits) - 1;
+constexpr uint16_t SbcExtendedActiveStatus = 0x7FF;
+
+// Response codes of the extended link. These Walsh codes are 16 bits apart from each other and at least 10 bits apart from the regular codes,
+// from 0 and 0xFFFFFFFF and from the first word of a transfer header or a packet header. Up to 3 bit errors are corrected
+struct SbcExtendedResponseCode
+{
+	uint32_t regular;
+	uint32_t extended;
+};
+
+constexpr SbcExtendedResponseCode SbcExtendedResponseCodes[] =
+{
+	{ SpiTransferResponse::Success, 0xFF00FF00u },
+	{ SpiTransferResponse::BadHeaderChecksum, 0xF0F0F0F0u },
+	{ SpiTransferResponse::BadDataChecksum, 0xF00F0FF0u },
+	{ SpiTransferResponse::BadResponse, 0xCCCCCCCCu },
+	{ SpiTransferResponse::BadFormat, 0xCC3333CCu },
+	{ SpiTransferResponse::BadProtocolVersion, 0xC3C3C3C3u },
+	{ SpiTransferResponse::BadDataLength, 0xC33C3CC3u }
+};
+
+constexpr unsigned int SbcExtendedCorrectableBits = 3;
+
 enum class SbcTransportType : uint8_t
 {
 	spi,
@@ -309,7 +343,9 @@ enum class SbcRequest : uint16_t
     ObjectModelKeyChanged = 30,					// Increment the sequence number of an object model key provided exclusively by DSF
 	FileListResult = 31,						// Result of a directory listing request
 
-	InvalidRequest = 32
+	InvalidRequest = 32,
+
+	ActivateLinkCapabilities = 0x4D50			// Activate capabilities of the SPI link for the current connection (Meltingplot, outside the upstream range)
 };
 
 struct BooleanHeader

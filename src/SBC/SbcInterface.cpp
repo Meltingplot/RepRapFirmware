@@ -317,7 +317,7 @@ void SbcInterface::ExchangeData() noexcept
 			break;
 		}
 
-		if (packet->request >= (uint16_t)SbcRequest::InvalidRequest)
+		if (packet->request >= (uint16_t)SbcRequest::InvalidRequest && packet->request != (uint16_t)SbcRequest::ActivateLinkCapabilities)
 		{
 			REPORT_INTERNAL_ERROR;
 			break;
@@ -1299,6 +1299,17 @@ void SbcInterface::ExchangeData() noexcept
 			else if (StringEqualsIgnoreCase(key, "volumes"))
 			{
 				reprap.VolumesUpdated();
+			}
+			break;
+		}
+
+		// Activate capabilities of the SPI link for the current connection (Meltingplot)
+		case SbcRequest::ActivateLinkCapabilities:
+		{
+			const char *data = transfer.ReadData(packet->length);
+			if (packet->length >= sizeof(uint32_t))
+			{
+				transfer.ActivateLinkCapabilities(*reinterpret_cast<const uint32_t *>(data));
 			}
 			break;
 		}

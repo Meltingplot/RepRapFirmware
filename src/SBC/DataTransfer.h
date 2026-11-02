@@ -54,6 +54,10 @@ public:
 	void StartNextTransfer() noexcept;														// Kick off the next transfer
 	void ResetConnection(bool fullReset) noexcept;											// Reset the connection after a longer timeout
 
+	uint32_t GetOfferedLinkCapabilities() const noexcept { return offeredLinkCapabilities; }
+	uint32_t GetActiveLinkCapabilities() const noexcept { return activeLinkCapabilities; }
+	void ActivateLinkCapabilities(uint32_t requested) noexcept;								// Activate link capabilities from the next transfer on
+
 	size_t PacketsToRead() const noexcept;
 	const PacketHeader *ReadPacket() noexcept;												// Attempt to read the next packet header or return null. Advances the read pointer to the next packet or the packet's data
 	const char *ReadData(size_t packetLength) noexcept;										// Read the packet data and advance to the next packet (if any)
@@ -163,6 +167,22 @@ private:
 	// Packet properties
 	uint16_t packetId;
 
+	// Capabilities of the SPI link (Meltingplot). The sequence guard keeps the last completed transfer in a second transmit buffer
+	uint32_t offeredLinkCapabilities, activeLinkCapabilities;
+	SpiTransferHeader lastTxHeader, pendingTxHeader;			// last completed transfer, and the transfer that waits while it is sent again
+	char *lastTxBuffer;											// swapped with txBuffer
+	size_t pendingTxPointer;
+	uint16_t pendingPacketId;
+	bool lastTxValid, resending;
+
+	bool IsLinkCapabilityActive(uint32_t capability) const noexcept { return (activeLinkCapabilities & capability) != 0; }
+	int SequenceDistance(uint16_t received) const noexcept;
+	uint32_t EncodeResponse(uint32_t response) const noexcept;
+	uint32_t DecodeResponse(uint32_t word) const noexcept;
+	bool GuardPhase() noexcept;
+	bool GuardSequence() noexcept;
+	bool CompleteGuardedTransfer() noexcept;
+
 	bool IsConnectionReset() const noexcept;
 
 	void ExchangeHeader() noexcept;
@@ -191,8 +211,7 @@ private:
 
 inline bool DataTransfer::IsConnectionReset() const noexcept
 {
-	uint16_t nextTransferNumber = lastTransferNumber + 1u;
-	return (rxHeader.formatCode == SbcFormatCode) && (rxHeader.sequenceNumber != nextTransferNumber);
+	return (rxHeader.formatCode == SbcFormatCode) && (SequenceDistance(rxHeader.sequenceNumber) != 1);
 }
 
 inline uint8_t DataTransfer::GetRxNumPackets() const noexcept

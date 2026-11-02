@@ -320,6 +320,10 @@ constexpr ObjectModelTableEntry RepRap::objectModelTable[] =
 	{ "portsPerHeater",			OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxPortsPerHeater),					ObjectModelEntryFlags::verbose },
 	{ "reportedAxes",			OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxReportedAxes),						ObjectModelEntryFlags::verbose },
 	{ "restorePoints",			OBJECT_MODEL_FUNC_NOSELF((int32_t)NumVisibleRestorePoints),				ObjectModelEntryFlags::verbose },
+#if HAS_SBC_INTERFACE
+	// Not verbose, so that DSF gets it without flags (Meltingplot)
+	{ "sbcLinkCapabilities",	OBJECT_MODEL_FUNC((int32_t)self->sbcInterface->GetDataTransfer().GetOfferedLinkCapabilities()),	ObjectModelEntryFlags::none },
+#endif
 	{ "sensors",				OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxSensors),							ObjectModelEntryFlags::verbose },
 	{ "spindles",				OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxSpindles),							ObjectModelEntryFlags::verbose },
 	{ "tools",					OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxTools),							ObjectModelEntryFlags::verbose },
@@ -362,6 +366,9 @@ constexpr ObjectModelTableEntry RepRap::objectModelTable[] =
 #endif
 	{ "previousTool",			OBJECT_MODEL_FUNC((int32_t)self->gCodes->GetCurrentMovementState(context).previousToolNumber),	ObjectModelEntryFlags::none | ObjectModelEntryFlags::obsolete },
 	{ "restorePoints",			OBJECT_MODEL_FUNC_ARRAY(7),												ObjectModelEntryFlags::obsolete },
+#if HAS_SBC_INTERFACE
+	{ "sbcLinkCapabilities",	OBJECT_MODEL_FUNC((int32_t)self->sbcInterface->GetDataTransfer().GetActiveLinkCapabilities()),	ObjectModelEntryFlags::none },
+#endif
 	{ "startupError",			OBJECT_MODEL_FUNC_IF(!self->configErrorMessage.IsNull(), self, 6),		ObjectModelEntryFlags::none },
 	{ "status",					OBJECT_MODEL_FUNC(self->GetStatusString()),								ObjectModelEntryFlags::live },
 	{ "thisActive",
@@ -427,8 +434,8 @@ constexpr uint8_t RepRap::objectModelTableDescriptor[] =
 #else
 	0,																						// directories
 #endif
-	27 + SUPPORT_LED_STRIPS,																// limits
-	22 + HAS_VOLTAGE_MONITOR + SUPPORT_LASER,												// state
+	27 + SUPPORT_LED_STRIPS + HAS_SBC_INTERFACE,											// limits
+	22 + HAS_VOLTAGE_MONITOR + SUPPORT_LASER + HAS_SBC_INTERFACE,							// state
 	2,																						// state.beep
 	12 + (unsigned int)HAS_NETWORKING + (2 * HAS_MASS_STORAGE) + ((unsigned int)HAS_MASS_STORAGE | (unsigned int)HAS_EMBEDDED_FILES | (unsigned int)HAS_SBC_INTERFACE) + SUPPORT_LED_STRIPS,	// seqs
 	3																						// state.configErr
