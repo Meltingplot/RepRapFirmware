@@ -139,7 +139,7 @@ enum SpiTransferResponse : uint32_t
 enum SbcLinkCapabilities : uint32_t
 {
 	SbcLinkPhaseGuard = 1,				// go back to the phase of the SBC when what we receive shows that it is in another one
-	SbcLinkSequenceGuard = 2,			// send the last completed transfer again when the SBC repeats it, wait when the SBC is a transfer ahead
+	SbcLinkSequenceGuard = 2,			// send the last completed transfer again when the SBC repeats it
 	SbcLinkExtendedHeader = 4			// sequence numbers with a session status and response codes that tolerate bit errors
 };
 

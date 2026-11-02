@@ -919,7 +919,7 @@ bool DataTransfer::GuardPhase() noexcept
 	return false;
 }
 
-// Deal with the SBC repeating the last completed transfer or being a transfer ahead. Return true if we asked for the headers to be exchanged again
+// Deal with the SBC repeating the last completed transfer. Return true if we asked for the headers to be exchanged again
 bool DataTransfer::GuardSequence() noexcept
 {
 	if (!IsLinkCapabilityActive(SbcLinkSequenceGuard))
@@ -928,8 +928,7 @@ bool DataTransfer::GuardSequence() noexcept
 	}
 
 	// The SBC repeats the transfer we completed last, so it did not complete it. Send that transfer again before the current one
-	const int distance = SequenceDistance(rxHeader.sequenceNumber);
-	if (!resending && lastTxValid && distance == 0)
+	if (!resending && lastTxValid && SequenceDistance(rxHeader.sequenceNumber) == 0)
 	{
 		pendingTxHeader = txHeader;
 		pendingTxPointer = txPointer;
@@ -940,13 +939,6 @@ bool DataTransfer::GuardSequence() noexcept
 		resending = true;
 
 		// Make both sides exchange the headers again
-		ExchangeResponse(SpiTransferResponse::BadHeaderChecksum);
-		return true;
-	}
-
-	// The SBC completed a transfer that we did not. It sends it again once it sees us repeat our part
-	if (distance == 2)
-	{
 		ExchangeResponse(SpiTransferResponse::BadHeaderChecksum);
 		return true;
 	}
@@ -1185,7 +1177,7 @@ TransferState DataTransfer::DoTransfer() noexcept
 		{
 			// (3) Exchanged data
 			Cache::InvalidateAfterDMAReceive(rxBuffer, rxHeader.dataLength);
-			if (DecodeResponse(*reinterpret_cast<uint32_t*>(rxBuffer)) == SpiTransferResponse::BadResponse)
+			if (*reinterpret_cast<uint32_t*>(rxBuffer) == SpiTransferResponse::BadResponse)
 			{
 				RestartTransfer(false);
 				break;
