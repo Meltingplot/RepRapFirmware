@@ -43,6 +43,7 @@ constexpr size_t SBCTaskStackWords = 1400;
 #endif
 
 constexpr uint32_t SbcYieldTimeout = 10;
+constexpr uint32_t SbcBootArmDelay = 10;			// time between DataTransfer::Init driving TfrRdy low and arming the first header (in ms)
 
 static Task<SBCTaskStackWords> *sbcTask;
 
@@ -118,6 +119,11 @@ static void SendUsbInitMessage(SerialCDC *dev) noexcept
 [[noreturn]] void SbcInterface::TaskLoop() noexcept
 {
 	transfer.InitFromTask();
+
+	// DataTransfer::Init has just driven TfrRdy low. A SBC that was waiting for that level before RRF rebooted takes the edge as
+	// the signal for its next exchange. If the first header were armed at once, that exchange could hit it and stall the link
+	// for 500ms or 4s, so give it time to hit the disabled SPI instead (recorded on a Duet 3 MB6HC, 2026-11-02)
+	delay(SbcBootArmDelay);
 	transfer.StartNextTransfer();
 
 	bool busy = false, transferComplete = false, hadTimeout = false, hadSbcTimeout = false, hadReset = false;
