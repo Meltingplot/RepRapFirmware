@@ -870,7 +870,8 @@ uint32_t DataTransfer::EncodeResponse(uint32_t response) const noexcept
 // Get the regular code of a received word, which may be an extended code with bit errors, or the word itself if it is no extended code
 uint32_t DataTransfer::DecodeResponse(uint32_t word) const noexcept
 {
-	if (IsLinkCapabilityActive(SbcLinkExtendedHeader))
+	// While we are not connected, e.g. after a restart, the SBC may still send the extended codes of its previous connection
+	if (IsLinkCapabilityActive(SbcLinkExtendedHeader) || !reprap.GetSbcInterface().IsConnected())
 	{
 		for (const SbcExtendedResponseCode& code : SbcExtendedResponseCodes)
 		{
