@@ -680,7 +680,8 @@ int main(int argc, char **argv)
 			if (!instanceActive) { printf("E no instance\n"); }
 			else if (booting) { printf("E T during the boot\n"); }
 			else if (interruptsOff) { printf("E T while the interrupts are off\n"); }
-			else if (blockedTimeout == TaskBase::TimeoutUnlimited) { printf("E T during an unlimited wait\n"); }
+			// In the boot arm delay, blockedTimeout is still the wait of the previous instance
+			else if (!inDelay && blockedTimeout == TaskBase::TimeoutUnlimited) { printf("E T during an unlimited wait\n"); }
 			else
 			{
 				got.clear();

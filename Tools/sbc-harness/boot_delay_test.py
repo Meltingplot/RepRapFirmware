@@ -61,6 +61,11 @@ def run(path):
     print(path)
     h = Harness(path)
 
+    # T ends the delay of every instance in the process, also after one that waited without limit (usb0 while not connected)
+    for _ in range(2):
+        expect(fields(h.cmd('NEW 0 ff')), state='ExchangingData', pin='0', wait='delay')
+        expect(fields(h.cmd('T')), state='ExchangingHeader', pin='1')
+
     # Boot: Init has driven TfrRdy low, TaskLoop waits in the boot arm delay
     expect(fields(h.cmd('NEW 0 ff')), state='ExchangingData', pin='0', wait='delay', conn='0', resets='0')
 
