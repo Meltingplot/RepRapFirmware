@@ -1,0 +1,2 @@
+# Built with make and awk under WSL, also from a Windows checkout with core.autocrlf
+* text eol=lf
