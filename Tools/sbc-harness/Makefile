@@ -3,7 +3,7 @@
 #
 #   make              build build/sbc-harness-usb1 (MB6HC release: SUPPORTS_SBC_OVER_USB=1) and build/sbc-harness-usb0
 #   make asan         the same with AddressSanitizer and UBSan, in build/asan-*
-#   make check        run the smoke, link capability and boot delay tests against both binaries
+#   make check        run the smoke, link capability, boot delay and restart tests against both binaries
 
 RRF ?= ../..
 SRC := $(RRF)/src
@@ -56,6 +56,7 @@ check: all
 	python3 -I smoke_test.py build/sbc-harness-usb1 build/sbc-harness-usb0
 	python3 -I link_test.py build/sbc-harness-usb1 build/sbc-harness-usb0
 	python3 -I boot_delay_test.py build/sbc-harness-usb1 build/sbc-harness-usb0
+	python3 -I restart_test.py build/sbc-harness-usb1 build/sbc-harness-usb0
 
 clean:
 	rm -rf build gen

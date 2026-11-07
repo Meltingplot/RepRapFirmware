@@ -317,6 +317,14 @@ public:
 	void DisconnectUsb() noexcept;
 };
 
+// SbcInterface as DataTransfer.cpp sees it through reprap.GetSbcInterface(): only the connection state. The members that
+// TaskLoop uses are in harness.cpp
+class HarnessSbcConnection
+{
+public:
+	bool IsConnected() const noexcept;
+};
+
 class RepRap
 {
 public:
@@ -324,8 +332,10 @@ public:
 	bool UsingSbcInterface() const noexcept { return true; }
 	void EmergencyStop() noexcept;
 	Platform& GetPlatform() noexcept { return platform; }
+	HarnessSbcConnection& GetSbcInterface() noexcept { return sbcConnection; }
 private:
 	Platform platform;
+	HarnessSbcConnection sbcConnection;
 };
 extern RepRap reprap;
 

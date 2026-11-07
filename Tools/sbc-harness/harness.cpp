@@ -42,7 +42,9 @@ namespace
 	} counters;
 
 	unsigned int skipTransfer;			// NEW <skip>
-	uint8_t underrunByte;				// NEW <underrun>
+	uint8_t underrunByte;				// NEW <underrun> or RESET <underrun>
+	bool interruptsOff = false;			// D: RRF has disabled its interrupts (SoftwareReset), the DMA runs on
+	bool booting = false;				// RESET: the processor is in reset or boots, until NEW runs DataTransfer::Init
 	std::vector<std::string> got;		// "dsf:N" seen by ExchangeData in the current step
 	bool debugOutput = false;			// -d: RRF's own debugPrintf output to stderr
 	bool traceOutput = false;			// -t: platform messages and harness events to stderr
@@ -211,6 +213,12 @@ namespace
 			}
 		}
 	}
+}
+
+// SbcInterface::IsConnected, as DataTransfer.cpp calls it through reprap.GetSbcInterface()
+bool HarnessSbcConnection::IsConnected() const noexcept
+{
+	return sbc != nullptr && sbc->isConnected;
 }
 
 // Harness version of SbcInterface::ExchangeData: the packet loop has the shape of the real one (bound by PacketsToRead,
@@ -392,6 +400,14 @@ static bool Exchange(const std::vector<uint8_t>& mosi, std::vector<uint8_t>& mis
 		miso[i] = (txActive && i < tx.ubc) ? AddressToPointer(tx.sa)[i] : underrunByte;
 	}
 
+	// With RRF's interrupts off the NSS interrupt does not run. The harness ends both DMA channels, so a further exchange
+	// moves nothing (on the board a shorter exchange would leave the rest of the DMA armed; RESET follows anyway)
+	if (interruptsOff)
+	{
+		hw.channels[DmacChanSbcRx].enabled = hw.channels[DmacChanSbcTx].enabled = false;
+		return false;
+	}
+
 	if (hw.spiEnabled && (hw.spiImr & SPI_IER_NSSR) != 0 && hw.nvicEnabled)
 	{
 		uint32_t status = SPI_SR_NSSR;
@@ -485,6 +501,7 @@ namespace
 		counters = Counters();
 		notifyCount = 0;
 		inDelay = false;
+		interruptsOff = booting = false;
 		virtualTime = 0;
 		got.clear();
 		skipTransfer = skip;
@@ -507,6 +524,22 @@ namespace
 		instanceActive = true;
 	}
 
+	// RESET: the processor resets. The TaskLoop coroutine is abandoned and SPI, XDMAC and NVIC are in their reset state, so an
+	// exchange reads the underrun byte and reaches nothing. TfrRdy keeps its level until NEW runs DataTransfer::Init
+	void ResetInstance(uint8_t underrun) noexcept
+	{
+		const bool tfrRdy = hw.tfrRdy;
+		memset(&hw, 0, sizeof(hw));
+		hw.tfrRdy = tfrRdy;
+		HarnessSpi.SPI_SR.value = 0;
+		notifyCount = 0;
+		inDelay = false;
+		interruptsOff = false;
+		booting = true;
+		got.clear();
+		underrunByte = underrun;
+	}
+
 	const char *WaitName(uint32_t timeout) noexcept
 	{
 		static char buf[24];
@@ -519,6 +552,14 @@ namespace
 
 	std::string Status() noexcept
 	{
+		char buf[256];
+		if (booting)
+		{
+			// Nothing of RRF runs and its RAM is cleared by the boot, only the pin keeps its level
+			snprintf(buf, sizeof(buf), "state=Boot pin=%d conn=0 disc=0 resets=0 wait=boot got=-", (int)hw.tfrRdy);
+			return buf;
+		}
+
 		const unsigned int s = (unsigned int)sbc->transfer.state;
 		std::string gotList;
 		for (const std::string& g : got)
@@ -526,7 +567,6 @@ namespace
 			if (!gotList.empty()) { gotList += ','; }
 			gotList += g;
 		}
-		char buf[256];
 		snprintf(buf, sizeof(buf), "state=%s pin=%d conn=%d disc=%u resets=%u wait=%s got=%s",
 				 (s < ARRAY_SIZE(StateNames)) ? StateNames[s] : "?", (int)hw.tfrRdy, (int)sbc->isConnected,
 				 counters.emergencyStops, counters.resets, inDelay ? "delay" : WaitName(blockedTimeout), gotList.empty() ? "-" : gotList.c_str());
@@ -577,7 +617,7 @@ int main(int argc, char **argv)
 		else if (a == "-b") { delayBlocks = true; }
 		else
 		{
-			fprintf(stderr, "usage: %s [-d] [-t] [-n] [-b]\n  -d  RRF debug output to stderr\n  -t  harness trace to stderr\n  -n  print an N status line after NEW\n  -b  delay() blocks until T\n", argv[0]);
+			fprintf(stderr, "usage: %s [-d] [-t] [-n] [-b]\n  -d  RRF debug output to stderr\n  -t  harness trace to stderr\n  -n  print an N status line after NEW and RESET\n  -b  delay() blocks until T\n", argv[0]);
 			return 2;
 		}
 	}
@@ -616,14 +656,18 @@ int main(int argc, char **argv)
 				if (ackNew) { printf("N %s\n", Status().c_str()); }
 			}
 		}
-		else if (cmd == "X")
+		else if (cmd == "X" || cmd == "D")
 		{
 			std::vector<uint8_t> mosi, miso;
 			if (!instanceActive) { printf("E no instance\n"); }
-			else if (tok.size() > 2 || !ParseHex((tok.size() == 2) ? tok[1] : "-", mosi)) { printf("E bad X\n"); }
+			else if (tok.size() > 2 || !ParseHex((tok.size() == 2) ? tok[1] : "-", mosi)) { printf("E bad %s\n", cmd.c_str()); }
 			else
 			{
 				got.clear();
+				if (cmd == "D" && !booting)
+				{
+					interruptsOff = true;		// until RESET, so every further X behaves like D
+				}
 				if (Exchange(mosi, miso) && !inDelay)
 				{
 					SwitchToTask();				// TakeIndexed returns true, TaskLoop runs until its next wait
@@ -634,6 +678,8 @@ int main(int argc, char **argv)
 		else if (cmd == "T")
 		{
 			if (!instanceActive) { printf("E no instance\n"); }
+			else if (booting) { printf("E T during the boot\n"); }
+			else if (interruptsOff) { printf("E T while the interrupts are off\n"); }
 			else if (blockedTimeout == TaskBase::TimeoutUnlimited) { printf("E T during an unlimited wait\n"); }
 			else
 			{
@@ -642,9 +688,20 @@ int main(int argc, char **argv)
 				printf("T %s\n", Status().c_str());
 			}
 		}
+		else if (cmd == "RESET")
+		{
+			std::vector<uint8_t> u;
+			if (!instanceActive) { printf("E no instance\n"); }
+			else if (tok.size() != 2 || !ParseHex(tok[1].substr(tok[1].rfind('x') + 1), u) || u.size() != 1) { printf("E bad RESET\n"); }
+			else
+			{
+				ResetInstance(u[0]);
+				if (ackNew) { printf("N %s\n", Status().c_str()); }
+			}
+		}
 		else if (cmd == "END")
 		{
-			instanceActive = false;
+			instanceActive = interruptsOff = booting = false;
 		}
 		else
 		{
