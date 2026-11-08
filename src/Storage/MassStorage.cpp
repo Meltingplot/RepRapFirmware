@@ -819,6 +819,28 @@ static bool DeleteContents(const StringRef& filePath, ErrorMessageMode errorMess
 // Note, we use the filePath string to build up nested directories if we are doing a recursive delete
 bool MassStorage::Delete(const StringRef& filePath, ErrorMessageMode errorMessageMode, bool recursive) noexcept
 {
+	if (recursive)
+	{
+		// Check for trying to delete root. This comes before the SBC, so that the SBC refuses the same paths as the local SD card
+		const char *_ecv_array fp = filePath.c_str();
+		if (isDigit(*fp) && fp[1] == ':')
+		{
+			fp += 2;
+		}
+		while (*fp == '/')
+		{
+			++fp;
+		}
+		if (*fp == 0)
+		{
+			if (errorMessageMode != ErrorMessageMode::noMessage)
+			{
+				reprap.GetPlatform().Message(ErrorMessage, "Delete root folder is not allowed");
+			}
+			return false;
+		}
+	}
+
 # if HAS_SBC_INTERFACE
 	if (reprap.UsingSbcInterface())
 	{
@@ -838,25 +860,6 @@ bool MassStorage::Delete(const StringRef& filePath, ErrorMessageMode errorMessag
 # if HAS_MASS_STORAGE
 	if (recursive)
 	{
-		// Check for trying to delete root
-		const char *_ecv_array fp = filePath.c_str();
-		if (isDigit(*fp) && fp[1] == ':')
-		{
-			fp += 2;
-		}
-		while (*fp == '/')
-		{
-			++fp;
-		}
-		if (*fp == 0)
-		{
-			if (errorMessageMode != ErrorMessageMode::noMessage)
-			{
-				reprap.GetPlatform().Message(ErrorMessage, "Delete root folder is not allowed");
-			}
-			return false;
-		}
-
 		MutexLocker locker(fsMutex);
 		if (!DeleteContents(filePath, errorMessageMode))
 		{
