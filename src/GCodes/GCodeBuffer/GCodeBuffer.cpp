@@ -116,7 +116,7 @@ GCodeBuffer::GCodeBuffer(GCodeChannel::RawType channel, GCodeInput *_ecv_from no
 	  disabled(false), timerRunning(false), motionCommanded(false), hadExplicitLineNumber(false), buffer(nullptr), bufferLength(0)
 
 #if HAS_SBC_INTERFACE
-	  , isWaitingForMacro(false), isBinaryBuffer(false), invalidated(false)
+	  , isWaitingForMacro(false), isBinaryBuffer(false), invalidated(false), invalidationPending(false)
 #endif
 {
 	mutex.Create(((GCodeChannel)channel).ToString());
@@ -142,7 +142,7 @@ void GCodeBuffer::Reset() noexcept
 	macroFileClosed = false;
 	isWaitingForMacro = false;
 	macroJustStarted = macroFileError = macroFileEmpty = false;
-	abortFile = abortAllFiles = sendToSbc = messagePromptPending = messageAcknowledged = false;
+	abortFile = abortAllFiles = sendToSbc = messagePromptPending = messageAcknowledged = codeReplySurplus = false;
 	machineState->lastCodeFromSbc = machineState->macroStartedByCode = false;
 #endif
 	cancelWait = false;
@@ -320,6 +320,7 @@ void GCodeBuffer::PutBinary(const uint32_t *data, size_t len) noexcept
 	machineState->lastCodeFromSbc = true;
 	isBinaryBuffer = true;
 	macroJustStarted = false;
+	codeReplySurplus = false;		// the code that the SBC dropped has finished, or this code belongs to a macro that the dropped code has started since
 	binaryParser.Put(data, len);
 }
 
