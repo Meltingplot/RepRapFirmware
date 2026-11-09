@@ -242,6 +242,11 @@ public:
 
 	bool IsInvalidated() const noexcept { return invalidated; }				// Indicates if the channel is invalidated
 	void Invalidate(bool i = true) noexcept { invalidated = i; }			// Invalidate this channel (or not)
+	bool IsInvalidationPending() const noexcept { return invalidationPending; }	// Is the SBC resending an InvalidateChannel request that could not be completed?
+	void SetInvalidationPending(bool p) noexcept { invalidationPending = p; }	// Called when an InvalidateChannel request could (not) be completed
+
+	bool IsCodeReplySurplus() const noexcept { return codeReplySurplus; }	// Has the SBC dropped the code being executed, so that its replies are surplus?
+	void SetCodeReplySurplus(bool s) noexcept { codeReplySurplus = s; }		// Called when the SBC has dropped the code being executed (or when it has finished)
 
 	bool IsSendRequested() const noexcept { return sendToSbc; }				// Is this code supposed to be sent to the SBC
 	void SendToSbc() noexcept { sendToSbc = true; }							// Send this code to the attached SBC
@@ -397,6 +402,7 @@ private:
 	// Accessed only when the GB mutex is acquired
 	String<MaxFilenameLength> requestedMacroFile;
 	bool isBinaryBuffer;
+	bool codeReplySurplus;			// The SBC has dropped the code being executed. Also set by the SBC task while the main task waits for a macro
 
 	uint8_t
 		macroJustStarted : 1,		// Whether the GB has just started a macro file
@@ -413,6 +419,7 @@ private:
 
 	// Accessed only by the SBC task
 	bool invalidated;				// Set to true if the GB content is not valid and about to be cleared
+	bool invalidationPending;		// Set to true if InvalidateChannel could not get the GB mutex, so the next one is a resent copy
 #endif
 };
 

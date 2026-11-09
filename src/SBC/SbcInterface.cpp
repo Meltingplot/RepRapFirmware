@@ -877,8 +877,17 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
+				// DSF drops every code it has sent on this channel, so the replies of a code from the SBC that is still being executed are surplus.
+				// Only the first copy of this request flags that code, a resent copy would flag a code that has started since
+				const bool firstCopy = !gb->IsInvalidationPending();
 				if (gb->IsWaitingForMacro())
 				{
+					// Flag the code that requested the macro before the main task wakes up and reports the macro as not found
+					if (firstCopy && gb->IsMacroStartedByCode())
+					{
+						gb->SetCodeReplySurplus(true);
+					}
+
 					// A request that has not gone out yet is void as well, as in GCodeBuffer::Reset. Clear it before the main task
 					// wakes up, so that a new request it makes after waking up stays
 					gb->MacroRequestSent();
@@ -894,9 +903,17 @@ void SbcInterface::ExchangeData() noexcept
 					gb->FileAbortSent();	// don't notify the SBC
 					gb->MacroFileClosedSent();	// DSF has dropped all its macro files, so a closal that has not gone out yet is void as well, as in GCodeBuffer::Reset
 					InvalidateBufferedCodes(channel);
+
+					// A code that is still being executed now replies on the level that AbortFile has left
+					if (firstCopy && gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
+					{
+						gb->SetCodeReplySurplus(true);
+					}
+					gb->SetInvalidationPending(false);
 				}
 				else
 				{
+					gb->SetInvalidationPending(true);
 					packetAcknowledged = false;
 				}
 			}

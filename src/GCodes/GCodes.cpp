@@ -3700,10 +3700,12 @@ bool GCodes::DoFileMacro(GCodeBuffer& gb, const char *_ecv_array fileName, bool 
 		{
 			if (reportMissing)
 			{
-				MessageType mt = (gb.LatestMachineState().lastCodeFromSbc && codeRunning != SystemHelperMacroCode)
-									? (MessageType)(gb.GetResponseMessageType() | WarningMessageFlag | PushFlag)
-										: WarningMessage;
-				platform.MessageF(mt, "Macro file %s not found\n", fileName);
+				const bool isCodeReply = gb.LatestMachineState().lastCodeFromSbc && codeRunning != SystemHelperMacroCode;
+				if (!isCodeReply || !gb.IsCodeReplySurplus())		// a part of the reply of a code that the SBC has dropped is surplus
+				{
+					platform.MessageF((isCodeReply) ? (MessageType)(gb.GetResponseMessageType() | WarningMessageFlag | PushFlag) : WarningMessage,
+										"Macro file %s not found\n", fileName);
+				}
 				return true;
 			}
 
@@ -4443,6 +4445,18 @@ void GCodes::HandleReplyPreserveResult(GCodeBuffer& gb, GCodeResult rslt, const 
 	// Deal with replies to the SBC
 	if (gb.LatestMachineState().lastCodeFromSbc)
 	{
+		const bool isPushMessage = rslt == GCodeResult::notFinished || gb.HasJustStartedMacro() ||
+									(gb.LatestMachineState().waitingForAcknowledgement && gb.IsMessagePromptPending());
+		if (gb.IsCodeReplySurplus())
+		{
+			// The SBC has dropped this code when it invalidated the channel, so this reply is surplus. Otherwise it would complete the next code
+			if (!isPushMessage)
+			{
+				gb.SetCodeReplySurplus(false);		// this was the final reply
+			}
+			return;
+		}
+
 		if (reply[0] == 0 && gb.IsAbortRequested() && !gb.IsAbortAllRequested())
 		{
 			// The SBC resolves the code that requested a single file abort itself, so this reply is surplus. It may also overtake
@@ -4451,8 +4465,7 @@ void GCodes::HandleReplyPreserveResult(GCodeBuffer& gb, GCodeResult rslt, const 
 		}
 
 		MessageType type = gb.GetResponseMessageType();
-		if (rslt == GCodeResult::notFinished || gb.HasJustStartedMacro() ||
-			(gb.LatestMachineState().waitingForAcknowledgement && gb.IsMessagePromptPending()))
+		if (isPushMessage)
 		{
 			if (reply[0] == 0)
 			{
@@ -4568,7 +4581,16 @@ void GCodes::HandleReply(GCodeBuffer& gb, OutputBuffer *_ecv_null reply) noexcep
 	// Deal with replies to the SBC
 	if (gb.LatestMachineState().lastCodeFromSbc)
 	{
-		platform.Message(gb.GetResponseMessageType(), reply);
+		if (gb.IsCodeReplySurplus())
+		{
+			// The SBC has dropped this code when it invalidated the channel, so this final reply is surplus
+			gb.SetCodeReplySurplus(false);
+			OutputBuffer::ReleaseAll(reply);
+		}
+		else
+		{
+			platform.Message(gb.GetResponseMessageType(), reply);
+		}
 		return;
 	}
 #endif
