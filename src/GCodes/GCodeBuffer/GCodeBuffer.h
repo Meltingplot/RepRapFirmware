@@ -242,8 +242,8 @@ public:
 
 	bool IsInvalidated() const noexcept { return invalidated; }				// Indicates if the channel is invalidated
 	void Invalidate(bool i = true) noexcept { invalidated = i; }			// Invalidate this channel (or not)
-	bool IsInvalidationPending() const noexcept { return invalidationPending; }	// Is the SBC resending an InvalidateChannel request that could not be completed?
-	void SetInvalidationPending(bool p) noexcept { invalidationPending = p; }	// Called when an InvalidateChannel request could (not) be completed
+	bool IsAbortRecorded() const noexcept { return abortRecorded; }			// Has the SBC task recorded an abort of this channel that the main task has yet to apply?
+	void SetAbortRecorded(bool r) noexcept { abortRecorded = r; }			// Called when an abort of this channel has been recorded (or applied)
 
 	bool IsCodeReplySurplus() const noexcept { return codeReplySurplus; }	// Has the SBC dropped the code being executed, so that its replies are surplus?
 	void SetCodeReplySurplus(bool s) noexcept { codeReplySurplus = s; }		// Called when the SBC has dropped the code being executed (or when it has finished)
@@ -398,6 +398,7 @@ private:
 	BinarySemaphore macroSemaphore;
 	volatile bool isWaitingForMacro;	// Is this GB waiting in DoFileMacro?
 	volatile bool macroFileClosed;		// Last macro file has been closed in RRF, tell the SBC
+	volatile bool abortRecorded;		// The SBC has aborted this channel. Set by the SBC task, cleared by the main task under the GB mutex when it applies the abort
 
 	// Accessed only when the GB mutex is acquired
 	String<MaxFilenameLength> requestedMacroFile;
@@ -417,9 +418,8 @@ private:
 	bool messagePromptPending;		// Has the SBC been notified about a message waiting for acknowledgement?
 	bool messageAcknowledged;		// Last message has been acknowledged
 
-	// Accessed only by the SBC task
+	// Accessed only by the SBC task, except that the main task sets it for a pause and clears it when it applies an abort of the channel
 	bool invalidated;				// Set to true if the GB content is not valid and about to be cleared
-	bool invalidationPending;		// Set to true if InvalidateChannel could not get the GB mutex, so the next one is a resent copy
 #endif
 };
 

@@ -56,6 +56,7 @@ public:
 
 	bool IsPrintAborted() noexcept;												// Check if the current print has been aborted
 	bool FillBuffer(GCodeBuffer &gb) noexcept;									// Try to fill up the G-code buffer with the next available G-code
+	void ApplyRecordedAborts() noexcept;										// Called by the main task to apply the channel aborts that the SBC task has recorded
 
 	void SetPauseReason(FilePosition position, FilePosition position2, PrintPausedReason reason) noexcept;	// Set parameters for the next pause request
 	void SetEmergencyPauseReason(FilePosition position, FilePosition position2, PrintPausedReason reason) noexcept;	// Set parameters for the next emergency pause request
@@ -97,6 +98,9 @@ private:
 	FilePosition pauseFilePosition, pauseFilePosition2;
 	PrintPausedReason pauseReason;
 	bool reportPause, reportPauseWritten, printAborted;
+
+	uint32_t whenAbortRecorded;											// when the SBC task recorded the last channel abort
+	uint32_t maxAbortApplyDelay;										// longest time from the record of a channel abort to its apply by the main task
 
 	char *codeBuffer;
 	volatile uint16_t rxPointer, txPointer, txEnd;
@@ -163,6 +167,7 @@ private:
 	void WriteQueuedCodeReplies() noexcept;									// Write as many queued code replies and generic messages as the current transfer can hold
 	[[noreturn]] void ReceiveAndStartIap(const char *iapChunk, size_t length) noexcept;	// Receive and start the IAP binary
 	void InvalidateResources() noexcept;									// Invalidate local resources on connection errors
+	void InvalidateChannel(GCodeBuffer& gb) noexcept;						// End everything of a channel that the SBC has dropped
 	void DefragmentBufferedCodes() noexcept;								// Attempt to defragment the code buffer ring to avoid stalls
 	bool DefragmentCodeBlock(uint16_t start, volatile uint16_t &end) noexcept;	// Defragment a specific code buffer region returning true if anything was defragmented
 	void InvalidateBufferedCodes(GCodeChannel channel) noexcept;           	// Invalidate every buffered G-code of the corresponding channel from the buffer ring
