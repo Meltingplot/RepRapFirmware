@@ -174,6 +174,7 @@ private:
 	void ExchangeData() noexcept;											// Exchange data between RRF and the SBC
 	void WriteQueuedCodeReplies() noexcept;									// Write as many queued code replies and generic messages as the current transfer can hold
 	[[noreturn]] void ReceiveAndStartIap(const char *iapChunk, size_t length) noexcept;	// Receive and start the IAP binary
+	void EndConnection(bool waitForMainTask) noexcept;						// End the work of a connection that has been lost or replaced
 	void InvalidateResources() noexcept;									// Invalidate local resources on connection errors
 	void RecordChannelAbort(GCodeBuffer& gb) noexcept;						// Record the abort of a channel for the main task
 	void InvalidateChannel(GCodeBuffer& gb) noexcept;						// End everything of a channel that the SBC has dropped

@@ -195,7 +195,6 @@ static void SendUsbInitMessage(SerialCDC *dev) noexcept
 		if (isConnected && (hadReset || hadTimeout))
 		{
 			isConnected = false;
-			numDisconnects++;
 			if (hadTimeout)
 			{
 				numTimeouts++;
@@ -227,16 +226,7 @@ static void SendUsbInitMessage(SerialCDC *dev) noexcept
 				reprap.GetPlatform().Message(NetworkInfoMessage, "Lost connection to SBC (connection reset)\n");
 			}
 
-			// Whatever connects next, possibly a restarted DCS, cannot know the state left behind, so stop until the controller is reset
-			reprap.EmergencyStop();
-
-			// Invalidate local resources
-			InvalidateResources();
-			if (hadReset)
-			{
-				// Let the main task invalidate resources before processing new data
-				TaskBase::TakeIndexed(NotifyIndices::SbcInterface, SbcYieldTimeout);
-			}
+			EndConnection(hadReset);
 
 #if SUPPORTS_SBC_OVER_USB
 			// On USB disconnect, exit direct mode and reinit the USB GCode device
@@ -290,6 +280,23 @@ static void SendUsbInitMessage(SerialCDC *dev) noexcept
 	}
 }
 
+// End the work of a connection that has been lost or that the SBC has replaced by a new one. The transport is left to the caller
+void SbcInterface::EndConnection(bool waitForMainTask) noexcept
+{
+	numDisconnects++;
+
+	// Whatever connects next, possibly a restarted DCS, cannot know the state left behind, so stop until the controller is reset
+	reprap.EmergencyStop();
+
+	// Invalidate local resources
+	InvalidateResources();
+	if (waitForMainTask)
+	{
+		// Let the main task invalidate resources before processing new data
+		TaskBase::TakeIndexed(NotifyIndices::SbcInterface, SbcYieldTimeout);
+	}
+}
+
 void SbcInterface::WriteQueuedCodeReplies() noexcept
 {
 	if (!gcodeReply.IsEmpty())
@@ -324,14 +331,20 @@ void SbcInterface::ExchangeData() noexcept
 			break;
 		}
 
-		// The SBC has sent a packet in this connection, so what belongs to a channel may be written from now on (see the end of this function)
-		sbcPacketRead = true;
-
-		// The first packet that DSF writes after it started or ended a connection, whatever its type, makes every channel start at epoch 0.
-		// A copy that DSF sends again does not carry the marker, so this must happen before the packet can be refused or dropped. The epochs of
-		// the codes on the stacks belong to the connection before, so the main task voids them
+		// The first packet that DSF writes after it started or ended a connection carries the first marker, whatever its type. A copy that DSF
+		// sends again does not carry it, so this must happen before the packet can be refused or dropped
 		if ((packet->resendPacketId & ChannelEpochFirstMarker) != 0)
 		{
+			if (sbcPacketRead)
+			{
+				// The SBC has ended the connection that RRF still runs and started a new one, before RRF noticed (SbcConnectionTimeout). RRF still
+				// holds the codes, macros and state of the old connection, so end it as a lost one. The transport stays, because it carries the
+				// new connection, and this packet is the first one of it
+				reprap.GetPlatform().Message(NetworkInfoMessage, "Lost connection to SBC (the SBC has started a new connection)\n");
+				EndConnection(true);
+			}
+
+			// Every channel starts at epoch 0
 			for (size_t c = 0; c < NumGCodeChannels; c++)
 			{
 				GCodeBuffer * const channelGb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(c));
@@ -342,6 +355,9 @@ void SbcInterface::ExchangeData() noexcept
 			}
 			reprap.GetGCodes().ChannelAbortRecorded();
 		}
+
+		// The SBC has sent a packet in this connection, so what belongs to a channel may be written from now on (see the end of this function)
+		sbcPacketRead = true;
 
 		if (packet->request >= (uint16_t)SbcRequest::InvalidRequest && packet->request != (uint16_t)SbcRequest::ActivateLinkCapabilities)
 		{

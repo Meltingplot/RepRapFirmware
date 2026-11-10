@@ -86,7 +86,7 @@ Compiled unchanged from RRF:
 
 Real text, extracted at build time by `extract-taskloop.awk`, with `#line` directives that point at the real lines:
 - `SbcYieldTimeout` and `SbcBootArmDelay` from `SbcInterface.cpp`.
-- `SbcInterface::TaskLoop` from the same file.
+- `SbcInterface::TaskLoop` and `SbcInterface::EndConnection`, which TaskLoop calls when the connection is lost, from the same file.
 
 Harness code, not RRF:
 

@@ -115,6 +115,7 @@ public:
 #endif
 
 	void ExchangeData() noexcept;
+	void EndConnection(bool waitForMainTask) noexcept;
 	void InvalidateResources() noexcept;
 };
 
