@@ -1195,6 +1195,7 @@ void GCodeBuffer::AbortFile(bool abortAll) noexcept
 		{
 			abortFile = true;
 			abortAllFiles = abortAll;
+			macroJustStarted = false;		// a macro that has just been started is closed too, so the next reply of the code below it is not a push message
 		}
 #endif
 	}
