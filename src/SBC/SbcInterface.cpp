@@ -535,9 +535,19 @@ void SbcInterface::ExchangeData() noexcept
 			{
 				// Just mark the print files as finished
 				GCodeBuffer * const fileGb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel::File);
-				MutexLocker fileLocker(fileGb->mutex, SbcYieldTimeout);
 #if SUPPORT_ASYNC_MOVES
 				GCodeBuffer * const file2Gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel::File2);
+				if (fileGb->IsAbortRecorded() || file2Gb->IsAbortRecorded())
+#else
+				if (fileGb->IsAbortRecorded())
+#endif
+				{
+					packetAcknowledged = false;			// keep off the GBs until the main task has applied the abort of their channel
+					break;
+				}
+
+				MutexLocker fileLocker(fileGb->mutex, SbcYieldTimeout);
+#if SUPPORT_ASYNC_MOVES
 				MutexLocker file2Locker(file2Gb->mutex, SbcYieldTimeout);
 				if (fileLocker.IsAcquired() && file2Locker.IsAcquired())
 #else
