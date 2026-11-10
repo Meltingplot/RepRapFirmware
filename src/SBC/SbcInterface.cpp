@@ -1930,8 +1930,8 @@ void SbcInterface::RecordChannelAbort(GCodeBuffer& gb) noexcept
 }
 
 // End everything of a channel that the SBC has dropped, so that nothing of it is reported to the SBC afterwards. Called by the main task when it
-// applies a recorded abort, with the GB mutex held and after the record has ended a macro wait. The state machine is cleaned up and the files are
-// aborted as in AbortPrint, but a code that is still being executed at the base level is neither stopped nor reset and goes on as in standalone RRF
+// applies a recorded abort, with the GB mutex held and after the record has ended a macro wait. A code that is still being executed at the base
+// level is neither stopped nor reset, and its state machine goes on with its next step
 void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 {
 	gb.MacroRequestSent();											// a macro request that has not gone out yet is void
@@ -1943,7 +1943,6 @@ void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 	// Note that we do not call StopPrint here or set any other variables; DSF already does that
 	GCodes& gcodes = reprap.GetGCodes();
 	gcodes.PauseSequenceAborted(gb);								// don't get stuck in "pausing" if this abort tears down the pause sequence
-	gcodes.AbortStateMachine(gb);									// clean up state machine side effects at all stack levels before unwinding
 	gb.AbortFile(true);
 	gb.FileAbortSent();												// DSF has aborted its files itself
 	gb.MacroFileClosedSent();										// and has dropped its macro files, so a closal that has not gone out yet is void
