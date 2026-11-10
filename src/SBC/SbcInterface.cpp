@@ -1608,29 +1608,14 @@ void SbcInterface::ExchangeData() noexcept
 		}
 	}
 
-	// Nothing that belongs to a channel is written before the SBC task has read a packet of the SBC in this connection. So the first requests of
-	// a channel, e.g. that of config.g, go out once it is known whether the SBC tags, with the epoch of its first marker if it does. They are held,
-	// not dropped
-	if (!sbcPacketRead)
-	{
-		return;
-	}
-
-	// Deal with code channel requests
+	// Nothing of a channel whose abort is recorded is sent before the main task has applied it, because it belongs to the work that DSF has dropped
+	// and the apply voids it. A macro wait that the main task began after the record ends here with an error, as the record ends one. This comes
+	// before the hold below, so that such a wait ends in the next exchange, also before the SBC's first packet of a new connection
 	bool fileAbortRecorded = false;
 	for (size_t i = 0; i < NumGCodeChannels; i++)
 	{
-		const GCodeChannel channel(i);
-		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(channel);
-		if (gb == nullptr)
-		{
-			// Skip GBs that are not available due to the build configuration
-			continue;
-		}
-
-		// Nothing of a channel whose abort is recorded is sent before the main task has applied it, because it belongs to the work that DSF
-		// has dropped and the apply voids it. A macro wait that the main task began after the record ends here with an error, as the record ends one
-		if (gb->IsAbortRecorded())
+		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(i));
+		if (gb != nullptr && gb->IsAbortRecorded())
 		{
 			if (gb->IsWaitingForMacro())
 			{
@@ -1641,6 +1626,25 @@ void SbcInterface::ExchangeData() noexcept
 			{
 				fileAbortRecorded = true;
 			}
+		}
+	}
+
+	// Nothing that belongs to a channel is written before the SBC task has read a packet of the SBC in this connection. So the first requests of
+	// a channel, e.g. that of config.g, go out once it is known whether the SBC tags, with the epoch of its first marker if it does. They are held,
+	// not dropped
+	if (!sbcPacketRead)
+	{
+		return;
+	}
+
+	// Deal with code channel requests
+	for (size_t i = 0; i < NumGCodeChannels; i++)
+	{
+		const GCodeChannel channel(i);
+		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(channel);
+		if (gb == nullptr || gb->IsAbortRecorded())
+		{
+			// Skip GBs that are not available due to the build configuration, and those whose abort is recorded (see above)
 			continue;
 		}
 
