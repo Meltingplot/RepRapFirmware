@@ -980,11 +980,8 @@ void SbcInterface::ExchangeData() noexcept
 				}
 				gb->SetAbortGate(false);
 
-				// The main task may be in the middle of changing this GB, so only record the abort here and let the main task apply it at the start
-				// of its next spin (ApplyRecordedAborts). So this request is never refused, and nothing of the channel is sent to DSF until then.
-				// DSF has dropped every code it has sent on this channel. The codes it sends from now on are kept, even if a macro request invalidated the GB
+				// DSF has dropped every code it has sent on this channel
 				InvalidateBufferedCodes(channel);
-				gb->Invalidate(false);
 
 				// The replies of a code from the SBC that is still being executed are surplus. Flag a code that requested a macro before the main task
 				// wakes up and reports the macro as not found, unless its replies carry its epoch. The main task waits, so the stack does not change
@@ -992,18 +989,7 @@ void SbcInterface::ExchangeData() noexcept
 				{
 					gb->MarkCodeReplySurplus();
 				}
-
-				gb->SetAbortRecorded(true);
-				whenAbortRecorded = millis();
-				reprap.GetGCodes().ChannelAbortRecorded();
-
-				// End a macro wait with an error, so that the main task gets to the start of its next spin. A request that has not gone out yet
-				// is void as well, as in GCodeBuffer::Reset
-				if (gb->IsWaitingForMacro())
-				{
-					gb->MacroRequestSent();
-					gb->ResolveMacroRequest(true, false);
-				}
+				RecordChannelAbort(*gb);
 			}
 			else
 			{
@@ -1890,29 +1876,19 @@ void SbcInterface::InvalidateResources() noexcept
 		gcodeReply.ReleaseAll();
 	}
 
-	// Close all open G-code files
+	// End the work of every channel. Only the main task changes the stack of a GB, so the abort of every channel is recorded here and the main task
+	// applies it at the start of its next spin, as it applies InvalidateChannel. There it runs after the emergency stop that the caller has requested,
+	// which runs AbortPrint for every GB. The epoch of each channel is unknown until the SBC tags a packet of the channel again, and the epochs of
+	// the codes on the stacks are voided
 	for (size_t i = 0; i < NumGCodeChannels; i++)
 	{
 		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(i));
-		if (gb == nullptr)
+		if (gb != nullptr)											// skip GBs that are not available due to the build configuration
 		{
-			// Skip GBs that are not available due to the build configuration
-			continue;
+			gb->ResetChannelEpoch(false);
+			RecordChannelAbort(*gb);
 		}
-
-		if (gb->IsWaitingForMacro())
-		{
-			gb->ResolveMacroRequest(true, false);
-		}
-
-		// Only under the mutex, because the main task may be spinning this channel. It finishes a code that waited for a macro before it releases it
-		MutexLocker locker(gb->mutex);
-		InvalidateChannel(*gb);
-		gb->SetAbortRecorded(false);
-		gb->SetCodeReplySurplus(false);
-		gb->ResetChannelEpoch(false);								// the epoch is unknown until the SBC tags a packet of this channel again
 	}
-	reprap.GetGCodes().ChannelAbortRecorded();						// so that the main task voids the epochs of the codes on the stacks
 
 	// Abort the print (if applicable)
 	printAborted = true;
@@ -1921,9 +1897,29 @@ void SbcInterface::InvalidateResources() noexcept
 	reprap.GetHeat().SwitchOffAll(true);
 }
 
-// End everything of a channel that the SBC has dropped, so that nothing of it is reported to the SBC afterwards: when the SBC aborts the
-// channel (InvalidateChannel, applied by the main task) and for every channel when the connection is lost (InvalidateResources).
-// The caller holds the GB mutex and has ended a macro wait. A code that is still being executed is neither stopped nor reset
+// Record the abort of a channel: when the SBC aborts the channel (InvalidateChannel) and for every channel when the connection is lost
+// (InvalidateResources). The main task may be in the middle of changing the GB, so it applies the abort at the start of its next spin
+// (ApplyRecordedAborts). So the abort is never refused, and nothing of the channel is sent to the SBC until then. The codes that the SBC sends
+// from now on are kept, even if a macro request invalidated the GB
+void SbcInterface::RecordChannelAbort(GCodeBuffer& gb) noexcept
+{
+	gb.Invalidate(false);
+	gb.SetAbortRecorded(true);
+	whenAbortRecorded = millis();
+	reprap.GetGCodes().ChannelAbortRecorded();
+
+	// End a macro wait with an error, so that the main task gets to the start of its next spin. A request that has not gone out yet is void
+	// as well, as in GCodeBuffer::Reset
+	if (gb.IsWaitingForMacro())
+	{
+		gb.MacroRequestSent();
+		gb.ResolveMacroRequest(true, false);
+	}
+}
+
+// End everything of a channel that the SBC has dropped, so that nothing of it is reported to the SBC afterwards. Called by the main task when it
+// applies a recorded abort, with the GB mutex held and after the record has ended a macro wait. The state machine is cleaned up and the files are
+// aborted as in AbortPrint, but a code that is still being executed at the base level is neither stopped nor reset and goes on as in standalone RRF
 void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 {
 	gb.MacroRequestSent();											// a macro request that has not gone out yet is void
@@ -1933,7 +1929,9 @@ void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 	}
 
 	// Note that we do not call StopPrint here or set any other variables; DSF already does that
-	reprap.GetGCodes().PauseSequenceAborted(gb);					// don't get stuck in "pausing" if this abort tears down the pause sequence
+	GCodes& gcodes = reprap.GetGCodes();
+	gcodes.PauseSequenceAborted(gb);								// don't get stuck in "pausing" if this abort tears down the pause sequence
+	gcodes.AbortStateMachine(gb);									// clean up state machine side effects at all stack levels before unwinding
 	gb.AbortFile(true);
 	gb.FileAbortSent();												// DSF has aborted its files itself
 	gb.MacroFileClosedSent();										// and has dropped its macro files, so a closal that has not gone out yet is void
@@ -1952,7 +1950,7 @@ void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 	// Release the locks of an idle GB. Those of a code that is still being executed stay until it has finished, e.g. G28 still needs its axes
 	if (gb.IsCompletelyIdle())
 	{
-		reprap.GetGCodes().UnlockAll(gb);
+		gcodes.UnlockAll(gb);
 	}
 }
 
@@ -2002,9 +2000,13 @@ void SbcInterface::ApplyRecordedAborts() noexcept
 			{
 				InvalidateChannel(*gb);
 
-				// A code from the SBC that is still being executed now replies on the level that AbortFile has left, but DSF has dropped it. Its replies
-				// are surplus unless they carry its epoch
-				if (gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
+				// A code from the SBC that is still being executed now replies on the level that AbortFile has left. If the connection has been lost,
+				// the SBC of the next one has not dropped that code. Otherwise DSF has, so its replies are surplus unless they carry its epoch
+				if (gb->IsConnectionEndRecorded())
+				{
+					gb->SetCodeReplySurplus(false);
+				}
+				else if (gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
 				{
 					gb->MarkCodeReplySurplus();
 				}
