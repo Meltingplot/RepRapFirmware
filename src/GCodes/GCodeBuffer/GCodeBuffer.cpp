@@ -328,18 +328,15 @@ void GCodeBuffer::PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noe
 	binaryParser.Put(data, len);
 }
 
-// Start at epoch 0 when the SBC starts a connection, or forget the epoch when the connection is lost. Either way there is no gate, and the epochs
-// of the codes on the stack belong to a connection that has ended. Only the main task changes the stack, so it voids them at the start of its next
-// spin (SbcInterface::ApplyRecordedAborts). Until then they count as invalid and FillBuffer hands no code to this GB
+// Start at epoch 0 when the SBC starts a connection, or forget the epoch when the connection is lost. Either way there is no gate
 void GCodeBuffer::ResetChannelEpoch(bool known) noexcept
 {
 	channelEpoch = 0;
 	channelEpochKnown = known;
 	abortGateSet = false;
-	connectionEndRecorded = true;
 }
 
-// Void the channel epochs of the codes on every level, after the connection that they belong to has ended. The caller holds the GB mutex
+// Void the channel epochs of the codes on every level, after the connection that they belong to has been lost. The caller holds the GB mutex
 void GCodeBuffer::VoidCodeEpochs() noexcept
 {
 	for (GCodeMachineState *_ecv_null ms = machineState; ms != nullptr; ms = ms->GetPrevious())

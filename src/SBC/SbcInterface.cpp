@@ -344,7 +344,8 @@ void SbcInterface::ExchangeData() noexcept
 				EndConnection(true);
 			}
 
-			// Every channel starts at epoch 0
+			// Every channel starts at epoch 0. The epochs of the codes on the stacks are invalid already: none is valid at boot, and the end of the
+			// connection before has been recorded (InvalidateResources)
 			for (size_t c = 0; c < NumGCodeChannels; c++)
 			{
 				GCodeBuffer * const channelGb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(c));
@@ -353,7 +354,6 @@ void SbcInterface::ExchangeData() noexcept
 					channelGb->ResetChannelEpoch(true);
 				}
 			}
-			reprap.GetGCodes().ChannelAbortRecorded();
 		}
 
 		// The SBC has sent a packet in this connection, so what belongs to a channel may be written from now on (see the end of this function)
@@ -1008,7 +1008,7 @@ void SbcInterface::ExchangeData() noexcept
 				{
 					gb->MarkCodeReplySurplus();
 				}
-				RecordChannelAbort(*gb);
+				RecordChannelAbort(*gb, false);
 			}
 			else
 			{
@@ -1914,7 +1914,7 @@ void SbcInterface::InvalidateResources() noexcept
 		if (gb != nullptr)											// skip GBs that are not available due to the build configuration
 		{
 			gb->ResetChannelEpoch(false);
-			RecordChannelAbort(*gb);
+			RecordChannelAbort(*gb, true);
 		}
 	}
 
@@ -1928,11 +1928,15 @@ void SbcInterface::InvalidateResources() noexcept
 // Record the abort of a channel: when the SBC aborts the channel (InvalidateChannel) and for every channel when the connection is lost
 // (InvalidateResources). The main task may be in the middle of changing the GB, so it applies the abort at the start of its next spin
 // (ApplyRecordedAborts). So the abort is never refused, and nothing of the channel is sent to the SBC until then. The codes that the SBC sends
-// from now on are kept, even if a macro request invalidated the GB
-void SbcInterface::RecordChannelAbort(GCodeBuffer& gb) noexcept
+// from now on are kept, even if a macro request invalidated the GB. A lost connection also voids the epochs of the codes on the stack
+void SbcInterface::RecordChannelAbort(GCodeBuffer& gb, bool connectionLost) noexcept
 {
 	gb.Invalidate(false);
 	gb.SetAbortRecorded(true);
+	if (connectionLost)
+	{
+		gb.SetConnectionEndRecorded();
+	}
 	whenAbortRecorded = millis();
 	reprap.GetGCodes().ChannelAbortRecorded();
 
@@ -2056,8 +2060,7 @@ void SbcInterface::ApplyRecordedAborts() noexcept
 				}
 			}
 
-			// The SBC has started a new connection or the connection has been lost. Only the main task changes the stack, so it voids the epochs
-			// of the codes on it here
+			// The connection has been lost. Only the main task changes the stack, so it voids the epochs of the codes on it here
 			if (gb->IsConnectionEndRecorded())
 			{
 				gb->VoidCodeEpochs();
@@ -2194,11 +2197,10 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 	bool gotCommand = false;
 	{
 		// The whole walk must be atomic: readPointer is a cursor into variable-length records, so a concurrent defragment would invalidate it.
-		// The codes of a channel whose abort or end of connection is recorded wait until the main task has applied it, so that a new code is
-		// not taken on behalf of the old work and its epoch is not voided with those of the old codes. This is checked here, because the SBC
-		// task records them before it stores the next code
+		// The codes of a channel whose abort is recorded wait until the main task has applied it. This is checked here, because the SBC task
+		// records an abort before it stores the next code
 		TaskCriticalSectionLocker locker;
-		if (!gb.IsAbortRecorded() && !gb.IsConnectionEndRecorded() && (rxPointer != txPointer || txEnd != 0))
+		if (!gb.IsAbortRecorded() && (rxPointer != txPointer || txEnd != 0))
 		{
 			bool updateRxPointer = true;
 			uint16_t readPointer = rxPointer;

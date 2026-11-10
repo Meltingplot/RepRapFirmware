@@ -176,7 +176,7 @@ private:
 	[[noreturn]] void ReceiveAndStartIap(const char *iapChunk, size_t length) noexcept;	// Receive and start the IAP binary
 	void EndConnection(bool waitForMainTask) noexcept;						// End the work of a connection that has been lost or replaced
 	void InvalidateResources() noexcept;									// Invalidate local resources on connection errors
-	void RecordChannelAbort(GCodeBuffer& gb) noexcept;						// Record the abort of a channel for the main task
+	void RecordChannelAbort(GCodeBuffer& gb, bool connectionLost) noexcept;	// Record the abort of a channel for the main task
 	void InvalidateChannel(GCodeBuffer& gb) noexcept;						// End everything of a channel that the SBC has dropped
 	bool IsDroppedByEpoch(GCodeBuffer& gb, const PacketHeader& packet) noexcept;	// Check if a packet of the SBC must be dropped because of the epoch of its channel
 	void DefragmentBufferedCodes() noexcept;								// Attempt to defragment the code buffer ring to avoid stalls
