@@ -1495,12 +1495,13 @@ bool DataTransfer::WriteCodeReply(MessageType type, OutputBuffer *&response) noe
 		return false;
 	}
 
-	// Write packet header
-	PacketHeader *header = WritePacketHeader(FirmwareRequest::Message);
+	// Write packet header. The reply of a code carries the channel epoch of that code in its message type, which goes into the tag
+	const uint16_t tag = ((type & CodeReplyEpochFlag) != 0) ? ChannelEpochTagged | (((uint32_t)type & CodeReplyEpochMask) >> CodeReplyEpochShift) : 0;
+	PacketHeader *header = WritePacketHeader(FirmwareRequest::Message, 0, tag);
 
 	// Write code reply header
 	MessageHeader *replyHeader = WriteDataHeader<MessageHeader>();
-	replyHeader->messageType = type;
+	replyHeader->messageType = (MessageType)(type & ~(CodeReplyEpochFlag | CodeReplyEpochMask));
 	replyHeader->padding = 0;
 
 	// Write code reply
@@ -1540,7 +1541,7 @@ bool DataTransfer::WriteCodeReply(MessageType type, OutputBuffer *&response) noe
 	return true;
 }
 
-bool DataTransfer::WriteMacroRequest(GCodeChannel channel, const char *filename, bool fromCode) noexcept
+bool DataTransfer::WriteMacroRequest(GCodeChannel channel, const char *filename, bool fromCode, uint16_t tag) noexcept
 {
 	size_t filenameLength = strlen(filename);
 	if (!CanWritePacket(sizeof(ExecuteMacroHeader) + filenameLength))
@@ -1549,7 +1550,7 @@ bool DataTransfer::WriteMacroRequest(GCodeChannel channel, const char *filename,
 	}
 
 	// Write packet header
-	WritePacketHeader(FirmwareRequest::ExecuteMacro, sizeof(ExecuteMacroHeader) + filenameLength);
+	WritePacketHeader(FirmwareRequest::ExecuteMacro, sizeof(ExecuteMacroHeader) + filenameLength, tag);
 
 	// Write header
 	ExecuteMacroHeader *header = WriteDataHeader<ExecuteMacroHeader>();
@@ -1563,7 +1564,7 @@ bool DataTransfer::WriteMacroRequest(GCodeChannel channel, const char *filename,
 	return true;
 }
 
-bool DataTransfer::WriteAbortFileRequest(GCodeChannel channel, bool abortAll) noexcept
+bool DataTransfer::WriteAbortFileRequest(GCodeChannel channel, bool abortAll, uint16_t tag) noexcept
 {
 	if (!CanWritePacket(sizeof(AbortFileHeader)))
 	{
@@ -1571,7 +1572,7 @@ bool DataTransfer::WriteAbortFileRequest(GCodeChannel channel, bool abortAll) no
 	}
 
 	// Write packet header
-	WritePacketHeader(FirmwareRequest::AbortFile, sizeof(AbortFileHeader));
+	WritePacketHeader(FirmwareRequest::AbortFile, sizeof(AbortFileHeader), tag);
 
 	// Write header
 	AbortFileHeader *header = WriteDataHeader<AbortFileHeader>();
@@ -1581,7 +1582,7 @@ bool DataTransfer::WriteAbortFileRequest(GCodeChannel channel, bool abortAll) no
 	return true;
 }
 
-bool DataTransfer::WriteMacroFileClosed(GCodeChannel channel) noexcept
+bool DataTransfer::WriteMacroFileClosed(GCodeChannel channel, uint16_t tag) noexcept
 {
 	if (!CanWritePacket(sizeof(CodeChannelHeader)))
 	{
@@ -1589,7 +1590,7 @@ bool DataTransfer::WriteMacroFileClosed(GCodeChannel channel) noexcept
 	}
 
 	// Write packet header
-	WritePacketHeader(FirmwareRequest::MacroFileClosed, sizeof(CodeChannelHeader));
+	WritePacketHeader(FirmwareRequest::MacroFileClosed, sizeof(CodeChannelHeader), tag);
 
 	// Write header
 	CodeChannelHeader *header = WriteDataHeader<CodeChannelHeader>();
@@ -1599,7 +1600,7 @@ bool DataTransfer::WriteMacroFileClosed(GCodeChannel channel) noexcept
 	return true;
 }
 
-bool DataTransfer::WritePrintPaused(FilePosition position, FilePosition position2, PrintPausedReason reason) noexcept
+bool DataTransfer::WritePrintPaused(FilePosition position, FilePosition position2, PrintPausedReason reason, uint16_t tag) noexcept
 {
 	if (!CanWritePacket(sizeof(PrintPausedHeader)))
 	{
@@ -1607,7 +1608,7 @@ bool DataTransfer::WritePrintPaused(FilePosition position, FilePosition position
 	}
 
 	// Write packet header
-	WritePacketHeader(FirmwareRequest::PrintPaused, sizeof(PrintPausedHeader));
+	WritePacketHeader(FirmwareRequest::PrintPaused, sizeof(PrintPausedHeader), tag);
 
 	// Write header
 	PrintPausedHeader *header = WriteDataHeader<PrintPausedHeader>();
@@ -1619,7 +1620,7 @@ bool DataTransfer::WritePrintPaused(FilePosition position, FilePosition position
 	return true;
 }
 
-bool DataTransfer::WriteLocked(GCodeChannel channel) noexcept
+bool DataTransfer::WriteLocked(GCodeChannel channel, uint16_t tag) noexcept
 {
 	if (!CanWritePacket(sizeof(CodeChannelHeader)))
 	{
@@ -1627,7 +1628,7 @@ bool DataTransfer::WriteLocked(GCodeChannel channel) noexcept
 	}
 
 	// Write packet header
-	WritePacketHeader(FirmwareRequest::Locked, sizeof(CodeChannelHeader));
+	WritePacketHeader(FirmwareRequest::Locked, sizeof(CodeChannelHeader), tag);
 
 	// Write header
 	CodeChannelHeader * const header = WriteDataHeader<CodeChannelHeader>();
@@ -1637,7 +1638,7 @@ bool DataTransfer::WriteLocked(GCodeChannel channel) noexcept
 	return true;
 }
 
-bool DataTransfer::WriteEvaluationResult(GCodeChannel channel, const char *expression, const ExpressionValue& value) noexcept
+bool DataTransfer::WriteEvaluationResult(GCodeChannel channel, const char *expression, const ExpressionValue& value, uint16_t tag) noexcept
 {
 	// Calculate payload length
 	const size_t expressionLength = strlen(expression);
@@ -1695,7 +1696,7 @@ bool DataTransfer::WriteEvaluationResult(GCodeChannel channel, const char *expre
 	}
 
 	// Write packet header
-	(void)WritePacketHeader(FirmwareRequest::EvaluationResult, sizeof(EvaluationResultHeader) + payloadLength);
+	(void)WritePacketHeader(FirmwareRequest::EvaluationResult, sizeof(EvaluationResultHeader) + payloadLength, tag);
 
 	// Write partial header
 	EvaluationResultHeader *header = WriteDataHeader<EvaluationResultHeader>();
@@ -1796,7 +1797,7 @@ bool DataTransfer::WriteEvaluationResult(GCodeChannel channel, const char *expre
 	return true;
 }
 
-bool DataTransfer::WriteEvaluationResult(GCodeChannel channel, const char *expression, OutputBuffer *json) noexcept
+bool DataTransfer::WriteEvaluationResult(GCodeChannel channel, const char *expression, OutputBuffer *json, uint16_t tag) noexcept
 {
 	// Check if we can write the JSON result
 	const size_t expressionLength = strlen(expression);
@@ -1807,7 +1808,7 @@ bool DataTransfer::WriteEvaluationResult(GCodeChannel channel, const char *expre
 	}
 
 	// Write packet header
-	(void)WritePacketHeader(FirmwareRequest::EvaluationResult, sizeof(EvaluationResultHeader) + expressionLength + json->Length());
+	(void)WritePacketHeader(FirmwareRequest::EvaluationResult, sizeof(EvaluationResultHeader) + expressionLength + json->Length(), tag);
 
 	// Write partial header
 	EvaluationResultHeader *header = WriteDataHeader<EvaluationResultHeader>();
@@ -1828,7 +1829,7 @@ bool DataTransfer::WriteEvaluationResult(GCodeChannel channel, const char *expre
 	return true;
 }
 
-bool DataTransfer::WriteEvaluationError(GCodeChannel channel, const char *expression, const char *errorMessage) noexcept
+bool DataTransfer::WriteEvaluationError(GCodeChannel channel, const char *expression, const char *errorMessage, uint16_t tag) noexcept
 {
 	// Check if it fits
 	size_t expressionLength = strlen(expression), errorLength = strlen(errorMessage);
@@ -1838,7 +1839,7 @@ bool DataTransfer::WriteEvaluationError(GCodeChannel channel, const char *expres
 	}
 
 	// Write packet header
-	(void)WritePacketHeader(FirmwareRequest::EvaluationResult, sizeof(EvaluationResultHeader) + expressionLength + errorLength);
+	(void)WritePacketHeader(FirmwareRequest::EvaluationResult, sizeof(EvaluationResultHeader) + expressionLength + errorLength, tag);
 
 	// Write partial header
 	EvaluationResultHeader *header = WriteDataHeader<EvaluationResultHeader>();
@@ -1853,7 +1854,7 @@ bool DataTransfer::WriteEvaluationError(GCodeChannel channel, const char *expres
 	return true;
 }
 
-bool DataTransfer::WriteDoCode(GCodeChannel channel, const char *code, size_t length) noexcept
+bool DataTransfer::WriteDoCode(GCodeChannel channel, const char *code, size_t length, uint16_t tag) noexcept
 {
 	if (!CanWritePacket(sizeof(DoCodeHeader) + length))
 	{
@@ -1861,7 +1862,7 @@ bool DataTransfer::WriteDoCode(GCodeChannel channel, const char *code, size_t le
 	}
 
 	// Write packet header
-	WritePacketHeader(FirmwareRequest::DoCode, sizeof(DoCodeHeader) + length);
+	WritePacketHeader(FirmwareRequest::DoCode, sizeof(DoCodeHeader) + length, tag);
 
 	// Write header
 	DoCodeHeader *header = WriteDataHeader<DoCodeHeader>();
@@ -1873,7 +1874,7 @@ bool DataTransfer::WriteDoCode(GCodeChannel channel, const char *code, size_t le
 	return true;
 }
 
-bool DataTransfer::WriteWaitForAcknowledgement(GCodeChannel channel) noexcept
+bool DataTransfer::WriteWaitForAcknowledgement(GCodeChannel channel, uint16_t tag) noexcept
 {
 	if (!CanWritePacket(sizeof(CodeChannelHeader)))
 	{
@@ -1881,7 +1882,7 @@ bool DataTransfer::WriteWaitForAcknowledgement(GCodeChannel channel) noexcept
 	}
 
 	// Write packet header
-	WritePacketHeader(FirmwareRequest::WaitForMessageAcknowledgment, sizeof(CodeChannelHeader));
+	WritePacketHeader(FirmwareRequest::WaitForMessageAcknowledgment, sizeof(CodeChannelHeader), tag);
 
 	// Write header
 	CodeChannelHeader *header = WriteDataHeader<CodeChannelHeader>();
@@ -1891,7 +1892,7 @@ bool DataTransfer::WriteWaitForAcknowledgement(GCodeChannel channel) noexcept
 	return true;
 }
 
-bool DataTransfer::WriteMessageAcknowledged(GCodeChannel channel) noexcept
+bool DataTransfer::WriteMessageAcknowledged(GCodeChannel channel, uint16_t tag) noexcept
 {
 	if (!CanWritePacket(sizeof(CodeChannelHeader)))
 	{
@@ -1899,7 +1900,7 @@ bool DataTransfer::WriteMessageAcknowledged(GCodeChannel channel) noexcept
 	}
 
 	// Write packet header
-	WritePacketHeader(FirmwareRequest::MessageAcknowledged, sizeof(CodeChannelHeader));
+	WritePacketHeader(FirmwareRequest::MessageAcknowledged, sizeof(CodeChannelHeader), tag);
 
 	// Write header
 	CodeChannelHeader *header = WriteDataHeader<CodeChannelHeader>();
@@ -1909,7 +1910,7 @@ bool DataTransfer::WriteMessageAcknowledged(GCodeChannel channel) noexcept
 	return true;
 }
 
-bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varName, const ExpressionValue& value) noexcept
+bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varName, const ExpressionValue& value, uint16_t tag) noexcept
 {
 	// Calculate payload length
 	const size_t varNameLength = strlen(varName);
@@ -1954,7 +1955,7 @@ bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varN
 	}
 
 	// Write packet header
-	(void)WritePacketHeader(FirmwareRequest::VariableResult, sizeof(EvaluationResultHeader) + payloadLength);
+	(void)WritePacketHeader(FirmwareRequest::VariableResult, sizeof(EvaluationResultHeader) + payloadLength, tag);
 
 	// Write partial header
 	EvaluationResultHeader *header = WriteDataHeader<EvaluationResultHeader>();
@@ -2021,7 +2022,7 @@ bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varN
 	return true;
 }
 
-bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varName, OutputBuffer *json) noexcept
+bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varName, OutputBuffer *json, uint16_t tag) noexcept
 {
 	// Check if we can write the JSON result
 	const size_t varNameLength = strlen(varName);
@@ -2032,7 +2033,7 @@ bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varN
 	}
 
 	// Write packet header
-	(void)WritePacketHeader(FirmwareRequest::VariableResult, sizeof(EvaluationResultHeader) + varNameLength + json->Length());
+	(void)WritePacketHeader(FirmwareRequest::VariableResult, sizeof(EvaluationResultHeader) + varNameLength + json->Length(), tag);
 
 	// Write partial header
 	EvaluationResultHeader *header = WriteDataHeader<EvaluationResultHeader>();
@@ -2053,7 +2054,7 @@ bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varN
 	return true;
 }
 
-bool DataTransfer::WriteSetVariableError(GCodeChannel channel, const char *varName, const char *errorMessage) noexcept
+bool DataTransfer::WriteSetVariableError(GCodeChannel channel, const char *varName, const char *errorMessage, uint16_t tag) noexcept
 {
 	// Check if it fits
 	size_t varNameLength = strlen(varName), errorLength = strlen(errorMessage);
@@ -2063,7 +2064,7 @@ bool DataTransfer::WriteSetVariableError(GCodeChannel channel, const char *varNa
 	}
 
 	// Write packet header
-	(void)WritePacketHeader(FirmwareRequest::VariableResult, sizeof(EvaluationResultHeader) + varNameLength + errorLength);
+	(void)WritePacketHeader(FirmwareRequest::VariableResult, sizeof(EvaluationResultHeader) + varNameLength + errorLength, tag);
 
 	// Write partial header
 	EvaluationResultHeader *header = WriteDataHeader<EvaluationResultHeader>();
@@ -2287,7 +2288,7 @@ bool DataTransfer::WriteCloseFile(FileHandle handle) noexcept
 	return true;
 }
 
-PacketHeader *DataTransfer::WritePacketHeader(FirmwareRequest request, size_t dataLength, uint16_t resendPacketId) noexcept
+PacketHeader *DataTransfer::WritePacketHeader(FirmwareRequest request, size_t dataLength, uint16_t resendPacketIdOrTag) noexcept
 {
 	// Make sure to stay aligned if the last packet ended with a string
 	txPointer = AddPadding(txPointer);
@@ -2297,7 +2298,7 @@ PacketHeader *DataTransfer::WritePacketHeader(FirmwareRequest request, size_t da
 	header->request = static_cast<uint16_t>(request);
 	header->id = packetId++;
 	header->length = dataLength;
-	header->resendPacketId = resendPacketId;
+	header->resendPacketId = resendPacketIdOrTag;
 	txPointer += sizeof(PacketHeader);
 	return header;
 }

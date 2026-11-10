@@ -257,8 +257,8 @@ void QueuedCode::AssignTo(GCodeBuffer *gb) noexcept
 #if HAS_SBC_INTERFACE
 	if (isBinary)
 	{
-		// Note that the data has to remain on a 4-byte boundary for this to work
-		gb->PutBinary(reinterpret_cast<const uint32_t *>(data), dataLength / sizeof(uint32_t));
+		// Note that the data has to remain on a 4-byte boundary for this to work. A queued code has no channel epoch, so its replies are not tagged
+		gb->PutBinary(reinterpret_cast<const uint32_t *>(data), dataLength / sizeof(uint32_t), 0);
 	}
 	else
 #endif

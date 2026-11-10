@@ -38,6 +38,12 @@ enum MessageType : uint32_t
 
 	DestinationsMask =		   0x3FFFFu, 	// Mask for all the destinations
 
+	// Channel epoch of the binary code that a code reply belongs to (bytes 3-4). Only the SBC interface reads these bits: it moves them into the
+	// packet header and clears them in the message type it sends to the SBC
+	CodeReplyEpochMask =	  0xFC0000u,	// Epoch of the code (6 bits)
+	CodeReplyEpochShift = 18,				// How many bits we have to shift a MessageType right by to get the epoch of the code
+	CodeReplyEpochFlag =	 0x4000000u,	// The epoch bits are valid
+
 	// Special indicators (byte 4)
 	// The first two are not processed when calling the version of Platform::Message that takes an OutputBuffer.
 	ErrorMessageFlag =		 0x1000000u,	// This is an error message

@@ -116,7 +116,8 @@ GCodeBuffer::GCodeBuffer(GCodeChannel::RawType channel, GCodeInput *_ecv_from no
 	  disabled(false), timerRunning(false), motionCommanded(false), hadExplicitLineNumber(false), buffer(nullptr), bufferLength(0)
 
 #if HAS_SBC_INTERFACE
-	  , isWaitingForMacro(false), abortRecorded(false), isBinaryBuffer(false), invalidated(false)
+	  , isWaitingForMacro(false), abortRecorded(false), codeEpoch(0), isBinaryBuffer(false), invalidated(false),
+	  channelEpoch(0), channelEpochKnown(false), abortGateSet(false)
 #endif
 {
 	mutex.Create(((GCodeChannel)channel).ToString());
@@ -312,16 +313,27 @@ bool GCodeBuffer::CheckMetaCommand(const StringRef& reply) THROWS(GCodeException
 
 #if HAS_SBC_INTERFACE
 
-// Add an entire binary G-Code, overwriting any existing content
+// Add an entire binary G-Code, overwriting any existing content. Its replies and macro requests carry the given channel epoch
 // CAUTION! This may be called with the task scheduler suspended, so don't do anything that might block or take more than a few microseconds to execute
-void GCodeBuffer::PutBinary(const uint32_t *data, size_t len) noexcept
+void GCodeBuffer::PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noexcept
 {
 	restoredCommandValid = false;
 	machineState->lastCodeFromSbc = true;
 	isBinaryBuffer = true;
 	macroJustStarted = false;
 	codeReplySurplus = false;		// the code that the SBC dropped has finished, or this code belongs to a macro that the dropped code has started since
+	codeEpoch = epoch;
 	binaryParser.Put(data, len);
+}
+
+// Start at epoch 0 when the SBC starts a connection, or forget the epoch when the connection is lost. Either way there is no gate and the code
+// being executed has no epoch any more
+void GCodeBuffer::ResetChannelEpoch(bool known) noexcept
+{
+	channelEpoch = 0;
+	channelEpochKnown = known;
+	abortGateSet = false;
+	codeEpoch = 0;
 }
 
 #endif
@@ -1337,7 +1349,9 @@ MessageType GCodeBuffer::GetResponseMessageType() const noexcept
 #if HAS_SBC_INTERFACE
 	if (machineState->lastCodeFromSbc)
 	{
-		return (MessageType)((1u << codeChannel.ToBaseType()) | BinaryCodeReplyFlag);
+		// The channel epoch of the code goes into bits of the message type that are otherwise unused, see DataTransfer::WriteCodeReply
+		const uint32_t epochBits = ((codeEpoch & ChannelEpochValid) != 0) ? (uint32_t)CodeReplyEpochFlag | ((uint32_t)(codeEpoch & ChannelEpochMask) << CodeReplyEpochShift) : 0;
+		return (MessageType)((1u << codeChannel.ToBaseType()) | BinaryCodeReplyFlag | epochBits);
 	}
 #endif
 	return responseMessageType;
