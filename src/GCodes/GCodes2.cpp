@@ -2276,13 +2276,20 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 			case 121:
 #if HAS_SBC_INTERFACE
 				{
-					// M121 replies on the level that it returns to, so that level takes the channel epoch of M121 from the level it pops. The M120 that
-					// pushed that level may belong to an older epoch, e.g. after the SBC aborted the channel while it ran at the base level
-					const bool codeEpochValid = gb.LatestMachineState().codeEpochValid;
-					const uint8_t codeEpoch = gb.LatestMachineState().codeEpoch;
+					// M121 replies on the level that it returns to. If it pops a level that M120 pushed, the level it returns to belongs to the same file
+					// and takes the channel epoch of M121, because the M120 may belong to an older epoch, e.g. after the SBC aborted the channel while that
+					// level ran at the base level. If M121 pops a macro level, because no M120 pushed one, the level below keeps the epoch of the code that
+					// started the macro
+					const GCodeMachineState& ms = gb.LatestMachineState();
+					const bool localLevel = ms.localPush;
+					const bool codeEpochValid = ms.codeEpochValid;
+					const uint8_t codeEpoch = ms.codeEpoch;
 					Pop(gb, true);
-					gb.LatestMachineState().codeEpochValid = codeEpochValid;
-					gb.LatestMachineState().codeEpoch = codeEpoch;
+					if (localLevel)
+					{
+						gb.LatestMachineState().codeEpochValid = codeEpochValid;
+						gb.LatestMachineState().codeEpoch = codeEpoch;
+					}
 				}
 #else
 				Pop(gb, true);
