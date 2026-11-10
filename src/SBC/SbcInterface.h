@@ -99,6 +99,8 @@ private:
 	PrintPausedReason pauseReason;
 	bool reportPause, reportPauseWritten, printAborted;
 
+	bool sbcPacketRead;													// has the SBC task read a packet of the SBC in this connection? Accessed only by the SBC task
+
 	uint32_t whenAbortRecorded;											// when the SBC task recorded the last channel abort
 	uint32_t maxAbortApplyDelay;										// longest time from the record of a channel abort to its apply by the main task
 	uint32_t numStalePackets, numAheadPackets, numGatedPackets;			// packets of the SBC dropped because of their channel epoch or the abort gate

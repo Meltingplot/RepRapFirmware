@@ -55,7 +55,7 @@ extern "C" [[noreturn]] void SBCTaskStart(void * pvParameters) noexcept
 SbcInterface::SbcInterface() noexcept : isConnected(false), numDisconnects(0), numTimeouts(0), numSbcTimeouts(0), lastTransferTime(0),
 	maxDelayBetweenTransfers(SbcTransferDelay), numMaxEvents(SbcEventsRequired),
 	burstModeWindow(SbcBurstModeWindow), burstModeDelay(SbcBurstModeDelay), burstModeStartTime(0),
-	delaying(false), numEvents(0), reportPause(false), reportPauseWritten(false), printAborted(false), whenAbortRecorded(0), maxAbortApplyDelay(0),
+	delaying(false), numEvents(0), reportPause(false), reportPauseWritten(false), printAborted(false), sbcPacketRead(false), whenAbortRecorded(0), maxAbortApplyDelay(0),
 	numStalePackets(0), numAheadPackets(0), numGatedPackets(0), numRepeatedAborts(0),
 	codeBuffer(nullptr), rxPointer(0), txPointer(0), txEnd(0), sendBufferUpdate(true),
 #if SUPPORTS_SBC_OVER_USB
@@ -324,15 +324,12 @@ void SbcInterface::ExchangeData() noexcept
 			break;
 		}
 
-		if (packet->request >= (uint16_t)SbcRequest::InvalidRequest && packet->request != (uint16_t)SbcRequest::ActivateLinkCapabilities)
-		{
-			REPORT_INTERNAL_ERROR;
-			break;
-		}
+		// The SBC has sent a packet in this connection, so what belongs to a channel may be written from now on (see the end of this function)
+		sbcPacketRead = true;
 
-		// The first tagged packet since DSF started or ended a connection makes every channel start at epoch 0. A copy that DSF sends again
-		// does not carry the marker, so this must happen before the packet can be refused. The epochs of the codes on the stacks belong to
-		// the connection before, so the main task voids them
+		// The first packet that DSF writes after it started or ended a connection, whatever its type, makes every channel start at epoch 0.
+		// A copy that DSF sends again does not carry the marker, so this must happen before the packet can be refused or dropped. The epochs of
+		// the codes on the stacks belong to the connection before, so the main task voids them
 		if ((packet->resendPacketId & ChannelEpochFirstMarker) != 0)
 		{
 			for (size_t c = 0; c < NumGCodeChannels; c++)
@@ -344,6 +341,12 @@ void SbcInterface::ExchangeData() noexcept
 				}
 			}
 			reprap.GetGCodes().ChannelAbortRecorded();
+		}
+
+		if (packet->request >= (uint16_t)SbcRequest::InvalidRequest && packet->request != (uint16_t)SbcRequest::ActivateLinkCapabilities)
+		{
+			REPORT_INTERNAL_ERROR;
+			break;
 		}
 
 		bool packetAcknowledged = true;
@@ -1589,6 +1592,14 @@ void SbcInterface::ExchangeData() noexcept
 		}
 	}
 
+	// Nothing that belongs to a channel is written before the SBC task has read a packet of the SBC in this connection. So the first requests of
+	// a channel, e.g. that of config.g, go out once it is known whether the SBC tags, with the epoch of its first marker if it does. They are held,
+	// not dropped
+	if (!sbcPacketRead)
+	{
+		return;
+	}
+
 	// Deal with code channel requests
 	bool fileAbortRecorded = false;
 	for (size_t i = 0; i < NumGCodeChannels; i++)
@@ -1849,6 +1860,7 @@ void SbcInterface::ExchangeData() noexcept
 
 void SbcInterface::InvalidateResources() noexcept
 {
+	sbcPacketRead = false;
 	txEnd = 0;
 	txPointer = 0;
 	rxPointer = 0;
