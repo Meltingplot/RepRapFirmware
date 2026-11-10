@@ -253,14 +253,15 @@ public:
 	bool IsAbortGateSet() const noexcept { return abortGateSet; }			// Must the packets of this channel be dropped until the SBC aborts the channel?
 	void SetAbortGate(bool g) noexcept { abortGateSet = g; }				// Called when an abort of all files has been sent with a tag (or the SBC has aborted the channel)
 	uint16_t GetChannelTag() const noexcept { return (channelEpochKnown) ? ChannelEpochTagged | channelEpoch : 0; }	// Tag of a packet of this channel
-	bool IsConnectionEndRecorded() const noexcept { return connectionEndRecorded; }	// Do the epochs of the codes on the stack belong to a connection that has been lost?
+	bool IsConnectionEndRecorded() const noexcept { return connectionEndRecorded; }	// Has the connection that the codes on the stack belong to been lost?
 	void SetConnectionEndRecorded() noexcept { connectionEndRecorded = true; }		// Called by the SBC task when the connection has been lost
 	void ConnectionEndApplied() noexcept { connectionEndRecorded = false; }			// Called by the main task when it applies the end of the connection
-	void VoidCodeEpochs() noexcept;											// Called by the main task to apply the end of a connection to the codes on the stack
+	void EndConnectionOfCodes() noexcept;									// Called by the main task to apply the end of a connection to the codes on the stack
+	bool IsCodeOfEndedConnection() const noexcept;							// Does the code being executed belong to an SBC connection that has ended?
 	bool IsMacroRequestOfCode() const noexcept;								// Is the pending macro request sent as one of the code being executed?
 
 	bool IsCodeReplySurplus() const noexcept { return codeReplySurplus; }	// Has the SBC dropped the code being executed, so that its replies are surplus?
-	void SetCodeReplySurplus(bool s) noexcept { codeReplySurplus = s; }		// Called when the code being executed has finished, or when its connection has ended
+	void SetCodeReplySurplus(bool s) noexcept { codeReplySurplus = s; }		// Called when the SBC has dropped the code being executed (or when it has finished)
 	void MarkCodeReplySurplus() noexcept;									// Called when the SBC has dropped the code being executed
 
 	bool IsSendRequested() const noexcept { return sendToSbc; }				// Is this code supposed to be sent to the SBC
@@ -417,8 +418,9 @@ private:
 	volatile bool isWaitingForMacro;	// Is this GB waiting in DoFileMacro?
 	volatile bool macroFileClosed;		// Last macro file has been closed in RRF, tell the SBC
 	volatile bool abortRecorded;		// The SBC has aborted this channel. Set by the SBC task, taken by the main task before it applies the abort
-	volatile bool connectionEndRecorded;	// The connection that the epochs of the codes on the stack belong to has been lost. Set by the SBC task together with
-										// abortRecorded, taken by the main task together with abortRecorded before it voids them. Until then they count as invalid
+	volatile bool connectionEndRecorded;	// The connection that the codes on the stack belong to has been lost. Set by the SBC task together with abortRecorded,
+										// taken by the main task together with abortRecorded before it applies it to the levels (EndConnectionOfCodes). Until then
+										// their epochs count as invalid and none of their replies is written (IsCodeOfEndedConnection, read by any task)
 
 	// Accessed only when the GB mutex is acquired
 	String<MaxFilenameLength> requestedMacroFile;

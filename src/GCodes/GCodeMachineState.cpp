@@ -23,7 +23,7 @@ GCodeMachineState::GCodeMachineState() noexcept
 	  volumetricExtrusion(false), g53Active(false), runningSystemMacro(false), usingInches(false),
 	  waitingForAcknowledgement(false), messageAcknowledged(false), localPush(false), macroRestartable(false), firstCommandAfterRestart(false), commandRepeated(false), inverseTimeMode(false),
 #if HAS_SBC_INTERFACE
-	  lastCodeFromSbc(false), macroStartedByCode(false), fileFinished(false), codeEpochValid(false), codeEpoch(0),
+	  lastCodeFromSbc(false), macroStartedByCode(false), fileFinished(false), codeEpochValid(false), codeEpoch(0), codeOfEndedConnection(false),
 #endif
 	  stateParameter(0),
 	  compatibility(Compatibility::RepRapFirmware),
@@ -57,7 +57,7 @@ GCodeMachineState::GCodeMachineState(GCodeMachineState& prev, bool withinSameFil
 	  inverseTimeMode(withinSameFile && prev.inverseTimeMode),
 #if HAS_SBC_INTERFACE
 	  lastCodeFromSbc(prev.lastCodeFromSbc), macroStartedByCode(prev.macroStartedByCode), fileFinished(prev.fileFinished),
-	  codeEpochValid(prev.codeEpochValid), codeEpoch(prev.codeEpoch),
+	  codeEpochValid(prev.codeEpochValid), codeEpoch(prev.codeEpoch), codeOfEndedConnection(prev.codeOfEndedConnection),
 #endif
 	  compatibility(prev.compatibility),
 	  previous(&prev), currentBlockState(new BlockState(nullptr)),
@@ -116,7 +116,7 @@ GCodeMachineState::GCodeMachineState(GCodeMachineState& copyFrom, GCodeMachineSt
 	  inverseTimeMode(copyFrom.inverseTimeMode),
 #if HAS_SBC_INTERFACE
 	  lastCodeFromSbc(copyFrom.lastCodeFromSbc), macroStartedByCode(copyFrom.macroStartedByCode), fileFinished(copyFrom.fileFinished),
-	  codeEpochValid(copyFrom.codeEpochValid), codeEpoch(copyFrom.codeEpoch),
+	  codeEpochValid(copyFrom.codeEpochValid), codeEpoch(copyFrom.codeEpoch), codeOfEndedConnection(copyFrom.codeOfEndedConnection),
 #endif
 	  compatibility(copyFrom.compatibility),
 	  previous(prev), currentBlockState(new BlockState(nullptr)), errorMessage(nullptr),

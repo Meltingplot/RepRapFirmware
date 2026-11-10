@@ -279,7 +279,8 @@ public:
 		macroStartedByCode : 1,
 		fileFinished : 1,
 		codeEpochValid : 1,						// true if codeEpoch holds the channel epoch of the last code from the SBC on this level
-		codeEpoch : 6							// channel epoch of that code, see SbcMessageFormats.h. Its replies and the macro requests made for it carry it
+		codeEpoch : 6,							// channel epoch of that code, see SbcMessageFormats.h. Its replies and the macro requests made for it carry it
+		codeOfEndedConnection : 1				// true if that code belongs to an SBC connection that has ended, so that none of its replies is written to the SBC
 #endif
 		;
 

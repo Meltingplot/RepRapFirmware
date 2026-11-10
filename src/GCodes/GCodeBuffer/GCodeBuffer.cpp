@@ -144,7 +144,7 @@ void GCodeBuffer::Reset() noexcept
 	isWaitingForMacro = false;
 	macroJustStarted = macroFileError = macroFileEmpty = false;
 	abortFile = abortAllFiles = sendToSbc = messagePromptPending = messageAcknowledged = codeReplySurplus = false;
-	machineState->lastCodeFromSbc = machineState->macroStartedByCode = machineState->codeEpochValid = false;
+	machineState->lastCodeFromSbc = machineState->macroStartedByCode = machineState->codeEpochValid = machineState->codeOfEndedConnection = false;
 #endif
 	cancelWait = false;
 	Init();
@@ -322,6 +322,7 @@ void GCodeBuffer::PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noe
 	machineState->lastCodeFromSbc = true;
 	machineState->codeEpochValid = (epoch & ChannelEpochValid) != 0;
 	machineState->codeEpoch = epoch & ChannelEpochMask;
+	machineState->codeOfEndedConnection = false;
 	isBinaryBuffer = true;
 	macroJustStarted = false;
 	codeReplySurplus = false;		// the code that the SBC dropped has finished, or this code belongs to a macro that the dropped code has started since
@@ -336,13 +337,23 @@ void GCodeBuffer::ResetChannelEpoch(bool known) noexcept
 	abortGateSet = false;
 }
 
-// Void the channel epochs of the codes on every level, after the connection that they belong to has been lost. The caller holds the GB mutex
-void GCodeBuffer::VoidCodeEpochs() noexcept
+// Apply the end of the connection that the codes on every level belong to: their channel epochs are void, and none of their replies is written to
+// the SBC, whatever connection is up when they reply. A level keeps the mark until a code is put on it, and a level pushed by such a code starts with
+// it. The caller holds the GB mutex
+void GCodeBuffer::EndConnectionOfCodes() noexcept
 {
 	for (GCodeMachineState *_ecv_null ms = machineState; ms != nullptr; ms = ms->GetPrevious())
 	{
 		ms->codeEpochValid = false;
+		ms->codeOfEndedConnection = true;
 	}
+}
+
+// Return true if the code being executed belongs to an SBC connection that has ended, so that none of its replies may be written to the SBC.
+// Between the record of the end of the connection and its apply this is true for every code on the stack
+bool GCodeBuffer::IsCodeOfEndedConnection() const noexcept
+{
+	return connectionEndRecorded || machineState->codeOfEndedConnection;
 }
 
 // Get the channel epoch of the code on the latest level in one byte (ChannelEpochValid set if it is valid)

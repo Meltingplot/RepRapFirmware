@@ -1723,8 +1723,10 @@ void SbcInterface::ExchangeData() noexcept
 							}
 						}
 #endif
-						// Send back a final code reply for codes that started the last macros, else the corresponding code will never finish
-						if (!gb->IsAbortAllRequested() && gb->GetState() == GCodeState::normal && (!gb->LatestMachineState().lastCodeFromSbc || gb->LatestMachineState().macroStartedByCode))
+						// Send back a final code reply for codes that started the last macros, else the corresponding code will never finish.
+						// Not for a code of a connection that has ended, which the SBC does not know
+						if (!gb->IsAbortAllRequested() && gb->GetState() == GCodeState::normal && (!gb->LatestMachineState().lastCodeFromSbc || gb->LatestMachineState().macroStartedByCode)
+							&& !IsReplyToCodeOfEndedConnection(gb->GetResponseMessageType()))
 						{
 							OutputBuffer *dummy = nullptr;
 							if (!transfer.WriteCodeReply(gb->GetResponseMessageType(), dummy))
@@ -1902,12 +1904,6 @@ void SbcInterface::InvalidateResources() noexcept
 	MassStorage::InvalidateAllFiles();
 	numOpenFiles = 0;
 
-	// Don't cache any messages if they cannot be sent
-	{
-		MutexLocker lock(gcodeReplyMutex);
-		gcodeReply.ReleaseAll();
-	}
-
 	// End the work of every channel. Only the main task changes the stack of a GB, so the abort of every channel is recorded here and the main task
 	// applies it at the start of its next spin, as it applies InvalidateChannel. There it runs after the emergency stop that the caller has requested,
 	// which runs AbortPrint for every GB. The epoch of each channel is unknown until the SBC tags a packet of the channel again, and the epochs of
@@ -1920,6 +1916,13 @@ void SbcInterface::InvalidateResources() noexcept
 			gb->ResetChannelEpoch(false);
 			RecordChannelAbort(*gb, true);
 		}
+	}
+
+	// Don't cache any messages if they cannot be sent. This comes after the record, so that a reply of a code of the ended connection that the
+	// main task queues meanwhile is either released here or dropped by HandleGCodeReply
+	{
+		MutexLocker lock(gcodeReplyMutex);
+		gcodeReply.ReleaseAll();
 	}
 
 	// Abort the print (if applicable)
@@ -1939,6 +1942,8 @@ void SbcInterface::RecordChannelAbort(GCodeBuffer& gb, bool connectionLost) noex
 	gb.SetAbortRecorded(true);
 	if (connectionLost)
 	{
+		// The codes on the stack belong to the connection that has ended: their epochs count as invalid and none of their replies is written
+		// to the SBC from now on, whatever connection is up when they reply (IsReplyToCodeOfEndedConnection)
 		gb.SetConnectionEndRecorded();
 	}
 	whenAbortRecorded = millis();
@@ -2064,7 +2069,7 @@ void SbcInterface::ApplyRecordedAborts() noexcept
 				InvalidateChannel(*gb);
 
 				// A code from the SBC that is still being executed now replies on the level that AbortFile has left. DSF has dropped it, so its replies
-				// are surplus unless they carry its epoch. After a lost connection the flag is cleared below instead
+				// are surplus unless they carry its epoch. None of the replies of a code of a lost connection is written anyway (IsCodeOfEndedConnection)
 				if (!connectionLost && gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
 				{
 					gb->MarkCodeReplySurplus();
@@ -2077,12 +2082,10 @@ void SbcInterface::ApplyRecordedAborts() noexcept
 				}
 			}
 
-			// The connection has been lost. Only the main task changes the stack, so it voids the epochs of the codes on it here, and the SBC of the
-			// next connection has not dropped a code that survived it
+			// The connection has been lost. Only the main task changes the stack, so it applies that to the levels of the codes on it here
 			if (connectionLost)
 			{
-				gb->VoidCodeEpochs();
-				gb->SetCodeReplySurplus(false);
+				gb->EndConnectionOfCodes();
 			}
 		}
 	}
@@ -2683,6 +2686,11 @@ void SbcInterface::HandleGCodeReply(MessageType mt, const char *reply) noexcept
 #endif
 
 	MutexLocker lock(gcodeReplyMutex);
+	if (IsReplyToCodeOfEndedConnection(mt))
+	{
+		return;
+	}
+
 	OutputBuffer *buffer = gcodeReply.GetLastItem();
 	if (buffer != nullptr && mt == gcodeReply.GetLastItemType() && (mt & PushFlag) != 0 && !buffer->IsReferenced())
 	{
@@ -2719,8 +2727,35 @@ void SbcInterface::HandleGCodeReply(MessageType mt, OutputBuffer *buffer) noexce
 #endif
 
 	MutexLocker lock(gcodeReplyMutex);
+	if (IsReplyToCodeOfEndedConnection(mt))
+	{
+		OutputBuffer::ReleaseAll(buffer);
+		return;
+	}
+
 	gcodeReply.Push(buffer, mt);
 	EventOccurred();
+}
+
+// Check if a message is a reply to a code from the SBC that belongs to a connection that has ended (GCodeBuffer::IsCodeOfEndedConnection). None of
+// its replies is written to the SBC, whatever connection is up when it replies. Every code reply to the SBC passes here or, for the reply that the
+// write phase sends for an aborted macro, is checked here before it is written. When called from HandleGCodeReply, the caller holds gcodeReplyMutex,
+// which InvalidateResources takes after it has recorded the end of the connection, so no such reply is queued after the queue has been released
+bool SbcInterface::IsReplyToCodeOfEndedConnection(MessageType mt) const noexcept
+{
+	if ((mt & BinaryCodeReplyFlag) != 0)
+	{
+		const uint32_t destinations = (uint32_t)mt & (uint32_t)DestinationsMask;
+		for (size_t c = 0; c < NumGCodeChannels; c++)
+		{
+			if (destinations == (1u << c))
+			{
+				const GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(c));
+				return gb != nullptr && gb->IsCodeOfEndedConnection();
+			}
+		}
+	}
+	return false;
 }
 
 void SbcInterface::EventOccurred(bool timeCritical) noexcept
