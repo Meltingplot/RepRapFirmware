@@ -56,7 +56,7 @@ SbcInterface::SbcInterface() noexcept : isConnected(false), numDisconnects(0), n
 	maxDelayBetweenTransfers(SbcTransferDelay), numMaxEvents(SbcEventsRequired),
 	burstModeWindow(SbcBurstModeWindow), burstModeDelay(SbcBurstModeDelay), burstModeStartTime(0),
 	delaying(false), numEvents(0), reportPause(false), reportPauseWritten(false), printAborted(false), sbcPacketRead(false), whenAbortRecorded(0), maxAbortApplyDelay(0),
-	numStalePackets(0), numAheadPackets(0), numGatedPackets(0), numRepeatedAborts(0),
+	numStalePackets(0), numAheadPackets(0), numGatedPackets(0), numRepeatedAborts(0), lastDropRequest(0), lastDropChannel(0), lastDrop(EpochDrop::none),
 	codeBuffer(nullptr), rxPointer(0), txPointer(0), txEnd(0), sendBufferUpdate(true),
 #if SUPPORTS_SBC_OVER_USB
 	pendingUsbDevice(nullptr), usbDeviceIndex(0),
@@ -393,7 +393,7 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (IsDroppedByEpoch(*gb, packet->resendPacketId) || gb->IsInvalidated())
+				if (IsDroppedByEpoch(*gb, *packet) || gb->IsInvalidated())
 				{
 					// Don't deal with codes of another channel epoch or that will be thrown away
 					break;
@@ -586,7 +586,7 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (IsDroppedByEpoch(*gb, packet->resendPacketId))
+				if (IsDroppedByEpoch(*gb, *packet))
 				{
 					break;
 				}
@@ -656,7 +656,7 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (IsDroppedByEpoch(*gb, packet->resendPacketId))
+				if (IsDroppedByEpoch(*gb, *packet))
 				{
 					break;
 				}
@@ -697,7 +697,7 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (IsDroppedByEpoch(*gb, packet->resendPacketId))
+				if (IsDroppedByEpoch(*gb, *packet))
 				{
 					break;
 				}
@@ -754,7 +754,7 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (IsDroppedByEpoch(*gb, packet->resendPacketId))
+				if (IsDroppedByEpoch(*gb, *packet))
 				{
 					break;
 				}
@@ -856,7 +856,7 @@ void SbcInterface::ExchangeData() noexcept
 					}
 
 					// Such a reply to a code that is executing on the SBC carries the channel epoch of that code. Drop it if it belongs to another epoch
-					if (gb != nullptr && (packet->resendPacketId & ChannelEpochTagged) != 0 && IsDroppedByEpoch(*gb, packet->resendPacketId))
+					if (gb != nullptr && (packet->resendPacketId & ChannelEpochTagged) != 0 && IsDroppedByEpoch(*gb, *packet))
 					{
 						OutputBuffer::ReleaseAll(buf);
 						break;
@@ -923,7 +923,7 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (IsDroppedByEpoch(*gb, packet->resendPacketId))
+				if (IsDroppedByEpoch(*gb, *packet))
 				{
 					break;
 				}
@@ -1023,7 +1023,7 @@ void SbcInterface::ExchangeData() noexcept
 				break;
 			}
 
-			if (IsDroppedByEpoch(*gb, packet->resendPacketId))
+			if (IsDroppedByEpoch(*gb, *packet))
 			{
 				break;
 			}
@@ -1217,7 +1217,7 @@ void SbcInterface::ExchangeData() noexcept
 				break;
 			}
 
-			if (IsDroppedByEpoch(*gb, packet->resendPacketId))
+			if (IsDroppedByEpoch(*gb, *packet))
 			{
 				break;
 			}
@@ -1404,7 +1404,7 @@ void SbcInterface::ExchangeData() noexcept
 				break;
 			}
 
-			if (IsDroppedByEpoch(*gb, packet->resendPacketId))
+			if (IsDroppedByEpoch(*gb, *packet))
 			{
 				break;
 			}
@@ -1969,8 +1969,9 @@ void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 // Apply the channel epoch to a packet of the SBC that belongs to the work of a channel, before anything of the packet is done. While the epoch
 // of the channel is unknown, a tagged packet sets it. Return true if the packet must be dropped, because the abort gate of the channel is set
 // or the packet is tagged with another epoch. A dropped packet gets no answer and is not requested again, because the SBC has ended its work
-bool SbcInterface::IsDroppedByEpoch(GCodeBuffer& gb, uint16_t tag) noexcept
+bool SbcInterface::IsDroppedByEpoch(GCodeBuffer& gb, const PacketHeader& packet) noexcept
 {
+	const uint16_t tag = packet.resendPacketId;
 	const bool tagged = (tag & ChannelEpochTagged) != 0;
 	const uint8_t epoch = tag & ChannelEpochMask;
 	if (tagged && !gb.IsChannelEpochKnown())
@@ -1978,25 +1979,34 @@ bool SbcInterface::IsDroppedByEpoch(GCodeBuffer& gb, uint16_t tag) noexcept
 		gb.SetChannelEpoch(epoch);
 	}
 
+	EpochDrop drop;
 	if (gb.IsAbortGateSet())
 	{
 		numGatedPackets++;
-		return true;
+		drop = EpochDrop::gated;
 	}
-
-	if (tagged && epoch != gb.GetChannelEpoch())
+	else if (tagged && epoch != gb.GetChannelEpoch())
 	{
 		if (ChannelEpochFollows(epoch, gb.GetChannelEpoch()))
 		{
 			numAheadPackets++;
+			drop = EpochDrop::ahead;
 		}
 		else
 		{
 			numStalePackets++;
+			drop = EpochDrop::stale;
 		}
-		return true;
 	}
-	return false;
+	else
+	{
+		return false;
+	}
+
+	lastDrop = drop;
+	lastDropChannel = gb.GetChannel().RawValue();
+	lastDropRequest = packet.request;
+	return true;
 }
 
 // Apply the channel aborts and the ends of connections that the SBC task has recorded. This is called by the main task at the start of its spin
@@ -2056,6 +2066,11 @@ void SbcInterface::Diagnostics(const StringRef& reply) noexcept
 	reply.lcatf("Buffer RX/TX: %d/%d-%d, open files: %u", (int)rxPointer, (int)txPointer, (int)txEnd, numOpenFiles);
 	reply.lcatf("Channel epochs: dropped %" PRIu32 " stale, %" PRIu32 " ahead, %" PRIu32 " gated, %" PRIu32 " repeated aborts, longest abort apply %" PRIu32 "ms",
 					numStalePackets, numAheadPackets, numGatedPackets, numRepeatedAborts, maxAbortApplyDelay);
+	if (lastDrop != EpochDrop::none)
+	{
+		reply.catf(", last dropped %s request %u on channel %s",
+					(lastDrop == EpochDrop::stale) ? "stale" : (lastDrop == EpochDrop::ahead) ? "ahead" : "gated", (unsigned int)lastDropRequest, GCodeChannel(lastDropChannel).ToString());
+	}
 #ifdef TRACK_FILE_CODES
 	reply.lcatf("File codes read/handled: %d/%d, file macros open/closing: %d %d", (int)fileCodesRead, (int)fileCodesHandled, (int)fileMacrosRunning, (int)fileMacrosClosing);
 #endif

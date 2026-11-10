@@ -105,6 +105,10 @@ private:
 	uint32_t maxAbortApplyDelay;										// longest time from the record of a channel abort to its apply by the main task
 	uint32_t numStalePackets, numAheadPackets, numGatedPackets;			// packets of the SBC dropped because of their channel epoch or the abort gate
 	uint32_t numRepeatedAborts;											// InvalidateChannel requests ignored because their epoch did not follow
+	enum class EpochDrop : uint8_t { none, stale, ahead, gated };		// why the last packet of the SBC was dropped by the epoch of its channel or the abort gate
+	uint16_t lastDropRequest;											// request of the last packet dropped by its channel epoch or the abort gate
+	uint8_t lastDropChannel;											// its channel
+	EpochDrop lastDrop;													// and why it was dropped
 
 	char *codeBuffer;
 	volatile uint16_t rxPointer, txPointer, txEnd;
@@ -173,7 +177,7 @@ private:
 	void InvalidateResources() noexcept;									// Invalidate local resources on connection errors
 	void RecordChannelAbort(GCodeBuffer& gb) noexcept;						// Record the abort of a channel for the main task
 	void InvalidateChannel(GCodeBuffer& gb) noexcept;						// End everything of a channel that the SBC has dropped
-	bool IsDroppedByEpoch(GCodeBuffer& gb, uint16_t tag) noexcept;			// Check if a packet of the SBC must be dropped because of the epoch of its channel
+	bool IsDroppedByEpoch(GCodeBuffer& gb, const PacketHeader& packet) noexcept;	// Check if a packet of the SBC must be dropped because of the epoch of its channel
 	void DefragmentBufferedCodes() noexcept;								// Attempt to defragment the code buffer ring to avoid stalls
 	bool DefragmentCodeBlock(uint16_t start, volatile uint16_t &end) noexcept;	// Defragment a specific code buffer region returning true if anything was defragmented
 	void InvalidateBufferedCodes(GCodeChannel channel) noexcept;           	// Invalidate every buffered G-code of the corresponding channel from the buffer ring
