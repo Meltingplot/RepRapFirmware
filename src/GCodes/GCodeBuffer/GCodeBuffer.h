@@ -258,7 +258,8 @@ public:
 	bool IsMacroRequestOfCode() const noexcept;								// Is the pending macro request sent as one of the code being executed?
 
 	bool IsCodeReplySurplus() const noexcept { return codeReplySurplus; }	// Has the SBC dropped the code being executed, so that its replies are surplus?
-	void SetCodeReplySurplus(bool s) noexcept { codeReplySurplus = s; }		// Called when the SBC has dropped the code being executed (or when it has finished)
+	void SetCodeReplySurplus(bool s) noexcept { codeReplySurplus = s; }		// Called when the code being executed has finished, or when its connection has ended
+	void MarkCodeReplySurplus() noexcept;									// Called when the SBC has dropped the code being executed
 
 	bool IsSendRequested() const noexcept { return sendToSbc; }				// Is this code supposed to be sent to the SBC
 	void SendToSbc() noexcept { sendToSbc = true; }							// Send this code to the attached SBC

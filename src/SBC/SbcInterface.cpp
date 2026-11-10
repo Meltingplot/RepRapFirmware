@@ -987,10 +987,10 @@ void SbcInterface::ExchangeData() noexcept
 				gb->Invalidate(false);
 
 				// The replies of a code from the SBC that is still being executed are surplus. Flag a code that requested a macro before the main task
-				// wakes up and reports the macro as not found
+				// wakes up and reports the macro as not found, unless its replies carry its epoch. The main task waits, so the stack does not change
 				if (gb->IsWaitingForMacro() && gb->IsMacroStartedByCode())
 				{
-					gb->SetCodeReplySurplus(true);
+					gb->MarkCodeReplySurplus();
 				}
 
 				gb->SetAbortRecorded(true);
@@ -2002,10 +2002,11 @@ void SbcInterface::ApplyRecordedAborts() noexcept
 			{
 				InvalidateChannel(*gb);
 
-				// A code from the SBC that is still being executed now replies on the level that AbortFile has left, but DSF has dropped it
+				// A code from the SBC that is still being executed now replies on the level that AbortFile has left, but DSF has dropped it. Its replies
+				// are surplus unless they carry its epoch
 				if (gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
 				{
-					gb->SetCodeReplySurplus(true);
+					gb->MarkCodeReplySurplus();
 				}
 				gb->SetAbortRecorded(false);
 

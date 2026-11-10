@@ -364,6 +364,17 @@ bool GCodeBuffer::IsMacroRequestOfCode() const noexcept
 	return machineState->macroStartedByCode && (!channelEpochKnown || GetCodeEpoch() == (ChannelEpochValid | channelEpoch));
 }
 
+// Flag the replies of the code being executed as surplus, because the SBC has dropped it. This is needed only if they would go out without a channel
+// epoch, that is if the epoch of the code on the latest level is invalid or the channel epoch is unknown. Otherwise they carry the epoch of the code,
+// which the SBC tells apart from the current one
+void GCodeBuffer::MarkCodeReplySurplus() noexcept
+{
+	if (!channelEpochKnown || (GetCodeEpoch() & ChannelEpochValid) == 0)
+	{
+		codeReplySurplus = true;
+	}
+}
+
 #endif
 
 // Add an entire G-Code, overwriting any existing content
