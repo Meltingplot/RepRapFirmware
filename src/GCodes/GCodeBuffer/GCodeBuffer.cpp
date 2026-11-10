@@ -343,7 +343,6 @@ void GCodeBuffer::VoidCodeEpochs() noexcept
 	{
 		ms->codeEpochValid = false;
 	}
-	connectionEndRecorded = false;
 }
 
 // Get the channel epoch of the code on the latest level in one byte (ChannelEpochValid set if it is valid)

@@ -1950,8 +1950,9 @@ void SbcInterface::RecordChannelAbort(GCodeBuffer& gb, bool connectionLost) noex
 }
 
 // End everything of a channel that the SBC has dropped, so that nothing of it is reported to the SBC afterwards. Called by the main task when it
-// applies a recorded abort, with the GB mutex held and after the record has ended a macro wait. A code that is still being executed at the base
-// level is neither stopped nor reset, and its state machine goes on with its next step
+// applies a recorded abort, with the GB mutex held, after the record has ended a macro wait and after the apply has voided what the SBC task reads
+// without the GB mutex. A code that is still being executed at the base level is neither stopped nor reset, and its state machine goes on with
+// its next step
 void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 {
 	gb.MacroRequestSent();											// a macro request that has not gone out yet is void
@@ -1965,18 +1966,11 @@ void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 	gcodes.PauseSequenceAborted(gb);								// don't get stuck in "pausing" if this abort tears down the pause sequence
 	gb.AbortFile(true);
 	gb.FileAbortSent();												// DSF has aborted its files itself
-	gb.MacroFileClosedSent();										// and has dropped its macro files, so a closal that has not gone out yet is void
 
 	// Close a message box left at the base level as cancelled, without the abort flag that would make the main task stop the print
 	gb.MessageAcknowledged(true, false, 0, ExpressionValue());
 	gb.MessagePromptSent();
 	gb.MessageAcknowledgementSent();
-
-	gb.Invalidate(false);
-	if (gb.IsFileChannel())
-	{
-		reportPause = false;										// DSF aborts the print when it aborts a print file channel
-	}
 
 	// Release the locks of an idle GB. Those of a code that is still being executed stay until it has finished, e.g. G28 still needs its axes
 	if (gb.IsCompletelyIdle())
@@ -2037,21 +2031,40 @@ void SbcInterface::ApplyRecordedAborts() noexcept
 		if (gb != nullptr && (gb->IsAbortRecorded() || gb->IsConnectionEndRecorded()))
 		{
 			MutexLocker locker(gb->mutex);
-			if (gb->IsAbortRecorded())
+
+			// The SBC task records without the GB mutex. Take the record before applying it, so that a record that comes in meanwhile stays set and
+			// is applied in the next spin. Both flags are taken at once, because InvalidateResources records an abort and the end of the connection
+			// together. The SBC task keeps off the GB while the abort is recorded, but it reads a few flags of the GB without the mutex, so those
+			// are voided here too: a closal that has not gone out yet (DSF has dropped its macro files), the invalidation of the GB (the event that
+			// set it is void) and the pause report of a print file channel (DSF aborts the print when it aborts that channel)
+			bool aborted, connectionLost;
+			{
+				TaskCriticalSectionLocker lock;
+				aborted = gb->IsAbortRecorded();
+				connectionLost = gb->IsConnectionEndRecorded();
+				gb->SetAbortRecorded(false);
+				gb->ConnectionEndApplied();
+				if (aborted)
+				{
+					gb->MacroFileClosedSent();
+					gb->Invalidate(false);
+					if (gb->IsFileChannel())
+					{
+						reportPause = false;
+					}
+				}
+			}
+
+			if (aborted)
 			{
 				InvalidateChannel(*gb);
 
-				// A code from the SBC that is still being executed now replies on the level that AbortFile has left. If the connection has been lost,
-				// the SBC of the next one has not dropped that code. Otherwise DSF has, so its replies are surplus unless they carry its epoch
-				if (gb->IsConnectionEndRecorded())
-				{
-					gb->SetCodeReplySurplus(false);
-				}
-				else if (gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
+				// A code from the SBC that is still being executed now replies on the level that AbortFile has left. DSF has dropped it, so its replies
+				// are surplus unless they carry its epoch. After a lost connection the flag is cleared below instead
+				if (!connectionLost && gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
 				{
 					gb->MarkCodeReplySurplus();
 				}
-				gb->SetAbortRecorded(false);
 
 				const uint32_t applyDelay = millis() - whenAbortRecorded;
 				if (applyDelay > maxAbortApplyDelay)
@@ -2060,10 +2073,12 @@ void SbcInterface::ApplyRecordedAborts() noexcept
 				}
 			}
 
-			// The connection has been lost. Only the main task changes the stack, so it voids the epochs of the codes on it here
-			if (gb->IsConnectionEndRecorded())
+			// The connection has been lost. Only the main task changes the stack, so it voids the epochs of the codes on it here, and the SBC of the
+			// next connection has not dropped a code that survived it
+			if (connectionLost)
 			{
 				gb->VoidCodeEpochs();
+				gb->SetCodeReplySurplus(false);
 			}
 		}
 	}

@@ -245,7 +245,7 @@ public:
 	bool IsAbortRecorded() const noexcept { return abortRecorded; }			// Has the SBC task recorded an abort of this channel that the main task has yet to apply?
 	void SetAbortRecorded(bool r) noexcept { abortRecorded = r; }			// Called when an abort of this channel has been recorded (or applied)
 
-	// Channel epoch, see SbcMessageFormats.h. Only the SBC task uses the epoch of the channel and the abort gate
+	// Channel epoch, see SbcMessageFormats.h. Only the SBC task changes the epoch of the channel and the abort gate
 	bool IsChannelEpochKnown() const noexcept { return channelEpochKnown; }	// Is the epoch of this channel known in this connection?
 	uint8_t GetChannelEpoch() const noexcept { return channelEpoch; }		// Get the epoch of this channel
 	void SetChannelEpoch(uint8_t epoch) noexcept { channelEpoch = epoch; channelEpochKnown = true; }
@@ -255,6 +255,7 @@ public:
 	uint16_t GetChannelTag() const noexcept { return (channelEpochKnown) ? ChannelEpochTagged | channelEpoch : 0; }	// Tag of a packet of this channel
 	bool IsConnectionEndRecorded() const noexcept { return connectionEndRecorded; }	// Do the epochs of the codes on the stack belong to a connection that has been lost?
 	void SetConnectionEndRecorded() noexcept { connectionEndRecorded = true; }		// Called by the SBC task when the connection has been lost
+	void ConnectionEndApplied() noexcept { connectionEndRecorded = false; }			// Called by the main task when it applies the end of the connection
 	void VoidCodeEpochs() noexcept;											// Called by the main task to apply the end of a connection to the codes on the stack
 	bool IsMacroRequestOfCode() const noexcept;								// Is the pending macro request sent as one of the code being executed?
 
@@ -415,9 +416,9 @@ private:
 	BinarySemaphore macroSemaphore;
 	volatile bool isWaitingForMacro;	// Is this GB waiting in DoFileMacro?
 	volatile bool macroFileClosed;		// Last macro file has been closed in RRF, tell the SBC
-	volatile bool abortRecorded;		// The SBC has aborted this channel. Set by the SBC task, cleared by the main task under the GB mutex when it applies the abort
+	volatile bool abortRecorded;		// The SBC has aborted this channel. Set by the SBC task, taken by the main task before it applies the abort
 	volatile bool connectionEndRecorded;	// The connection that the epochs of the codes on the stack belong to has been lost. Set by the SBC task together with
-										// abortRecorded, cleared by the main task under the GB mutex when it voids them. Until then they count as invalid
+										// abortRecorded, taken by the main task together with abortRecorded before it voids them. Until then they count as invalid
 
 	// Accessed only when the GB mutex is acquired
 	String<MaxFilenameLength> requestedMacroFile;
@@ -440,7 +441,7 @@ private:
 	// Accessed only by the SBC task, except that the main task sets it for a pause and clears it when it applies an abort of the channel
 	bool invalidated;				// Set to true if the GB content is not valid and about to be cleared
 
-	// Accessed only by the SBC task
+	// Written only by the SBC task. The main task reads channelEpochKnown when it applies an abort (MarkCodeReplySurplus)
 	uint8_t
 		channelEpoch : 6,			// Epoch of this channel, valid if channelEpochKnown
 		channelEpochKnown : 1,		// Whether the epoch is known, from the first tagged packet of this channel in this connection
