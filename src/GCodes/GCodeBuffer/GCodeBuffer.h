@@ -66,7 +66,7 @@ public:
 
 	bool Put(char c) noexcept SPEED_CRITICAL;										// Add a character to the end
 #if HAS_SBC_INTERFACE
-	void PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noexcept;		// Add an entire binary G-Code of the given channel epoch, overwriting any existing content
+	void PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noexcept;		// Add an entire binary G-Code of the given channel epoch to the latest level, overwriting any existing content
 #endif
 	void PutAndDecode(const char *_ecv_array data, size_t len) noexcept;			// Add an entire G-Code, overwriting any existing content
 	void PutAndDecode(const char *_ecv_array str) noexcept;							// Add a null-terminated string, overwriting any existing content
@@ -249,13 +249,15 @@ public:
 	bool IsChannelEpochKnown() const noexcept { return channelEpochKnown; }	// Is the epoch of this channel known in this connection?
 	uint8_t GetChannelEpoch() const noexcept { return channelEpoch; }		// Get the epoch of this channel
 	void SetChannelEpoch(uint8_t epoch) noexcept { channelEpoch = epoch; channelEpochKnown = true; }
-	void ResetChannelEpoch(bool known) noexcept;							// Start at epoch 0 or forget the epoch, without a gate and without the epoch of a code
+	void ResetChannelEpoch(bool known) noexcept;							// Start at epoch 0 or forget the epoch when a connection starts or ends
 	bool IsAbortGateSet() const noexcept { return abortGateSet; }			// Must the packets of this channel be dropped until the SBC aborts the channel?
 	void SetAbortGate(bool g) noexcept { abortGateSet = g; }				// Called when an abort of all files has been sent with a tag (or the SBC has aborted the channel)
 	uint16_t GetChannelTag() const noexcept { return (channelEpochKnown) ? ChannelEpochTagged | channelEpoch : 0; }	// Tag of a packet of this channel
-	uint16_t GetCodeTag() const noexcept { return (channelEpochKnown) ? ChannelEpochTag(codeEpoch) : 0; }			// Tag of a packet of the code being executed
+	uint16_t GetCodeTag() const noexcept { return (channelEpochKnown) ? ChannelEpochTag(GetCodeEpoch()) : 0; }	// Tag of a packet of the code being executed
 	bool IsCodeOfOtherEpoch() const noexcept												// Does the code being executed belong to another epoch of this channel?
-		{ return channelEpochKnown && (codeEpoch & ChannelEpochValid) != 0 && (codeEpoch & ChannelEpochMask) != channelEpoch; }
+		{ const uint8_t codeEpoch = GetCodeEpoch(); return channelEpochKnown && (codeEpoch & ChannelEpochValid) != 0 && (codeEpoch & ChannelEpochMask) != channelEpoch; }
+	bool IsConnectionEndRecorded() const noexcept { return connectionEndRecorded; }	// Do the epochs of the codes on the stack belong to a connection that has ended?
+	void VoidCodeEpochs() noexcept;											// Called by the main task to apply the end of a connection to the codes on the stack
 
 	bool IsCodeReplySurplus() const noexcept { return codeReplySurplus; }	// Has the SBC dropped the code being executed, so that its replies are surplus?
 	void SetCodeReplySurplus(bool s) noexcept { codeReplySurplus = s; }		// Called when the SBC has dropped the code being executed (or when it has finished)
@@ -358,6 +360,9 @@ private:
 
 	void SaveInvokingCommand() noexcept;								// remember the current command when pushing a macro frame
 	void RestoreInvokingCommand(const GCodeMachineState& ms) noexcept;	// reinstate it as the reported command when a macro frame is popped
+#if HAS_SBC_INTERFACE
+	uint8_t GetCodeEpoch() const noexcept;								// get the channel epoch of the code on the latest level, see SbcMessageFormats.h
+#endif
 
 	FilePosition printFilePositionAtMacroStart;			// the saved file position when we started executing a macro
 	GCodeInput *_ecv_from normalInput;					// Our normal input stream, or nullptr if there isn't one
@@ -411,7 +416,8 @@ private:
 	volatile bool isWaitingForMacro;	// Is this GB waiting in DoFileMacro?
 	volatile bool macroFileClosed;		// Last macro file has been closed in RRF, tell the SBC
 	volatile bool abortRecorded;		// The SBC has aborted this channel. Set by the SBC task, cleared by the main task under the GB mutex when it applies the abort
-	uint8_t codeEpoch;					// Channel epoch of the binary code being executed. Set by the main task when it takes the code, cleared by the SBC task
+	volatile bool connectionEndRecorded;	// The connection that the epochs of the codes on the stack belong to has ended. Set by the SBC task, cleared by the main task
+										// under the GB mutex when it has voided them. Until then they count as invalid
 
 	// Accessed only when the GB mutex is acquired
 	String<MaxFilenameLength> requestedMacroFile;

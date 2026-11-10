@@ -56,7 +56,7 @@ public:
 
 	bool IsPrintAborted() noexcept;												// Check if the current print has been aborted
 	bool FillBuffer(GCodeBuffer &gb) noexcept;									// Try to fill up the G-code buffer with the next available G-code
-	void ApplyRecordedAborts() noexcept;										// Called by the main task to apply the channel aborts that the SBC task has recorded
+	void ApplyRecordedAborts() noexcept;										// Called by the main task to apply the channel aborts and the ends of connections that the SBC task has recorded
 
 	void SetPauseReason(FilePosition position, FilePosition position2, PrintPausedReason reason) noexcept;	// Set parameters for the next pause request
 	void SetEmergencyPauseReason(FilePosition position, FilePosition position2, PrintPausedReason reason) noexcept;	// Set parameters for the next emergency pause request

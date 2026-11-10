@@ -112,7 +112,7 @@ struct PacketHeader
 constexpr uint16_t ChannelEpochTagged = 0x8000;			// the packet carries the epoch of its channel
 constexpr uint16_t ChannelEpochFirstMarker = 0x4000;	// SBC to RRF only: this is the first tagged packet since DSF started or ended a connection
 constexpr uint16_t ChannelEpochMask = 0x003F;			// the epoch (6 bits)
-constexpr uint8_t ChannelEpochValid = 0x80;				// in an epoch of one byte (GCodeBuffer::codeEpoch, BufferedCodeHeader::codeEpoch): bits 0-5 hold an epoch
+constexpr uint8_t ChannelEpochValid = 0x80;				// in an epoch of one byte (BufferedCodeHeader::codeEpoch, the epoch passed to GCodeBuffer::PutBinary): bits 0-5 hold an epoch
 
 // Return true if epoch a follows epoch b, i.e. a is newer, as an RFC 1982 serial number of 6 bits. At a distance of 32 neither follows the other
 inline constexpr bool ChannelEpochFollows(uint8_t a, uint8_t b) noexcept

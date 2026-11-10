@@ -331,7 +331,8 @@ void SbcInterface::ExchangeData() noexcept
 		}
 
 		// The first tagged packet since DSF started or ended a connection makes every channel start at epoch 0. A copy that DSF sends again
-		// does not carry the marker, so this must happen before the packet can be refused
+		// does not carry the marker, so this must happen before the packet can be refused. The epochs of the codes on the stacks belong to
+		// the connection before, so the main task voids them
 		if ((packet->resendPacketId & ChannelEpochFirstMarker) != 0)
 		{
 			for (size_t c = 0; c < NumGCodeChannels; c++)
@@ -342,6 +343,7 @@ void SbcInterface::ExchangeData() noexcept
 					channelGb->ResetChannelEpoch(true);
 				}
 			}
+			reprap.GetGCodes().ChannelAbortRecorded();
 		}
 
 		bool packetAcknowledged = true;
@@ -1916,6 +1918,7 @@ void SbcInterface::InvalidateResources() noexcept
 		gb->SetCodeReplySurplus(false);
 		gb->ResetChannelEpoch(false);								// the epoch is unknown until the SBC tags a packet of this channel again
 	}
+	reprap.GetGCodes().ChannelAbortRecorded();						// so that the main task voids the epochs of the codes on the stacks
 
 	// Abort the print (if applicable)
 	printAborted = true;
@@ -1992,28 +1995,38 @@ bool SbcInterface::IsDroppedByEpoch(GCodeBuffer& gb, uint16_t tag) noexcept
 	return false;
 }
 
-// Apply the channel aborts that the SBC task has recorded. This is called by the main task at the start of its spin
+// Apply the channel aborts and the ends of connections that the SBC task has recorded. This is called by the main task at the start of its spin
 void SbcInterface::ApplyRecordedAborts() noexcept
 {
 	for (size_t i = 0; i < NumGCodeChannels; i++)
 	{
 		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(i));
-		if (gb != nullptr && gb->IsAbortRecorded())
+		if (gb != nullptr && (gb->IsAbortRecorded() || gb->IsConnectionEndRecorded()))
 		{
 			MutexLocker locker(gb->mutex);
-			InvalidateChannel(*gb);
-
-			// A code from the SBC that is still being executed now replies on the level that AbortFile has left, but DSF has dropped it
-			if (gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
+			if (gb->IsAbortRecorded())
 			{
-				gb->SetCodeReplySurplus(true);
+				InvalidateChannel(*gb);
+
+				// A code from the SBC that is still being executed now replies on the level that AbortFile has left, but DSF has dropped it
+				if (gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
+				{
+					gb->SetCodeReplySurplus(true);
+				}
+				gb->SetAbortRecorded(false);
+
+				const uint32_t applyDelay = millis() - whenAbortRecorded;
+				if (applyDelay > maxAbortApplyDelay)
+				{
+					maxAbortApplyDelay = applyDelay;
+				}
 			}
-			gb->SetAbortRecorded(false);
 
-			const uint32_t applyDelay = millis() - whenAbortRecorded;
-			if (applyDelay > maxAbortApplyDelay)
+			// The SBC has started a new connection or the connection has been lost. Only the main task changes the stack, so it voids the epochs
+			// of the codes on it here
+			if (gb->IsConnectionEndRecorded())
 			{
-				maxAbortApplyDelay = applyDelay;
+				gb->VoidCodeEpochs();
 			}
 		}
 	}
@@ -2142,10 +2155,11 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 	bool gotCommand = false;
 	{
 		// The whole walk must be atomic: readPointer is a cursor into variable-length records, so a concurrent defragment would invalidate it.
-		// The codes of a channel whose abort is recorded wait until the main task has applied it. This is checked here, because the SBC task
-		// records an abort before it stores the next code
+		// The codes of a channel whose abort or end of connection is recorded wait until the main task has applied it, so that a new code is
+		// not taken on behalf of the old work and its epoch is not voided with those of the old codes. This is checked here, because the SBC
+		// task records them before it stores the next code
 		TaskCriticalSectionLocker locker;
-		if (!gb.IsAbortRecorded() && (rxPointer != txPointer || txEnd != 0))
+		if (!gb.IsAbortRecorded() && !gb.IsConnectionEndRecorded() && (rxPointer != txPointer || txEnd != 0))
 		{
 			bool updateRxPointer = true;
 			uint16_t readPointer = rxPointer;

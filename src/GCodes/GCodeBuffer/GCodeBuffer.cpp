@@ -116,7 +116,7 @@ GCodeBuffer::GCodeBuffer(GCodeChannel::RawType channel, GCodeInput *_ecv_from no
 	  disabled(false), timerRunning(false), motionCommanded(false), hadExplicitLineNumber(false), buffer(nullptr), bufferLength(0)
 
 #if HAS_SBC_INTERFACE
-	  , isWaitingForMacro(false), abortRecorded(false), codeEpoch(0), isBinaryBuffer(false), invalidated(false),
+	  , isWaitingForMacro(false), abortRecorded(false), connectionEndRecorded(false), isBinaryBuffer(false), invalidated(false),
 	  channelEpoch(0), channelEpochKnown(false), abortGateSet(false)
 #endif
 {
@@ -144,7 +144,7 @@ void GCodeBuffer::Reset() noexcept
 	isWaitingForMacro = false;
 	macroJustStarted = macroFileError = macroFileEmpty = false;
 	abortFile = abortAllFiles = sendToSbc = messagePromptPending = messageAcknowledged = codeReplySurplus = false;
-	machineState->lastCodeFromSbc = machineState->macroStartedByCode = false;
+	machineState->lastCodeFromSbc = machineState->macroStartedByCode = machineState->codeEpochValid = false;
 #endif
 	cancelWait = false;
 	Init();
@@ -313,27 +313,46 @@ bool GCodeBuffer::CheckMetaCommand(const StringRef& reply) THROWS(GCodeException
 
 #if HAS_SBC_INTERFACE
 
-// Add an entire binary G-Code, overwriting any existing content. Its replies and macro requests carry the given channel epoch
+// Add an entire binary G-Code, overwriting any existing content. The latest level keeps the given channel epoch of the code, which its replies and
+// its macro requests carry. A level pushed later starts with it, and a pop brings back the epoch of the code that pushed the level
 // CAUTION! This may be called with the task scheduler suspended, so don't do anything that might block or take more than a few microseconds to execute
 void GCodeBuffer::PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noexcept
 {
 	restoredCommandValid = false;
 	machineState->lastCodeFromSbc = true;
+	machineState->codeEpochValid = (epoch & ChannelEpochValid) != 0;
+	machineState->codeEpoch = epoch & ChannelEpochMask;
 	isBinaryBuffer = true;
 	macroJustStarted = false;
 	codeReplySurplus = false;		// the code that the SBC dropped has finished, or this code belongs to a macro that the dropped code has started since
-	codeEpoch = epoch;
 	binaryParser.Put(data, len);
 }
 
-// Start at epoch 0 when the SBC starts a connection, or forget the epoch when the connection is lost. Either way there is no gate and the code
-// being executed has no epoch any more
+// Start at epoch 0 when the SBC starts a connection, or forget the epoch when the connection is lost. Either way there is no gate, and the epochs
+// of the codes on the stack belong to a connection that has ended. Only the main task changes the stack, so it voids them at the start of its next
+// spin (SbcInterface::ApplyRecordedAborts). Until then they count as invalid and FillBuffer hands no code to this GB
 void GCodeBuffer::ResetChannelEpoch(bool known) noexcept
 {
 	channelEpoch = 0;
 	channelEpochKnown = known;
 	abortGateSet = false;
-	codeEpoch = 0;
+	connectionEndRecorded = true;
+}
+
+// Void the channel epochs of the codes on every level, after the connection that they belong to has ended. The caller holds the GB mutex
+void GCodeBuffer::VoidCodeEpochs() noexcept
+{
+	for (GCodeMachineState *_ecv_null ms = machineState; ms != nullptr; ms = ms->GetPrevious())
+	{
+		ms->codeEpochValid = false;
+	}
+	connectionEndRecorded = false;
+}
+
+// Get the channel epoch of the code on the latest level in one byte (ChannelEpochValid set if it is valid)
+uint8_t GCodeBuffer::GetCodeEpoch() const noexcept
+{
+	return (machineState->codeEpochValid && !connectionEndRecorded) ? ChannelEpochValid | machineState->codeEpoch : 0;
 }
 
 #endif
@@ -1350,6 +1369,7 @@ MessageType GCodeBuffer::GetResponseMessageType() const noexcept
 	if (machineState->lastCodeFromSbc)
 	{
 		// The channel epoch of the code goes into bits of the message type that are otherwise unused, see DataTransfer::WriteCodeReply
+		const uint8_t codeEpoch = GetCodeEpoch();
 		const uint32_t epochBits = ((codeEpoch & ChannelEpochValid) != 0) ? (uint32_t)CodeReplyEpochFlag | ((uint32_t)(codeEpoch & ChannelEpochMask) << CodeReplyEpochShift) : 0;
 		return (MessageType)((1u << codeChannel.ToBaseType()) | BinaryCodeReplyFlag | epochBits);
 	}

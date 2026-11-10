@@ -277,7 +277,9 @@ public:
 #if HAS_SBC_INTERFACE
 		, lastCodeFromSbc : 1,
 		macroStartedByCode : 1,
-		fileFinished : 1
+		fileFinished : 1,
+		codeEpochValid : 1,						// true if codeEpoch holds the channel epoch of the last code from the SBC on this level
+		codeEpoch : 6							// channel epoch of that code, see SbcMessageFormats.h. Its replies and the macro requests made for it carry it
 #endif
 		;
 
