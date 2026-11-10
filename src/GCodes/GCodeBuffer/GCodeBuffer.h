@@ -253,11 +253,9 @@ public:
 	bool IsAbortGateSet() const noexcept { return abortGateSet; }			// Must the packets of this channel be dropped until the SBC aborts the channel?
 	void SetAbortGate(bool g) noexcept { abortGateSet = g; }				// Called when an abort of all files has been sent with a tag (or the SBC has aborted the channel)
 	uint16_t GetChannelTag() const noexcept { return (channelEpochKnown) ? ChannelEpochTagged | channelEpoch : 0; }	// Tag of a packet of this channel
-	uint16_t GetCodeTag() const noexcept { return (channelEpochKnown) ? ChannelEpochTag(GetCodeEpoch()) : 0; }	// Tag of a packet of the code being executed
-	bool IsCodeOfOtherEpoch() const noexcept												// Does the code being executed belong to another epoch of this channel?
-		{ const uint8_t codeEpoch = GetCodeEpoch(); return channelEpochKnown && (codeEpoch & ChannelEpochValid) != 0 && (codeEpoch & ChannelEpochMask) != channelEpoch; }
 	bool IsConnectionEndRecorded() const noexcept { return connectionEndRecorded; }	// Do the epochs of the codes on the stack belong to a connection that has ended?
 	void VoidCodeEpochs() noexcept;											// Called by the main task to apply the end of a connection to the codes on the stack
+	bool IsMacroRequestOfCode() const noexcept;								// Is the pending macro request sent as one of the code being executed?
 
 	bool IsCodeReplySurplus() const noexcept { return codeReplySurplus; }	// Has the SBC dropped the code being executed, so that its replies are surplus?
 	void SetCodeReplySurplus(bool s) noexcept { codeReplySurplus = s; }		// Called when the SBC has dropped the code being executed (or when it has finished)

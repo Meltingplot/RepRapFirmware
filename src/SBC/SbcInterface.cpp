@@ -1649,18 +1649,12 @@ void SbcInterface::ExchangeData() noexcept
 			gb->MacroFileClosedSent();
 		}
 
-		// Handle blocking macro requests. The request of a code carries the epoch of that code. If the code has survived an abort of its channel,
-		// e.g. G28 that asks for its next homing file, the request is not sent and fails at once, as if the abort had come during the request
+		// Handle blocking macro requests. One of a code that has outlived the epoch of its channel is sent as a system macro request (IsMacroRequestOfCode)
 		if (gb->IsWaitingForMacro() && gb->IsMacroRequestPending())
 		{
 			const char * const requestedMacroFile = gb->GetRequestedMacroFile();
-			bool fromCode = gb->IsMacroStartedByCode();
-			if (fromCode && gb->IsCodeOfOtherEpoch())
-			{
-				gb->MacroRequestSent();
-				gb->ResolveMacroRequest(true, false);
-			}
-			else if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode, (fromCode) ? gb->GetCodeTag() : gb->GetChannelTag()))
+			const bool fromCode = gb->IsMacroRequestOfCode();
+			if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode, gb->GetChannelTag()))
 			{
 				if (reprap.Debug(Module::SbcInterface))
 				{
@@ -1749,8 +1743,8 @@ void SbcInterface::ExchangeData() noexcept
 				if (gb->IsMacroRequestPending())
 				{
 					const char * const requestedMacroFile = gb->GetRequestedMacroFile();
-					bool fromCode = gb->IsMacroStartedByCode();
-					if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode, (fromCode) ? gb->GetCodeTag() : gb->GetChannelTag()))
+					const bool fromCode = gb->IsMacroRequestOfCode();
+					if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode, gb->GetChannelTag()))
 					{
 						if (reprap.Debug(Module::SbcInterface))
 						{

@@ -355,6 +355,15 @@ uint8_t GCodeBuffer::GetCodeEpoch() const noexcept
 	return (machineState->codeEpochValid && !connectionEndRecorded) ? ChannelEpochValid | machineState->codeEpoch : 0;
 }
 
+// Return true if the pending macro request is sent as one of the code being executed. That is so if the code requested it and belongs to the
+// epoch of the channel, or if that epoch is unknown. A code that has outlived the epoch of its channel, e.g. a T-code at the base level whose
+// tfree.g an abort has ended, requests its next macros as system macros of the channel epoch, so that it goes on as in standalone RRF.
+// Either way the request carries the tag of the channel, which is the tag of the code if it is sent as one of the code
+bool GCodeBuffer::IsMacroRequestOfCode() const noexcept
+{
+	return machineState->macroStartedByCode && (!channelEpochKnown || GetCodeEpoch() == (ChannelEpochValid | channelEpoch));
+}
+
 #endif
 
 // Add an entire G-Code, overwriting any existing content
