@@ -2274,7 +2274,19 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 				break;
 
 			case 121:
+#if HAS_SBC_INTERFACE
+				{
+					// M121 replies on the level that it returns to, so that level takes the channel epoch of M121 from the level it pops. The M120 that
+					// pushed that level may belong to an older epoch, e.g. after the SBC aborted the channel while it ran at the base level
+					const bool codeEpochValid = gb.LatestMachineState().codeEpochValid;
+					const uint8_t codeEpoch = gb.LatestMachineState().codeEpoch;
+					Pop(gb, true);
+					gb.LatestMachineState().codeEpochValid = codeEpochValid;
+					gb.LatestMachineState().codeEpoch = codeEpoch;
+				}
+#else
 				Pop(gb, true);
+#endif
 #if HAS_SBC_INTERFACE && SUPPORT_ASYNC_MOVES
 				if (gb.IsBinary() && !gb.LatestMachineState().lastCodeFromSbc)
 				{
