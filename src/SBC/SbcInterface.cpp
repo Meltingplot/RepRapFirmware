@@ -55,7 +55,8 @@ extern "C" [[noreturn]] void SBCTaskStart(void * pvParameters) noexcept
 SbcInterface::SbcInterface() noexcept : isConnected(false), numDisconnects(0), numTimeouts(0), numSbcTimeouts(0), lastTransferTime(0),
 	maxDelayBetweenTransfers(SbcTransferDelay), numMaxEvents(SbcEventsRequired),
 	burstModeWindow(SbcBurstModeWindow), burstModeDelay(SbcBurstModeDelay), burstModeStartTime(0),
-	delaying(false), numEvents(0), reportPause(false), reportPauseWritten(false), printAborted(false),
+	delaying(false), numEvents(0), reportPause(false), reportPauseWritten(false), printAborted(false), sbcPacketRead(false), whenAbortRecorded(0), maxAbortApplyDelay(0),
+	numStalePackets(0), numAheadPackets(0), numGatedPackets(0), numRepeatedAborts(0), lastDropRequest(0), lastDropChannel(0), lastDrop(EpochDrop::none),
 	codeBuffer(nullptr), rxPointer(0), txPointer(0), txEnd(0), sendBufferUpdate(true),
 #if SUPPORTS_SBC_OVER_USB
 	pendingUsbDevice(nullptr), usbDeviceIndex(0),
@@ -194,7 +195,6 @@ static void SendUsbInitMessage(SerialCDC *dev) noexcept
 		if (isConnected && (hadReset || hadTimeout))
 		{
 			isConnected = false;
-			numDisconnects++;
 			if (hadTimeout)
 			{
 				numTimeouts++;
@@ -226,16 +226,7 @@ static void SendUsbInitMessage(SerialCDC *dev) noexcept
 				reprap.GetPlatform().Message(NetworkInfoMessage, "Lost connection to SBC (connection reset)\n");
 			}
 
-			// Whatever connects next, possibly a restarted DCS, cannot know the state left behind, so stop until the controller is reset
-			reprap.EmergencyStop();
-
-			// Invalidate local resources
-			InvalidateResources();
-			if (hadReset)
-			{
-				// Let the main task invalidate resources before processing new data
-				TaskBase::TakeIndexed(NotifyIndices::SbcInterface, SbcYieldTimeout);
-			}
+			EndConnection(hadReset);
 
 #if SUPPORTS_SBC_OVER_USB
 			// On USB disconnect, exit direct mode and reinit the USB GCode device
@@ -289,6 +280,23 @@ static void SendUsbInitMessage(SerialCDC *dev) noexcept
 	}
 }
 
+// End the work of a connection that has been lost or that the SBC has replaced by a new one. The transport is left to the caller
+void SbcInterface::EndConnection(bool waitForMainTask) noexcept
+{
+	numDisconnects++;
+
+	// Whatever connects next, possibly a restarted DCS, cannot know the state left behind, so stop until the controller is reset
+	reprap.EmergencyStop();
+
+	// Invalidate local resources
+	InvalidateResources();
+	if (waitForMainTask)
+	{
+		// Let the main task invalidate resources before processing new data
+		TaskBase::TakeIndexed(NotifyIndices::SbcInterface, SbcYieldTimeout);
+	}
+}
+
 void SbcInterface::WriteQueuedCodeReplies() noexcept
 {
 	if (!gcodeReply.IsEmpty())
@@ -322,6 +330,34 @@ void SbcInterface::ExchangeData() noexcept
 			}
 			break;
 		}
+
+		// The first packet that DSF writes after it started or ended a connection carries the first marker, whatever its type. A copy that DSF
+		// sends again does not carry it, so this must happen before the packet can be refused or dropped
+		if ((packet->resendPacketId & ChannelEpochFirstMarker) != 0)
+		{
+			if (sbcPacketRead)
+			{
+				// The SBC has ended the connection that RRF still runs and started a new one, before RRF noticed (SbcConnectionTimeout). RRF still
+				// holds the codes, macros and state of the old connection, so end it as a lost one. The transport stays, because it carries the
+				// new connection, and this packet is the first one of it
+				reprap.GetPlatform().Message(NetworkInfoMessage, "Lost connection to SBC (the SBC has started a new connection)\n");
+				EndConnection(true);
+			}
+
+			// Every channel starts at epoch 0. The epochs of the codes on the stacks are invalid already: none is valid at boot, and the end of the
+			// connection before has been recorded (InvalidateResources)
+			for (size_t c = 0; c < NumGCodeChannels; c++)
+			{
+				GCodeBuffer * const channelGb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(c));
+				if (channelGb != nullptr)
+				{
+					channelGb->ResetChannelEpoch(true);
+				}
+			}
+		}
+
+		// The SBC has sent a packet in this connection, so what belongs to a channel may be written from now on (see the end of this function)
+		sbcPacketRead = true;
 
 		if (packet->request >= (uint16_t)SbcRequest::InvalidRequest && packet->request != (uint16_t)SbcRequest::ActivateLinkCapabilities)
 		{
@@ -373,9 +409,9 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (gb->IsInvalidated())
+				if (IsDroppedByEpoch(*gb, *packet) || gb->IsInvalidated())
 				{
-					// Don't deal with codes that will be thrown away
+					// Don't deal with codes of another channel epoch or that will be thrown away
 					break;
 				}
 
@@ -423,6 +459,7 @@ void SbcInterface::ExchangeData() noexcept
 				// Store the buffer header
 				BufferedCodeHeader *bufHeader = reinterpret_cast<BufferedCodeHeader *>(codeBuffer + txPointer);
 				bufHeader->isPending = true;
+				bufHeader->codeEpoch = ChannelEpochOf(packet->resendPacketId);
 				bufHeader->length = packet->length;
 
 				// Store the corresponding code. Binary codes are always aligned on a 4-byte boundary
@@ -519,9 +556,19 @@ void SbcInterface::ExchangeData() noexcept
 			{
 				// Just mark the print files as finished
 				GCodeBuffer * const fileGb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel::File);
-				MutexLocker fileLocker(fileGb->mutex, SbcYieldTimeout);
 #if SUPPORT_ASYNC_MOVES
 				GCodeBuffer * const file2Gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel::File2);
+				if (fileGb->IsAbortRecorded() || file2Gb->IsAbortRecorded())
+#else
+				if (fileGb->IsAbortRecorded())
+#endif
+				{
+					packetAcknowledged = false;			// keep off the GBs until the main task has applied the abort of their channel
+					break;
+				}
+
+				MutexLocker fileLocker(fileGb->mutex, SbcYieldTimeout);
+#if SUPPORT_ASYNC_MOVES
 				MutexLocker file2Locker(file2Gb->mutex, SbcYieldTimeout);
 				if (fileLocker.IsAcquired() && file2Locker.IsAcquired())
 #else
@@ -555,6 +602,11 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
+				if (IsDroppedByEpoch(*gb, *packet))
+				{
+					break;
+				}
+
 				if (gb->IsWaitingForMacro() && !gb->IsMacroRequestPending())
 				{
 					gb->ResolveMacroRequest(error, true);
@@ -562,6 +614,10 @@ void SbcInterface::ExchangeData() noexcept
 					{
 						debugPrintf("Waiting macro completed on channel %u\n", channel.ToBaseType());
 					}
+				}
+				else if (gb->IsAbortRecorded())
+				{
+					packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
 				}
 				else
 				{
@@ -616,10 +672,21 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
+				if (IsDroppedByEpoch(*gb, *packet))
+				{
+					break;
+				}
+
+				if (gb->IsAbortRecorded())
+				{
+					packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+					break;
+				}
+
 				MutexLocker locker(gb->mutex, SbcYieldTimeout);
 				if (locker.IsAcquired() && reprap.GetGCodes().LockAllMovementSystemsAndWaitForStandstill(*gb))
 				{
-					transfer.WriteLocked(channel);
+					transfer.WriteLocked(channel, ChannelEpochTag(ChannelEpochOf(packet->resendPacketId)));		// the tag of the request without the marker
 				}
 				else
 				{
@@ -643,6 +710,17 @@ void SbcInterface::ExchangeData() noexcept
 				if (gb == nullptr)
 				{
 					REPORT_INTERNAL_ERROR;
+					break;
+				}
+
+				if (IsDroppedByEpoch(*gb, *packet))
+				{
+					break;
+				}
+
+				if (gb->IsAbortRecorded())
+				{
+					packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
 					break;
 				}
 
@@ -692,6 +770,18 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
+				if (IsDroppedByEpoch(*gb, *packet))
+				{
+					break;
+				}
+
+				if (gb->IsAbortRecorded())
+				{
+					packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+					break;
+				}
+
+				const uint16_t answerTag = ChannelEpochTag(ChannelEpochOf(packet->resendPacketId));		// the tag of the request without the marker
 				try
 				{
 					// Evaluate the expression and send the result to DSF
@@ -709,7 +799,7 @@ void SbcInterface::ExchangeData() noexcept
 							{
 								ObjectExplorationContext context;
 								ReportHeapArrayAsJson(json, context, nullptr, val.ahVal, "");
-								packetAcknowledged = transfer.WriteEvaluationResult(channel, expression.c_str(), json);
+								packetAcknowledged = transfer.WriteEvaluationResult(channel, expression.c_str(), json, answerTag);
 							}
 							else
 							{
@@ -725,7 +815,7 @@ void SbcInterface::ExchangeData() noexcept
 								ObjectExplorationContext context;
 								context.AddIndex(val.param >> 8);
 								val.omVal->ReportItemAsJsonFull(json, context, nullptr, val, "");
-								packetAcknowledged = transfer.WriteEvaluationResult(channel, expression.c_str(), json);
+								packetAcknowledged = transfer.WriteEvaluationResult(channel, expression.c_str(), json, answerTag);
 							}
 							else
 							{
@@ -735,7 +825,7 @@ void SbcInterface::ExchangeData() noexcept
 						else
 						{
 							// Write plain result
-							packetAcknowledged = transfer.WriteEvaluationResult(channel, expression.c_str(), val);
+							packetAcknowledged = transfer.WriteEvaluationResult(channel, expression.c_str(), val, answerTag);
 						}
 					}
 					else
@@ -748,7 +838,7 @@ void SbcInterface::ExchangeData() noexcept
 					// Get the error message and send it back to DSF
 					String<StringLength100> errorMessage;
 					e.GetMessage(errorMessage.GetRef(), nullptr);
-					packetAcknowledged = transfer.WriteEvaluationError(channel, expression.c_str(), errorMessage.c_str());
+					packetAcknowledged = transfer.WriteEvaluationError(channel, expression.c_str(), errorMessage.c_str(), answerTag);
 				}
 				burstModeStartTime = millis();
 			}
@@ -769,30 +859,43 @@ void SbcInterface::ExchangeData() noexcept
 				MessageType type;
 				if (transfer.ReadMessage(type, buf))
 				{
-					// Check if this is a targeted reply to a single channel whose code is executing on the SBC
-					// (e.g. a response to M121 retransmitted by DSF). If so, mark the GB as finished.
-					if ((type & PushFlag) == 0)
+					// Check if this is a targeted reply to a single channel (e.g. a response to M121 retransmitted by DSF)
+					GCodeBuffer *gb = nullptr;
+					const Bitmap<uint32_t> destBits((uint32_t)type & (uint32_t)DestinationsMask);
+					for (size_t channel = 0; channel < NumGCodeChannels; channel++)
 					{
-						const Bitmap<uint32_t> destBits((uint32_t)type & (uint32_t)DestinationsMask);
-						for (size_t channel = 0; channel < NumGCodeChannels; channel++)
+						if (destBits.IsOnlyBitSet(channel))
 						{
-							if (destBits.IsOnlyBitSet(channel))
+							gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(channel));
+							break;
+						}
+					}
+
+					// Such a reply to a code that is executing on the SBC carries the channel epoch of that code. Drop it if it belongs to another epoch
+					if (gb != nullptr && (packet->resendPacketId & ChannelEpochTagged) != 0 && IsDroppedByEpoch(*gb, *packet))
+					{
+						OutputBuffer::ReleaseAll(buf);
+						break;
+					}
+
+					// If the code of that channel is executing on the SBC, mark the GB as finished
+					if ((type & PushFlag) == 0 && gb != nullptr && gb->IsExecutingOnSbc())
+					{
+						if (gb->IsAbortRecorded())
+						{
+							packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+						}
+						else
+						{
+							// The main task may be spinning this channel, so take its mutex. If we can't get it, we will get the message again
+							MutexLocker locker(gb->mutex, SbcYieldTimeout);
+							if (!locker.IsAcquired())
 							{
-								GCodeBuffer *const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(channel));
-								if (gb != nullptr && gb->IsExecutingOnSbc())
-								{
-									// The main task may be spinning this channel, so take its mutex. If we can't get it, we will get the message again
-									MutexLocker locker(gb->mutex, SbcYieldTimeout);
-									if (!locker.IsAcquired())
-									{
-										packetAcknowledged = false;
-									}
-									else if (gb->IsExecutingOnSbc())
-									{
-										gb->SetFinished(true);
-									}
-								}
-								break;
+								packetAcknowledged = false;
+							}
+							else if (gb->IsExecutingOnSbc())
+							{
+								gb->SetFinished(true);
 							}
 						}
 					}
@@ -833,6 +936,11 @@ void SbcInterface::ExchangeData() noexcept
 				if (gb == nullptr)
 				{
 					REPORT_INTERNAL_ERROR;
+					break;
+				}
+
+				if (IsDroppedByEpoch(*gb, *packet))
+				{
 					break;
 				}
 
@@ -877,45 +985,30 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				// DSF drops every code it has sent on this channel, so the replies of a code from the SBC that is still being executed are surplus.
-				// Only the first copy of this request flags that code, a resent copy would flag a code that has started since
-				const bool firstCopy = !gb->IsInvalidationPending();
-				if (gb->IsWaitingForMacro())
+				// DSF starts a new epoch of the channel with this request. One whose epoch does not follow that of the channel is a repeat,
+				// e.g. of a transfer that was processed twice, and is ignored. An untagged one always acts
+				const uint16_t tag = packet->resendPacketId;
+				if ((tag & ChannelEpochTagged) != 0)
 				{
-					// Flag the code that requested the macro before the main task wakes up and reports the macro as not found
-					if (firstCopy && gb->IsMacroStartedByCode())
+					if (gb->IsChannelEpochKnown() && !ChannelEpochFollows(tag & ChannelEpochMask, gb->GetChannelEpoch()))
 					{
-						gb->SetCodeReplySurplus(true);
+						numRepeatedAborts++;
+						break;
 					}
-
-					// A request that has not gone out yet is void as well, as in GCodeBuffer::Reset. Clear it before the main task
-					// wakes up, so that a new request it makes after waking up stays
-					gb->MacroRequestSent();
-					gb->ResolveMacroRequest(true, false);
+					gb->SetChannelEpoch(tag & ChannelEpochMask);
 				}
+				gb->SetAbortGate(false);
 
-				MutexLocker locker(gb->mutex, SbcYieldTimeout);
-				if (locker.IsAcquired())
+				// DSF has dropped every code it has sent on this channel
+				InvalidateBufferedCodes(channel);
+
+				// The replies of a code from the SBC that is still being executed are surplus. Flag a code that requested a macro before the main task
+				// wakes up and reports the macro as not found, unless its replies carry its epoch. The main task waits, so the stack does not change
+				if (gb->IsWaitingForMacro() && gb->IsMacroStartedByCode())
 				{
-					// Note that we do not call StopPrint here or set any other variables; DSF already does that
-					reprap.GetGCodes().PauseSequenceAborted(*gb);	// don't get stuck in "pausing" if this abort tears down the pause sequence
-					gb->AbortFile(true);
-					gb->FileAbortSent();	// don't notify the SBC
-					gb->MacroFileClosedSent();	// DSF has dropped all its macro files, so a closal that has not gone out yet is void as well, as in GCodeBuffer::Reset
-					InvalidateBufferedCodes(channel);
-
-					// A code that is still being executed now replies on the level that AbortFile has left
-					if (firstCopy && gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
-					{
-						gb->SetCodeReplySurplus(true);
-					}
-					gb->SetInvalidationPending(false);
+					gb->MarkCodeReplySurplus();
 				}
-				else
-				{
-					gb->SetInvalidationPending(true);
-					packetAcknowledged = false;
-				}
+				RecordChannelAbort(*gb, false);
 			}
 			else
 			{
@@ -946,6 +1039,17 @@ void SbcInterface::ExchangeData() noexcept
 				break;
 			}
 
+			if (IsDroppedByEpoch(*gb, *packet))
+			{
+				break;
+			}
+
+			if (gb->IsAbortRecorded())
+			{
+				packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+				break;
+			}
+
 			MutexLocker lock(gb->mutex, SbcYieldTimeout);
 			if (!lock.IsAcquired())
 			{
@@ -954,10 +1058,11 @@ void SbcInterface::ExchangeData() noexcept
 			}
 
 			// Get the variable set
+			const uint16_t answerTag = ChannelEpochTag(ChannelEpochOf(packet->resendPacketId));		// the tag of the request without the marker
 			const bool isGlobal = StringStartsWith(varName.c_str(), "global.");
 			if (!isGlobal && !StringStartsWith(varName.c_str(), "var."))
 			{
-				packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), "expected a global or local variable");
+				packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), "expected a global or local variable", answerTag);
 				break;
 			}
 			WriteLockedPointer<VariableSet> vset = (isGlobal) ? reprap.GetGlobalVariablesForWriting() : WriteLockedPointer<VariableSet>(nullptr, &gb->GetVariables());
@@ -1010,7 +1115,7 @@ void SbcInterface::ExchangeData() noexcept
 
 					if (hadError)
 					{
-						packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), expression.c_str());
+						packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), expression.c_str(), answerTag);
 						break;
 					}
 
@@ -1025,14 +1130,14 @@ void SbcInterface::ExchangeData() noexcept
 				// For now we don't allow an existing variable to be reassigned using a 'var' or 'global' statement. We may need to allow it for 'global' statements.
 				// Save memory by re-using 'expression' to capture the error message
 				expression.printf("variable '%s' already exists", varName.c_str());
-				packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), expression.c_str());
+				packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), expression.c_str(), answerTag);
 				break;
 			}
 			if (!createVariable && v == nullptr)
 			{
 				// Save memory by re-using 'expression' to capture the error message
 				expression.printf("unknown variable '%s'", varName.c_str());
-				packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), expression.c_str());
+				packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), expression.c_str(), answerTag);
 				break;
 			}
 
@@ -1063,7 +1168,7 @@ void SbcInterface::ExchangeData() noexcept
 					{
 						ObjectExplorationContext context;
 						ReportHeapArrayAsJson(json, context, nullptr, ev.ahVal, "");
-						packetAcknowledged = transfer.WriteSetVariableResult(channel, varName.c_str(), json);
+						packetAcknowledged = transfer.WriteSetVariableResult(channel, varName.c_str(), json, answerTag);
 					}
 					else
 					{
@@ -1079,7 +1184,7 @@ void SbcInterface::ExchangeData() noexcept
 						ObjectExplorationContext context;
 						context.AddIndex(ev.param >> 8);
 						ev.omVal->ReportItemAsJsonFull(json, context, nullptr, ev, "");
-						packetAcknowledged = transfer.WriteSetVariableResult(channel, varName.c_str(), json);
+						packetAcknowledged = transfer.WriteSetVariableResult(channel, varName.c_str(), json, answerTag);
 					}
 					else
 					{
@@ -1089,7 +1194,7 @@ void SbcInterface::ExchangeData() noexcept
 				else
 				{
 					// Write plain result
-					packetAcknowledged = transfer.WriteSetVariableResult(channel, varName.c_str(), ev);
+					packetAcknowledged = transfer.WriteSetVariableResult(channel, varName.c_str(), ev, answerTag);
 				}
 
 				if (isGlobal)
@@ -1102,7 +1207,7 @@ void SbcInterface::ExchangeData() noexcept
 				// Get the error message and send it back to DSF
 				// Save memory by re-using 'expression' to capture the error message
 				e.GetMessage(expression.GetRef(), nullptr);
-				packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), expression.c_str());
+				packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), expression.c_str(), answerTag);
 			}
 			burstModeStartTime = millis();
 			break;
@@ -1125,6 +1230,17 @@ void SbcInterface::ExchangeData() noexcept
 			if (gb == nullptr)
 			{
 				REPORT_INTERNAL_ERROR;
+				break;
+			}
+
+			if (IsDroppedByEpoch(*gb, *packet))
+			{
+				break;
+			}
+
+			if (gb->IsAbortRecorded())
+			{
+				packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
 				break;
 			}
 
@@ -1301,6 +1417,17 @@ void SbcInterface::ExchangeData() noexcept
 			if (gb == nullptr)
 			{
 				REPORT_INTERNAL_ERROR;
+				break;
+			}
+
+			if (IsDroppedByEpoch(*gb, *packet))
+			{
+				break;
+			}
+
+			if (gb->IsAbortRecorded())
+			{
+				packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
 				break;
 			}
 
@@ -1481,14 +1608,43 @@ void SbcInterface::ExchangeData() noexcept
 		}
 	}
 
+	// Nothing of a channel whose abort is recorded is sent before the main task has applied it, because it belongs to the work that DSF has dropped
+	// and the apply voids it. A macro wait that the main task began after the record ends here with an error, as the record ends one. This comes
+	// before the hold below, so that such a wait ends in the next exchange, also before the SBC's first packet of a new connection
+	bool fileAbortRecorded = false;
+	for (size_t i = 0; i < NumGCodeChannels; i++)
+	{
+		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(i));
+		if (gb != nullptr && gb->IsAbortRecorded())
+		{
+			if (gb->IsWaitingForMacro())
+			{
+				gb->MacroRequestSent();
+				gb->ResolveMacroRequest(true, false);
+			}
+			if (gb->IsFileChannel())
+			{
+				fileAbortRecorded = true;
+			}
+		}
+	}
+
+	// Nothing that belongs to a channel is written before the SBC task has read a packet of the SBC in this connection. So the first requests of
+	// a channel, e.g. that of config.g, go out once it is known whether the SBC tags, with the epoch of its first marker if it does. They are held,
+	// not dropped
+	if (!sbcPacketRead)
+	{
+		return;
+	}
+
 	// Deal with code channel requests
 	for (size_t i = 0; i < NumGCodeChannels; i++)
 	{
 		const GCodeChannel channel(i);
 		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(channel);
-		if (gb == nullptr)
+		if (gb == nullptr || gb->IsAbortRecorded())
 		{
-			// Skip GBs that are not available due to the build configuration
+			// Skip GBs that are not available due to the build configuration, and those whose abort is recorded (see above)
 			continue;
 		}
 
@@ -1504,18 +1660,18 @@ void SbcInterface::ExchangeData() noexcept
 		}
 
 		// Deal with macro files being closed
-		if (gb->IsMacroFileClosed() && transfer.WriteMacroFileClosed(channel))
+		if (gb->IsMacroFileClosed() && transfer.WriteMacroFileClosed(channel, gb->GetChannelTag()))
 		{
 			// Note this is only sent when a macro file has finished successfully
 			gb->MacroFileClosedSent();
 		}
 
-		// Handle blocking macro requests
+		// Handle blocking macro requests. One of a code that has outlived the epoch of its channel is sent as a system macro request (IsMacroRequestOfCode)
 		if (gb->IsWaitingForMacro() && gb->IsMacroRequestPending())
 		{
 			const char * const requestedMacroFile = gb->GetRequestedMacroFile();
-			bool fromCode = gb->IsMacroStartedByCode();
-			if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode))
+			const bool fromCode = gb->IsMacroRequestOfCode();
+			if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode, gb->GetChannelTag()))
 			{
 				if (reprap.Debug(Module::SbcInterface))
 				{
@@ -1546,8 +1702,14 @@ void SbcInterface::ExchangeData() noexcept
 					{
 						WriteQueuedCodeReplies();
 					}
-					if ((gb->IsAbortAllRequested() || gcodeReply.IsEmpty()) && transfer.WriteAbortFileRequest(channel, gb->IsAbortAllRequested()))
+					if ((gb->IsAbortAllRequested() || gcodeReply.IsEmpty()) && transfer.WriteAbortFileRequest(channel, gb->IsAbortAllRequested(), gb->GetChannelTag()))
 					{
+						// DSF answers an abort of all files of its current epoch with InvalidateChannel. Until then the packets of the channel are dropped
+						if (gb->IsAbortAllRequested() && gb->GetChannelTag() != 0)
+						{
+							gb->SetAbortGate(true);
+						}
+
 #ifdef TRACK_FILE_CODES
 						if (gb->IsFileChannel())
 						{
@@ -1561,8 +1723,10 @@ void SbcInterface::ExchangeData() noexcept
 							}
 						}
 #endif
-						// Send back a final code reply for codes that started the last macros, else the corresponding code will never finish
-						if (!gb->IsAbortAllRequested() && gb->GetState() == GCodeState::normal && (!gb->LatestMachineState().lastCodeFromSbc || gb->LatestMachineState().macroStartedByCode))
+						// Send back a final code reply for codes that started the last macros, else the corresponding code will never finish.
+						// Not for a code of a connection that has ended, which the SBC does not know
+						if (!gb->IsAbortAllRequested() && gb->GetState() == GCodeState::normal && (!gb->LatestMachineState().lastCodeFromSbc || gb->LatestMachineState().macroStartedByCode)
+							&& !IsReplyToCodeOfEndedConnection(gb->GetResponseMessageType()))
 						{
 							OutputBuffer *dummy = nullptr;
 							if (!transfer.WriteCodeReply(gb->GetResponseMessageType(), dummy))
@@ -1582,13 +1746,13 @@ void SbcInterface::ExchangeData() noexcept
 					// The SBC attributes this request to the first code it has buffered for this channel, so every queued reply
 					// must go out before it. Holding gb->mutex stops the GCodes task from adding more while we write them
 					WriteQueuedCodeReplies();
-					if (gcodeReply.IsEmpty() && transfer.WriteWaitForAcknowledgement(channel))
+					if (gcodeReply.IsEmpty() && transfer.WriteWaitForAcknowledgement(channel, gb->GetChannelTag()))
 					{
 						gb->MessagePromptSent();
 						gb->Invalidate();
 					}
 				}
-				else if (gb->IsMessageAcknowledged() && transfer.WriteMessageAcknowledged(channel))
+				else if (gb->IsMessageAcknowledged() && transfer.WriteMessageAcknowledged(channel, gb->GetChannelTag()))
 				{
 					// Note this is only sent when a message was acknowledged in a regular way (i.e. by M292)
 					gb->MessageAcknowledgementSent();
@@ -1598,8 +1762,8 @@ void SbcInterface::ExchangeData() noexcept
 				if (gb->IsMacroRequestPending())
 				{
 					const char * const requestedMacroFile = gb->GetRequestedMacroFile();
-					bool fromCode = gb->IsMacroStartedByCode();
-					if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode))
+					const bool fromCode = gb->IsMacroRequestOfCode();
+					if (transfer.WriteMacroRequest(channel, requestedMacroFile, fromCode, gb->GetChannelTag()))
 					{
 						if (reprap.Debug(Module::SbcInterface))
 						{
@@ -1619,14 +1783,14 @@ void SbcInterface::ExchangeData() noexcept
 						// That means we need to prepend it again before the full code is sent over to the SBC
 						String<MaxGCodeStringLength> code;
 						code.printf("N%" PRIu32 " %s", gb->GetExplicitLineNumber(), gb->DataStart());
-						if (transfer.WriteDoCode(channel, code.c_str(), code.strlen()))
+						if (transfer.WriteDoCode(channel, code.c_str(), code.strlen(), gb->GetChannelTag()))
 						{
 							gb->SentToSbc();
 						}
 					}
 					else
 					{
-						if (transfer.WriteDoCode(channel, gb->DataStart(), gb->DataLength()))
+						if (transfer.WriteDoCode(channel, gb->DataStart(), gb->DataLength(), gb->GetChannelTag()))
 						{
 							gb->SentToSbc();
 						}
@@ -1636,8 +1800,10 @@ void SbcInterface::ExchangeData() noexcept
 		}
 	}
 
-	// Send pause notification on demand
-	if (reportPause && transfer.WritePrintPaused(pauseFilePosition, pauseFilePosition2, pauseReason))
+	// Send pause notification on demand, but not while the abort of a print file channel is recorded, because DSF aborts the print for it.
+	// It carries the epoch of the File channel
+	if (reportPause && !fileAbortRecorded &&
+		transfer.WritePrintPaused(pauseFilePosition, pauseFilePosition2, pauseReason, reprap.GetGCodes().GetGCodeBuffer(GCodeChannel::File)->GetChannelTag()))
 	{
 		reportPause = false;
 	}
@@ -1716,6 +1882,7 @@ void SbcInterface::ExchangeData() noexcept
 
 void SbcInterface::InvalidateResources() noexcept
 {
+	sbcPacketRead = false;
 	txEnd = 0;
 	txPointer = 0;
 	rxPointer = 0;
@@ -1737,39 +1904,25 @@ void SbcInterface::InvalidateResources() noexcept
 	MassStorage::InvalidateAllFiles();
 	numOpenFiles = 0;
 
-	// Don't cache any messages if they cannot be sent
-	{
-		MutexLocker lock(gcodeReplyMutex);
-		gcodeReply.ReleaseAll();
-	}
-
-	// Close all open G-code files
+	// End the work of every channel. Only the main task changes the stack of a GB, so the abort of every channel is recorded here and the main task
+	// applies it at the start of its next spin, as it applies InvalidateChannel. There it runs after the emergency stop that the caller has requested,
+	// which runs AbortPrint for every GB. The epoch of each channel is unknown until the SBC tags a packet of the channel again, and the epochs of
+	// the codes on the stacks are voided
 	for (size_t i = 0; i < NumGCodeChannels; i++)
 	{
 		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(i));
-		if (gb == nullptr)
+		if (gb != nullptr)											// skip GBs that are not available due to the build configuration
 		{
-			// Skip GBs that are not available due to the build configuration
-			continue;
+			gb->ResetChannelEpoch(false);
+			RecordChannelAbort(*gb, true);
 		}
+	}
 
-		if (gb->IsWaitingForMacro())
-		{
-			gb->ResolveMacroRequest(true, false);
-		}
-
-		MutexLocker locker(gb->mutex);
-		if (gb->IsExecutingOnSbc())
-		{
-			gb->SetFinished(true);		// only under the mutex, because the main task may be spinning this channel
-		}
-		if (gb->IsMacroRequestPending())
-		{
-			gb->MacroRequestSent();
-		}
-		gb->AbortFile(true);
-		gb->FileAbortSent();	// don't notify the SBC
-		gb->MessageAcknowledged(true, true, 0, ExpressionValue());
+	// Don't cache any messages if they cannot be sent. This comes after the record, so that a reply of a code of the ended connection that the
+	// main task queues meanwhile is either released here or dropped by HandleGCodeReply
+	{
+		MutexLocker lock(gcodeReplyMutex);
+		gcodeReply.ReleaseAll();
 	}
 
 	// Abort the print (if applicable)
@@ -1777,6 +1930,165 @@ void SbcInterface::InvalidateResources() noexcept
 
 	// Turn off all the heaters
 	reprap.GetHeat().SwitchOffAll(true);
+}
+
+// Record the abort of a channel: when the SBC aborts the channel (InvalidateChannel) and for every channel when the connection is lost
+// (InvalidateResources). The main task may be in the middle of changing the GB, so it applies the abort at the start of its next spin
+// (ApplyRecordedAborts). So the abort is never refused, and nothing of the channel is sent to the SBC until then. The codes that the SBC sends
+// from now on are kept, even if a macro request invalidated the GB. A lost connection also voids the epochs of the codes on the stack
+void SbcInterface::RecordChannelAbort(GCodeBuffer& gb, bool connectionLost) noexcept
+{
+	gb.Invalidate(false);
+	gb.SetAbortRecorded(true);
+	if (connectionLost)
+	{
+		// The codes on the stack belong to the connection that has ended: their epochs count as invalid and none of their replies is written
+		// to the SBC from now on, whatever connection is up when they reply (IsReplyToCodeOfEndedConnection)
+		gb.SetConnectionEndRecorded();
+	}
+	whenAbortRecorded = millis();
+	reprap.GetGCodes().ChannelAbortRecorded();
+
+	// End a macro wait with an error, so that the main task gets to the start of its next spin. A request that has not gone out yet is void
+	// as well, as in GCodeBuffer::Reset
+	if (gb.IsWaitingForMacro())
+	{
+		gb.MacroRequestSent();
+		gb.ResolveMacroRequest(true, false);
+	}
+}
+
+// End everything of a channel that the SBC has dropped, so that nothing of it is reported to the SBC afterwards. Called by the main task when it
+// applies a recorded abort, with the GB mutex held, after the record has ended a macro wait and after the apply has voided what the SBC task reads
+// without the GB mutex. A code that is still being executed at the base level is neither stopped nor reset, and its state machine goes on with
+// its next step
+void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
+{
+	gb.MacroRequestSent();											// a macro request that has not gone out yet is void
+	if (gb.IsSendRequested() || gb.IsExecutingOnSbc())
+	{
+		gb.SetFinished(true);										// so is a code to be executed by the SBC, sent or not
+	}
+
+	// Note that we do not call StopPrint here or set any other variables; DSF already does that
+	GCodes& gcodes = reprap.GetGCodes();
+	gcodes.PauseSequenceAborted(gb);								// don't get stuck in "pausing" if this abort tears down the pause sequence
+	gb.AbortFile(true);
+	gb.FileAbortSent();												// DSF has aborted its files itself
+
+	// Close a message box left at the base level as cancelled, without the abort flag that would make the main task stop the print
+	gb.MessageAcknowledged(true, false, 0, ExpressionValue());
+	gb.MessagePromptSent();
+	gb.MessageAcknowledgementSent();
+
+	// Release the locks of an idle GB. Those of a code that is still being executed stay until it has finished, e.g. G28 still needs its axes
+	if (gb.IsCompletelyIdle())
+	{
+		gcodes.UnlockAll(gb);
+	}
+}
+
+// Apply the channel epoch to a packet of the SBC that belongs to the work of a channel, before anything of the packet is done. While the epoch
+// of the channel is unknown, a tagged packet sets it. Return true if the packet must be dropped, because the abort gate of the channel is set
+// or the packet is tagged with another epoch. A dropped packet gets no answer and is not requested again, because the SBC has ended its work
+bool SbcInterface::IsDroppedByEpoch(GCodeBuffer& gb, const PacketHeader& packet) noexcept
+{
+	const uint16_t tag = packet.resendPacketId;
+	const bool tagged = (tag & ChannelEpochTagged) != 0;
+	const uint8_t epoch = tag & ChannelEpochMask;
+	if (tagged && !gb.IsChannelEpochKnown())
+	{
+		gb.SetChannelEpoch(epoch);
+	}
+
+	EpochDrop drop;
+	if (gb.IsAbortGateSet())
+	{
+		numGatedPackets++;
+		drop = EpochDrop::gated;
+	}
+	else if (tagged && epoch != gb.GetChannelEpoch())
+	{
+		if (ChannelEpochFollows(epoch, gb.GetChannelEpoch()))
+		{
+			numAheadPackets++;
+			drop = EpochDrop::ahead;
+		}
+		else
+		{
+			numStalePackets++;
+			drop = EpochDrop::stale;
+		}
+	}
+	else
+	{
+		return false;
+	}
+
+	lastDrop = drop;
+	lastDropChannel = gb.GetChannel().RawValue();
+	lastDropRequest = packet.request;
+	return true;
+}
+
+// Apply the channel aborts and the ends of connections that the SBC task has recorded. This is called by the main task at the start of its spin
+void SbcInterface::ApplyRecordedAborts() noexcept
+{
+	for (size_t i = 0; i < NumGCodeChannels; i++)
+	{
+		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(i));
+		if (gb != nullptr && (gb->IsAbortRecorded() || gb->IsConnectionEndRecorded()))
+		{
+			MutexLocker locker(gb->mutex);
+
+			// The SBC task records without the GB mutex. Take the record before applying it, so that a record that comes in meanwhile stays set and
+			// is applied in the next spin. Both flags are taken at once, because InvalidateResources records an abort and the end of the connection
+			// together. The SBC task keeps off the GB while the abort is recorded, but it reads a few flags of the GB without the mutex, so those
+			// are voided here too: a closal that has not gone out yet (DSF has dropped its macro files), the invalidation of the GB (the event that
+			// set it is void) and the pause report of a print file channel (DSF aborts the print when it aborts that channel)
+			bool aborted, connectionLost;
+			{
+				TaskCriticalSectionLocker lock;
+				aborted = gb->IsAbortRecorded();
+				connectionLost = gb->IsConnectionEndRecorded();
+				gb->SetAbortRecorded(false);
+				gb->ConnectionEndApplied();
+				if (aborted)
+				{
+					gb->MacroFileClosedSent();
+					gb->Invalidate(false);
+					if (gb->IsFileChannel())
+					{
+						reportPause = false;
+					}
+				}
+			}
+
+			if (aborted)
+			{
+				InvalidateChannel(*gb);
+
+				// A code from the SBC that is still being executed now replies on the level that AbortFile has left. DSF has dropped it, so its replies
+				// are surplus unless they carry its epoch. None of the replies of a code of a lost connection is written anyway (IsCodeOfEndedConnection)
+				if (!connectionLost && gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
+				{
+					gb->MarkCodeReplySurplus();
+				}
+
+				const uint32_t applyDelay = millis() - whenAbortRecorded;
+				if (applyDelay > maxAbortApplyDelay)
+				{
+					maxAbortApplyDelay = applyDelay;
+				}
+			}
+
+			// The connection has been lost. Only the main task changes the stack, so it applies that to the levels of the codes on it here
+			if (connectionLost)
+			{
+				gb->EndConnectionOfCodes();
+			}
+		}
+	}
 }
 
 void SbcInterface::Diagnostics(const StringRef& reply) noexcept
@@ -1792,6 +2104,13 @@ void SbcInterface::Diagnostics(const StringRef& reply) noexcept
 	}
 	reply.lcatf("State: %d, disconnects: %" PRIu32 ", timeouts: %" PRIu32 " total, %" PRIu32 " by SBC", (int)state, numDisconnects, numTimeouts, numSbcTimeouts);
 	reply.lcatf("Buffer RX/TX: %d/%d-%d, open files: %u", (int)rxPointer, (int)txPointer, (int)txEnd, numOpenFiles);
+	reply.lcatf("Channel epochs: dropped %" PRIu32 " stale, %" PRIu32 " ahead, %" PRIu32 " gated, %" PRIu32 " repeated aborts, longest abort apply %" PRIu32 "ms",
+					numStalePackets, numAheadPackets, numGatedPackets, numRepeatedAborts, maxAbortApplyDelay);
+	if (lastDrop != EpochDrop::none)
+	{
+		reply.catf(", last dropped %s request %u on channel %s",
+					(lastDrop == EpochDrop::stale) ? "stale" : (lastDrop == EpochDrop::ahead) ? "ahead" : "gated", (unsigned int)lastDropRequest, GCodeChannel(lastDropChannel).ToString());
+	}
 #ifdef TRACK_FILE_CODES
 	reply.lcatf("File codes read/handled: %d/%d, file macros open/closing: %d %d", (int)fileCodesRead, (int)fileCodesHandled, (int)fileMacrosRunning, (int)fileMacrosClosing);
 #endif
@@ -1899,9 +2218,11 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 
 	bool gotCommand = false;
 	{
-		// The whole walk must be atomic: readPointer is a cursor into variable-length records, so a concurrent defragment would invalidate it
+		// The whole walk must be atomic: readPointer is a cursor into variable-length records, so a concurrent defragment would invalidate it.
+		// The codes of a channel whose abort is recorded wait until the main task has applied it. This is checked here, because the SBC task
+		// records an abort before it stores the next code
 		TaskCriticalSectionLocker locker;
-		if (rxPointer != txPointer || txEnd != 0)
+		if (!gb.IsAbortRecorded() && (rxPointer != txPointer || txEnd != 0))
 		{
 			bool updateRxPointer = true;
 			uint16_t readPointer = rxPointer;
@@ -1942,7 +2263,7 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 #endif
 
 						// Process the next binary G-code
-						gb.PutBinary(reinterpret_cast<const uint32_t *>(codeHeader), bufHeader->length / sizeof(uint32_t));
+						gb.PutBinary(reinterpret_cast<const uint32_t *>(codeHeader), bufHeader->length / sizeof(uint32_t), bufHeader->codeEpoch);
 						bufHeader->isPending = false;
 
 						// Check if we can reset the ring buffer pointers
@@ -2365,6 +2686,11 @@ void SbcInterface::HandleGCodeReply(MessageType mt, const char *reply) noexcept
 #endif
 
 	MutexLocker lock(gcodeReplyMutex);
+	if (IsReplyToCodeOfEndedConnection(mt))
+	{
+		return;
+	}
+
 	OutputBuffer *buffer = gcodeReply.GetLastItem();
 	if (buffer != nullptr && mt == gcodeReply.GetLastItemType() && (mt & PushFlag) != 0 && !buffer->IsReferenced())
 	{
@@ -2401,8 +2727,35 @@ void SbcInterface::HandleGCodeReply(MessageType mt, OutputBuffer *buffer) noexce
 #endif
 
 	MutexLocker lock(gcodeReplyMutex);
+	if (IsReplyToCodeOfEndedConnection(mt))
+	{
+		OutputBuffer::ReleaseAll(buffer);
+		return;
+	}
+
 	gcodeReply.Push(buffer, mt);
 	EventOccurred();
+}
+
+// Check if a message is a reply to a code from the SBC that belongs to a connection that has ended (GCodeBuffer::IsCodeOfEndedConnection). None of
+// its replies is written to the SBC, whatever connection is up when it replies. Every code reply to the SBC passes here or, for the reply that the
+// write phase sends for an aborted macro, is checked here before it is written. When called from HandleGCodeReply, the caller holds gcodeReplyMutex,
+// which InvalidateResources takes after it has recorded the end of the connection, so no such reply is queued after the queue has been released
+bool SbcInterface::IsReplyToCodeOfEndedConnection(MessageType mt) const noexcept
+{
+	if ((mt & BinaryCodeReplyFlag) != 0)
+	{
+		const uint32_t destinations = (uint32_t)mt & (uint32_t)DestinationsMask;
+		for (size_t c = 0; c < NumGCodeChannels; c++)
+		{
+			if (destinations == (1u << c))
+			{
+				const GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(c));
+				return gb != nullptr && gb->IsCodeOfEndedConnection();
+			}
+		}
+	}
+	return false;
 }
 
 void SbcInterface::EventOccurred(bool timeCritical) noexcept

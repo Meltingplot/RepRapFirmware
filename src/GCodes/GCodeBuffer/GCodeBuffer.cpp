@@ -116,7 +116,8 @@ GCodeBuffer::GCodeBuffer(GCodeChannel::RawType channel, GCodeInput *_ecv_from no
 	  disabled(false), timerRunning(false), motionCommanded(false), hadExplicitLineNumber(false), buffer(nullptr), bufferLength(0)
 
 #if HAS_SBC_INTERFACE
-	  , isWaitingForMacro(false), isBinaryBuffer(false), invalidated(false), invalidationPending(false)
+	  , isWaitingForMacro(false), abortRecorded(false), connectionEndRecorded(false), isBinaryBuffer(false), invalidated(false),
+	  channelEpoch(0), channelEpochKnown(false), abortGateSet(false)
 #endif
 {
 	mutex.Create(((GCodeChannel)channel).ToString());
@@ -143,7 +144,7 @@ void GCodeBuffer::Reset() noexcept
 	isWaitingForMacro = false;
 	macroJustStarted = macroFileError = macroFileEmpty = false;
 	abortFile = abortAllFiles = sendToSbc = messagePromptPending = messageAcknowledged = codeReplySurplus = false;
-	machineState->lastCodeFromSbc = machineState->macroStartedByCode = false;
+	machineState->lastCodeFromSbc = machineState->macroStartedByCode = machineState->codeEpochValid = machineState->codeOfEndedConnection = false;
 #endif
 	cancelWait = false;
 	Init();
@@ -312,16 +313,73 @@ bool GCodeBuffer::CheckMetaCommand(const StringRef& reply) THROWS(GCodeException
 
 #if HAS_SBC_INTERFACE
 
-// Add an entire binary G-Code, overwriting any existing content
+// Add an entire binary G-Code, overwriting any existing content. The latest level keeps the given channel epoch of the code, which its replies and
+// its macro requests carry. A level pushed later starts with it, and a pop brings back the epoch of the code that pushed the level
 // CAUTION! This may be called with the task scheduler suspended, so don't do anything that might block or take more than a few microseconds to execute
-void GCodeBuffer::PutBinary(const uint32_t *data, size_t len) noexcept
+void GCodeBuffer::PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noexcept
 {
 	restoredCommandValid = false;
 	machineState->lastCodeFromSbc = true;
+	machineState->codeEpochValid = (epoch & ChannelEpochValid) != 0;
+	machineState->codeEpoch = epoch & ChannelEpochMask;
+	machineState->codeOfEndedConnection = false;
 	isBinaryBuffer = true;
 	macroJustStarted = false;
 	codeReplySurplus = false;		// the code that the SBC dropped has finished, or this code belongs to a macro that the dropped code has started since
 	binaryParser.Put(data, len);
+}
+
+// Start at epoch 0 when the SBC starts a connection, or forget the epoch when the connection is lost. Either way there is no gate
+void GCodeBuffer::ResetChannelEpoch(bool known) noexcept
+{
+	channelEpoch = 0;
+	channelEpochKnown = known;
+	abortGateSet = false;
+}
+
+// Apply the end of the connection that the codes on every level belong to: their channel epochs are void, and none of their replies is written to
+// the SBC, whatever connection is up when they reply. A level keeps the mark until a code is put on it, and a level pushed by such a code starts with
+// it. The caller holds the GB mutex
+void GCodeBuffer::EndConnectionOfCodes() noexcept
+{
+	for (GCodeMachineState *_ecv_null ms = machineState; ms != nullptr; ms = ms->GetPrevious())
+	{
+		ms->codeEpochValid = false;
+		ms->codeOfEndedConnection = true;
+	}
+}
+
+// Return true if the code being executed belongs to an SBC connection that has ended, so that none of its replies may be written to the SBC.
+// Between the record of the end of the connection and its apply this is true for every code on the stack
+bool GCodeBuffer::IsCodeOfEndedConnection() const noexcept
+{
+	return connectionEndRecorded || machineState->codeOfEndedConnection;
+}
+
+// Get the channel epoch of the code on the latest level in one byte (ChannelEpochValid set if it is valid)
+uint8_t GCodeBuffer::GetCodeEpoch() const noexcept
+{
+	return (machineState->codeEpochValid && !connectionEndRecorded) ? ChannelEpochValid | machineState->codeEpoch : 0;
+}
+
+// Return true if the pending macro request is sent as one of the code being executed. That is so if the code requested it and belongs to the
+// epoch of the channel, or if that epoch is unknown. A code that has outlived the epoch of its channel, e.g. a T-code at the base level whose
+// tfree.g an abort has ended, requests its next macros as system macros of the channel epoch, so that it goes on as in standalone RRF.
+// Either way the request carries the tag of the channel, which is the tag of the code if it is sent as one of the code
+bool GCodeBuffer::IsMacroRequestOfCode() const noexcept
+{
+	return machineState->macroStartedByCode && (!channelEpochKnown || GetCodeEpoch() == (ChannelEpochValid | channelEpoch));
+}
+
+// Flag the replies of the code being executed as surplus, because the SBC has dropped it. This is needed only if they would go out without a channel
+// epoch, that is if the epoch of the code on the latest level is invalid or the channel epoch is unknown. Otherwise they carry the epoch of the code,
+// which the SBC tells apart from the current one
+void GCodeBuffer::MarkCodeReplySurplus() noexcept
+{
+	if (!channelEpochKnown || (GetCodeEpoch() & ChannelEpochValid) == 0)
+	{
+		codeReplySurplus = true;
+	}
 }
 
 #endif
@@ -1144,6 +1202,7 @@ void GCodeBuffer::AbortFile(bool abortAll) noexcept
 		{
 			abortFile = true;
 			abortAllFiles = abortAll;
+			macroJustStarted = false;		// a macro that has just been started is closed too, so the next reply of the code below it is not a push message
 		}
 #endif
 	}
@@ -1337,7 +1396,10 @@ MessageType GCodeBuffer::GetResponseMessageType() const noexcept
 #if HAS_SBC_INTERFACE
 	if (machineState->lastCodeFromSbc)
 	{
-		return (MessageType)((1u << codeChannel.ToBaseType()) | BinaryCodeReplyFlag);
+		// The channel epoch of the code goes into bits of the message type that are otherwise unused, see DataTransfer::WriteCodeReply
+		const uint8_t codeEpoch = GetCodeEpoch();
+		const uint32_t epochBits = ((codeEpoch & ChannelEpochValid) != 0) ? (uint32_t)CodeReplyEpochFlag | ((uint32_t)(codeEpoch & ChannelEpochMask) << CodeReplyEpochShift) : 0;
+		return (MessageType)((1u << codeChannel.ToBaseType()) | BinaryCodeReplyFlag | epochBits);
 	}
 #endif
 	return responseMessageType;

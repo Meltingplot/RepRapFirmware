@@ -76,24 +76,25 @@ public:
 	size_t ReadFileList(char *buffer, size_t length, bool& endOfList) noexcept;				// Read a chunk of a directory listing from the SBC
 	GCodeChannel ReadSetLastCodeResult(GCodeResult& result) noexcept;						// Read the result of the last executed code
 
+	// The packets that belong to the work of a code channel take the tag of its channel epoch, see SbcMessageFormats.h. A code reply carries it in its message type
 	void ResendPacket(const PacketHeader *packet) noexcept;
 	bool WriteObjectModel(OutputBuffer *data) noexcept;
 	bool WriteCodeBufferUpdate(uint16_t bufferSpace) noexcept;
 	bool WriteCodeReply(MessageType type, OutputBuffer *&response) noexcept;
-	bool WriteMacroRequest(GCodeChannel channel, const char *filename, bool fromCode) noexcept;
-	bool WriteAbortFileRequest(GCodeChannel channel, bool abortAll) noexcept;
-	bool WriteMacroFileClosed(GCodeChannel channel) noexcept;
-	bool WritePrintPaused(FilePosition position, FilePosition position2, PrintPausedReason reason) noexcept;
-	bool WriteLocked(GCodeChannel channel) noexcept;
-	bool WriteEvaluationResult(GCodeChannel channel, const char *expression, const ExpressionValue& value) noexcept;
-	bool WriteEvaluationResult(GCodeChannel channel, const char *expression, OutputBuffer *json) noexcept;
-	bool WriteEvaluationError(GCodeChannel channel, const char *expression, const char *errorMessage) noexcept;
-	bool WriteDoCode(GCodeChannel channel, const char *code, size_t length) noexcept;
-	bool WriteWaitForAcknowledgement(GCodeChannel channel) noexcept;
-	bool WriteMessageAcknowledged(GCodeChannel channel) noexcept;
-	bool WriteSetVariableResult(GCodeChannel channel, const char *varName, const ExpressionValue& value) noexcept;
-	bool WriteSetVariableResult(GCodeChannel channel,const char *varName, OutputBuffer *json) noexcept;
-	bool WriteSetVariableError(GCodeChannel channel,const char *varName, const char *errorMessage) noexcept;
+	bool WriteMacroRequest(GCodeChannel channel, const char *filename, bool fromCode, uint16_t tag) noexcept;
+	bool WriteAbortFileRequest(GCodeChannel channel, bool abortAll, uint16_t tag) noexcept;
+	bool WriteMacroFileClosed(GCodeChannel channel, uint16_t tag) noexcept;
+	bool WritePrintPaused(FilePosition position, FilePosition position2, PrintPausedReason reason, uint16_t tag) noexcept;
+	bool WriteLocked(GCodeChannel channel, uint16_t tag) noexcept;
+	bool WriteEvaluationResult(GCodeChannel channel, const char *expression, const ExpressionValue& value, uint16_t tag) noexcept;
+	bool WriteEvaluationResult(GCodeChannel channel, const char *expression, OutputBuffer *json, uint16_t tag) noexcept;
+	bool WriteEvaluationError(GCodeChannel channel, const char *expression, const char *errorMessage, uint16_t tag) noexcept;
+	bool WriteDoCode(GCodeChannel channel, const char *code, size_t length, uint16_t tag) noexcept;
+	bool WriteWaitForAcknowledgement(GCodeChannel channel, uint16_t tag) noexcept;
+	bool WriteMessageAcknowledged(GCodeChannel channel, uint16_t tag) noexcept;
+	bool WriteSetVariableResult(GCodeChannel channel, const char *varName, const ExpressionValue& value, uint16_t tag) noexcept;
+	bool WriteSetVariableResult(GCodeChannel channel,const char *varName, OutputBuffer *json, uint16_t tag) noexcept;
+	bool WriteSetVariableError(GCodeChannel channel,const char *varName, const char *errorMessage, uint16_t tag) noexcept;
 	bool WriteCheckFileExists(const char *filename) noexcept;
 	bool WriteDeleteFileOrDirectory(const char *filename, bool recursive = false) noexcept;
 	bool WriteSecureDeleteFile(const char *filename) noexcept;
@@ -202,7 +203,7 @@ private:
 	uint8_t GetRxNumPackets() const noexcept;
 
 	bool CanWritePacket(size_t dataLength = 0) const noexcept;
-	PacketHeader *WritePacketHeader(FirmwareRequest request, size_t dataLength = 0, uint16_t resendPacktId = 0) noexcept;
+	PacketHeader *WritePacketHeader(FirmwareRequest request, size_t dataLength = 0, uint16_t resendPacketIdOrTag = 0) noexcept;
 	void WriteData(const char *data, size_t length) noexcept;
 	template<typename T> T *WriteDataHeader() noexcept;
 

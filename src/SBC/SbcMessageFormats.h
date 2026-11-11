@@ -103,8 +103,35 @@ struct PacketHeader
 	uint16_t request;
 	uint16_t id;
 	uint16_t length;
-	uint16_t resendPacketId;
+	uint16_t resendPacketId;					// ID of the packet to send again in a ResendPacket request, else the tag of the channel epoch
 };
+
+// Channel epoch (Meltingplot). Both sides tag the packets that belong to the work of a code channel with the epoch of that channel, and DSF
+// starts a new epoch whenever it aborts the channel (InvalidateChannel). The tag is in PacketHeader::resendPacketId, which a peer without the
+// channel epoch sets to 0 and reads only in ResendPacket requests
+constexpr uint16_t ChannelEpochTagged = 0x8000;			// the packet carries the epoch of its channel
+constexpr uint16_t ChannelEpochFirstMarker = 0x4000;	// SBC to RRF only: this is the first tagged packet since DSF started or ended a connection
+constexpr uint16_t ChannelEpochMask = 0x003F;			// the epoch (6 bits)
+constexpr uint8_t ChannelEpochValid = 0x80;				// in an epoch of one byte (BufferedCodeHeader::codeEpoch, the epoch passed to GCodeBuffer::PutBinary): bits 0-5 hold an epoch
+
+// Return true if epoch a follows epoch b, i.e. a is newer, as an RFC 1982 serial number of 6 bits. At a distance of 32 neither follows the other
+inline constexpr bool ChannelEpochFollows(uint8_t a, uint8_t b) noexcept
+{
+	const unsigned int distance = (unsigned int)(a - b) & ChannelEpochMask;
+	return distance != 0 && distance < 32;
+}
+
+// Return the tag of a packet with the given epoch of one byte, which may be invalid
+inline constexpr uint16_t ChannelEpochTag(uint8_t epoch) noexcept
+{
+	return ((epoch & ChannelEpochValid) != 0) ? ChannelEpochTagged | (epoch & ChannelEpochMask) : 0;
+}
+
+// Return the epoch of one byte of a tag, which is invalid if the packet is not tagged
+inline constexpr uint8_t ChannelEpochOf(uint16_t tag) noexcept
+{
+	return ((tag & ChannelEpochTagged) != 0) ? ChannelEpochValid | (tag & ChannelEpochMask) : 0;
+}
 
 struct StringHeader
 {
@@ -368,7 +395,7 @@ enum CodeFlags : uint8_t
 struct BufferedCodeHeader
 {
 	bool isPending;
-	uint8_t padding;
+	uint8_t codeEpoch;							// channel epoch of the Code packet (ChannelEpochValid set) or 0 if it was not tagged
 	uint16_t length;
 };
 

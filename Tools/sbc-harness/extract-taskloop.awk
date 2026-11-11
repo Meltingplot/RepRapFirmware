@@ -24,6 +24,17 @@ inLoop {
 	if ($0 ~ /^}/) { inLoop = 0; foundLoop = 1 }
 }
 
+# Optional, so that sources from before it still build: the end of a connection that TaskLoop calls
+/^void SbcInterface::EndConnection\(bool waitForMainTask\) noexcept/ {
+	inEnd = 1
+	printf "#line %d \"%s\"\n", NR, f
+}
+
+inEnd {
+	print
+	if ($0 ~ /^}/) { inEnd = 0 }
+}
+
 END {
 	if (!foundYield) { print "SbcYieldTimeout not found" > "/dev/stderr"; exit 1 }
 	if (!foundLoop) { print "SbcInterface::TaskLoop not found" > "/dev/stderr"; exit 1 }

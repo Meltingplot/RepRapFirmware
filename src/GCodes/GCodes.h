@@ -225,9 +225,12 @@ public:
 	GCodeResult HandleM558Subcommand(GCodeBuffer& gb, const StringRef &reply, unsigned int probeNumber) THROWS(GCodeException);	// Calibrate a scanning Z probe or tare a load cell probe
 #endif
 
-	// These next two are public because they are used by class SbcInterface
+	// These next ones are public because they are used by class SbcInterface
 	void UnlockAll(const GCodeBuffer& gb) noexcept;									// Release all locks
 	GCodeBuffer *_ecv_null GetGCodeBuffer(GCodeChannel channel) const noexcept { return gcodeSources[channel.ToBaseType()]; }
+#if HAS_SBC_INTERFACE
+	void ChannelAbortRecorded() noexcept;											// Called by the SBC task when it has recorded the abort of a channel or the end of a connection
+#endif
 
 #if HAS_MASS_STORAGE
 	GCodeResult StartSDTiming(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);	// Start timing SD card file writing

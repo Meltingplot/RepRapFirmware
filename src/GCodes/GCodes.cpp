@@ -73,6 +73,9 @@ constexpr uint32_t ResetRequest = 1u << 1;
 constexpr uint32_t CancelWaitRequest = 1u << 2;
 constexpr uint32_t CancelPrintFileWaitRequest = 1u << 3;
 constexpr uint32_t AxesNotHomedRequest = 1u << 4;
+#if HAS_SBC_INTERFACE
+constexpr uint32_t ChannelAbortRequest = 1u << 5;
+#endif
 static std::atomic<uint32_t> requestsFromOtherTasks = 0;
 
 GCodes::GCodes(Platform& p) noexcept :
@@ -428,6 +431,7 @@ bool GCodes::IsTriggerBusy() const noexcept
 #if HAS_SBC_INTERFACE
 			|| TriggerGCode()->IsAbortRequested()		// DSF keeps the aborted file on its stack until the abort has been sent
 			|| TriggerGCode()->IsSendRequested() || TriggerGCode()->IsExecutingOnSbc()	// a line of a trigger action is with DSF
+			|| TriggerGCode()->IsAbortRecorded()		// DSF has aborted the channel and the abort is yet to be applied
 #endif
 		;
 }
@@ -472,6 +476,12 @@ void GCodes::Spin() noexcept
 		{
 			Reset();
 		}
+#if HAS_SBC_INTERFACE
+		if (requests & ChannelAbortRequest)
+		{
+			reprap.GetSbcInterface().ApplyRecordedAborts();
+		}
+#endif
 		if (requests & CancelWaitRequest)
 		{
 			CancelWaitForTemperatures(false);
@@ -1068,6 +1078,16 @@ void GCodes::DoEmergencyStop() noexcept
 	Reset();
 	platform.Message(GenericMessage, "Emergency Stop! Reset the controller to continue.\n");
 }
+
+#if HAS_SBC_INTERFACE
+
+// Called by the SBC task when it has recorded the abort of a channel or the end of a connection. The main task applies it at the start of its next spin
+void GCodes::ChannelAbortRecorded() noexcept
+{
+	requestsFromOtherTasks |= ChannelAbortRequest;
+}
+
+#endif
 
 // reprap.EmergencyStop calls this to shut down this module
 void GCodes::EmergencyStop() noexcept
