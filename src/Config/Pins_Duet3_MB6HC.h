@@ -59,7 +59,7 @@ constexpr uint32_t IAP_IMAGE_START = 0x20458000;		// last 32kb of RAM on a SAME7
 
 #define SUPPORT_CAN_EXPANSION	1
 #define SUPPORT_BRS				1
-#define DUAL_CAN				1					// support the second CAN interface as simple CAN (not FD)
+#define DUAL_CAN				1					// support CAN0 as a second CAN-FD expansion bus or as classic CAN
 #define SUPPORT_LED_STRIPS		1
 #define SUPPORT_DMA_DOTSTAR		1
 #define SUPPORT_DMA_NEOPIXEL	1
@@ -298,7 +298,7 @@ constexpr auto EthernetPhyOtherPinsFunction = GpioPinFunction::A;
 // If a pin name is prefixed by ! then this means the pin is hardware inverted. The same pin may have names for both the inverted and non-inverted cases,
 // for example the inverted heater pins on the expansion connector are available as non-inverted servo pins on a DueX.
 //TODO change the table below for the V0.6 board
-constexpr PinDescription PinTable[] =
+inline constexpr PinDescription PinTable[] =
 {
 	//	TC					PWM					ADC				Capability				PinNames
 	// Port A

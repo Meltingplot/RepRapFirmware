@@ -27,12 +27,15 @@ namespace CanInterface
 	constexpr uint32_t UsualResponseTimeout = 1000;				// how long we normally wait for a response, in milliseconds
 	constexpr uint32_t UsualSendTimeout = 200;					// how long we normally wait to send a message, in milliseconds
 
+	// This function is used only in preconditions
+	inline bool IsExpansionBoadAddress(CanAddress addr) noexcept { return addr <= CanId::MaxCanAddress && addr != GetCanAddress(); }
+
 	// Low level functions
 	void Init() noexcept;
 	void Shutdown() noexcept;
 	inline CanAddress GetCurrentMasterAddress() noexcept { return CanId::MasterAddress; }		// currently fixed, but might change in future
 
-	void ReportCanTiming(const StringRef& reply) noexcept;
+	void ReportCanTiming(size_t port, const StringRef& reply) noexcept;
 
 #if SUPPORT_REMOTE_COMMANDS
 	bool InExpansionMode() noexcept;
@@ -56,12 +59,12 @@ namespace CanInterface
 	void SendMessageNoReplyNoFree(CanMessageBuffer *buf) noexcept;
 	void Diagnostics(const StringRef& reply) noexcept;
 	CanMessageBuffer *AllocateBuffer(const GCodeBuffer *_ecv_null gb) THROWS(GCodeException);
-	void CheckCanAddress(uint32_t address, const GCodeBuffer& gb) THROWS(GCodeException);
 
 	uint16_t GetTimeStampCounter() noexcept;
 	uint32_t Convert16bitReceivedTimeStampTo32bits(uint16_t ts) noexcept;
 
 #if DUAL_CAN
+	CanAddress GetSplitAddress() noexcept;								// lowest address served by CAN0, 0 if CAN0 has no boards assigned
 	uint32_t SendPlainMessageNoFree(CanMessageBuffer *buf, uint32_t timeout = UsualSendTimeout) noexcept;
 	bool ReceivePlainMessage(CanMessageBuffer *null buf, uint32_t timeout = UsualResponseTimeout) noexcept;
 #endif
@@ -71,9 +74,12 @@ namespace CanInterface
 #endif
 
 	// Info functions
-	GCodeResult GetRemoteFirmwareDetails(uint32_t boardAddress, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);
-	GCodeResult RemoteDiagnostics(MessageType mt, uint32_t boardAddress, unsigned int type, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);
-	GCodeResult HandleM111(uint32_t boardAddress, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);
+	GCodeResult GetRemoteFirmwareDetails(uint32_t boardAddress, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
+		pre(IsExpansionBoardAddress(boardAddress));
+	GCodeResult RemoteDiagnostics(MessageType mt, uint32_t boardAddress, unsigned int type, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
+		pre(IsExpansionBoardAddress(boardAddress));
+	GCodeResult HandleM111(uint32_t boardAddress, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
+		pre(IsExpansionBoardAddress(boardAddress));
 
 	// Motor control functions
 	void SendMotion(CanMessageBuffer *buf) noexcept;

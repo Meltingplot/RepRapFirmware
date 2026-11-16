@@ -317,6 +317,7 @@ public:
 	void ResetChannel(size_t chan) noexcept;						// Re-initialise a serial channel
 	bool IsChanEnabled(size_t chan) const noexcept;					// Any device on the serial line?
     bool IsChanRaw(size_t chan) const noexcept;						// Is the serial line in raw mode?
+	bool IsAuxPanelDue(size_t auxNumber) const noexcept;			// Is a PanelDue connected to this aux channel?
 
 #if NUM_ASYNC_PORTS != 0
     AsyncSerial *GetAsyncPort(size_t auxNumber) pre(auxNumber < NUM_ASYNC_PORTS) noexcept { return asyncPorts[auxNumber]; }
@@ -456,6 +457,7 @@ public:
 
 	// Ancillary PWM
 	GCodeResult GetSetAncillaryPwm(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException);
+	int32_t ReconfigureOutputOnExtrude(int32_t port, float pwm) noexcept;
 	bool IsOutputOnExtrudeActive() const noexcept { return extrusionAncilliaryPwmGpOutNumber >= 0; }
 	void ExtrudeOn() noexcept;
 	void ExtrudeOff() noexcept;

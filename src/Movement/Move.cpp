@@ -1731,7 +1731,7 @@ void Move::SetupNextScanningProbeReading() noexcept
 		}
 //		debugPrintf("nr=%u, wt=%" PRIu32 ", dec=%.3e\n", probeControl.nextReadingNeeded, wakeupTime, (double)probeControl.deceleration);
 		++probeControl.nextReadingNeeded;
-		if (probeControl.timer.ScheduleMovementCallbackFromIsr(wakeupTime + probeControl.startTime))
+		if (probeControl.timer.ScheduleMovementCallback(wakeupTime + probeControl.startTime))
 		{
 			ScanningProbeTimerCallback();
 		}
@@ -2498,7 +2498,7 @@ bool Move::SetLocalDriverStepMode(DriveMovement& dm, uint8_t driver, StepMode mo
 		const uint16_t calculatedPhase = dm.phaseStepControl.CalculateStepPhase(driver);			// Get the phase based on current machine position
 
 		dm.phaseStepControl.SetPhaseOffset(driver, (initialPhase - calculatedPhase) % 4096u);		// Update the offset so calculated phase equals MSCNT
-		dm.phaseStepControl.SetMotorPhase(driver, initialPhase, 1.0);								// Update XDIRECT register with new phase values
+		dm.phaseStepControl.SetMotorPhase(driver, initialPhase, dm.phaseStepControl.holdCurrentFraction);		// Update XDIRECT register with new phase values
 	}
 	// If we are going from phase step to step dir, we need to send some fake steps to the driver to update MSCNT to avoid a jitter when disabling direct_mode
 	// This is suboptimal but it is a configuration command that is unlikely to be run so a few ms delay is unlikely to cause much harm.
@@ -2756,7 +2756,7 @@ bool Move::PhaseStepControlLoop() noexcept
 	if (inserted)
 	{
 		BasePriorityBooster booster(NvicPriorityStep);					// shut out the step interrupt
-		if (!ScheduleNextStepInterrupt())
+		if (ScheduleNextStepInterrupt())
 		{
 			Interrupt();
 		}
