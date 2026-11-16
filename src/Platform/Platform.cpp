@@ -207,11 +207,25 @@ constexpr ObjectModelArrayTableEntry Platform::objectModelArrayTable[] =
 
 DEFINE_GET_OBJECT_MODEL_ARRAY_TABLE(Platform)
 
+#if DUAL_CAN
+
+// Read the split address only once, so that a concurrent M953 can't make it report 0 instead of null
+static ExpressionValue GetCanSplitAddressValue() noexcept
+{
+	const CanAddress splitAddress = CanInterface::GetSplitAddress();
+	return (splitAddress != 0) ? ExpressionValue((int32_t)splitAddress) : ExpressionValue(nullptr);
+}
+
+#endif
+
 constexpr ObjectModelTableEntry Platform::objectModelTable[] =
 {
 	// 0. boards[0] members
 #if SUPPORT_CAN_EXPANSION
 	{ "canAddress",			OBJECT_MODEL_FUNC_NOSELF((int32_t)CanInterface::GetCanAddress()),									ObjectModelEntryFlags::none },
+#endif
+#if DUAL_CAN
+	{ "canSplitAddress",	OBJECT_MODEL_FUNC_NOSELF(GetCanSplitAddressValue()),												ObjectModelEntryFlags::none },
 #endif
 #if SUPPORT_DIRECT_LCD
 	{ "directDisplay",		OBJECT_MODEL_FUNC_IF_NOSELF(reprap.GetDisplay().IsPresent(), &reprap.GetDisplay()),					ObjectModelEntryFlags::none },
@@ -228,7 +242,6 @@ constexpr ObjectModelTableEntry Platform::objectModelTable[] =
 #if HAS_MASS_STORAGE
 	{ "iapFileNameSD",		OBJECT_MODEL_FUNC_NOSELF(IAP_UPDATE_FILE),															ObjectModelEntryFlags::verbose },
 #endif
-	{ "maxHeaters",			OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxHeaters),														ObjectModelEntryFlags::verbose },
 	{ "maxMotors",			OBJECT_MODEL_FUNC_NOSELF((int32_t)NumDirectDrivers),												ObjectModelEntryFlags::verbose },
 #if HAS_CPU_TEMP_SENSOR
 	{ "mcuTemp",			OBJECT_MODEL_FUNC(self, 1),																			ObjectModelEntryFlags::liveNotPanelDue },
@@ -278,8 +291,8 @@ constexpr ObjectModelTableEntry Platform::objectModelTable[] =
 constexpr uint8_t Platform::objectModelTableDescriptor[] =
 {
 	4,																		// number of sections
-	11 + HAS_SBC_INTERFACE + HAS_MASS_STORAGE + HAS_VOLTAGE_MONITOR + HAS_12V_MONITOR + HAS_CPU_TEMP_SENSOR
-	  + SUPPORT_CAN_EXPANSION + (int)SUPPORT_DIRECT_LCD + MCU_HAS_UNIQUE_ID + HAS_WIFI_NETWORKING,		// section 0: boards[0]
+	10 + HAS_SBC_INTERFACE + HAS_MASS_STORAGE + HAS_VOLTAGE_MONITOR + HAS_12V_MONITOR + HAS_CPU_TEMP_SENSOR
+	  + SUPPORT_CAN_EXPANSION + DUAL_CAN + (int)SUPPORT_DIRECT_LCD + MCU_HAS_UNIQUE_ID + HAS_WIFI_NETWORKING,		// section 0: boards[0]
 #if HAS_CPU_TEMP_SENSOR
 	3,																		// section 1: mcuTemp
 #else
@@ -2453,6 +2466,15 @@ bool Platform::IsChanRaw(size_t chan) const noexcept
 #endif
 }
 
+bool Platform::IsAuxPanelDue(size_t auxNumber) const noexcept
+{
+#if NUM_ASYNC_CHANNELS != 0
+	return (auxNumber < NumAuxChannels) && (auxDevices[auxNumber].GetMode() == AuxMode::panelDue);
+#else
+	return false;
+#endif
+}
+
 # if NUM_ASYNC_CHANNELS != 0 && !defined(DUET_NG)			// we don't support this on Duet 2 because we are running low on flash memory space
 
 /**
@@ -4204,36 +4226,41 @@ void Platform::OnProcessingCanMessage() noexcept
 // Configure the ancillary PWM
 GCodeResult Platform::GetSetAncillaryPwm(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
-	int32_t tempPort;
-	bool seen = gb.TryGetLimitedIValue('P', tempPort, seen, -1, MaxGpOutPorts - 1);
-	if (seen)
+	bool seenPort = false, seenPwm = false;
+	int32_t port = extrusionAncilliaryPwmGpOutNumber;
+	gb.TryGetLimitedIValue('P', port, seenPort, -1, MaxGpOutPorts - 1);
+	if (seenPort && (port >= 0))
 	{
-		if (tempPort >= 0)
+		if (GetGpOutPort(port).IsUnused())
 		{
-			if (GetGpOutPort(tempPort).IsUnused())
-			{
-				reply.printf("GpOut port %" PRIu32 " has not been created", tempPort);
-				return GCodeResult::error;
-			}
-#if SUPPORT_CAN_EXPANSION
-			if (!GetGpOutPort(tempPort).IsLocal())
-			{
-				reply.printf("Remote GpOut port %" PRIu32 " not allowed here", tempPort);
-				return GCodeResult::error;
-			}
-#endif
+			reply.printf("GpOut port %" PRIu32 " has not been created", port);
+			return GCodeResult::error;
 		}
-
-		extrusionAncilliaryPwmGpOutNumber = tempPort;
-		Move::CreateLaserTask();									// we use the laser task to manage ancillary PWM
+#if SUPPORT_CAN_EXPANSION
+		if (!GetGpOutPort(port).IsLocal())
+		{
+			reply.printf("Remote GpOut port %" PRIu32 " not allowed here", port);
+			return GCodeResult::error;
+		}
+#endif
 	}
+
+	float pwm = extrusionAncilliaryPwmValue;
 	if (gb.Seen('S'))
 	{
-		extrusionAncilliaryPwmValue = min<float>(gb.GetFValue(), 1.0);		// negative values are OK, they mean don't set the output
-		seen = true;
+		pwm = min<float>(gb.GetFValue(), 1.0);						// negative values are OK, they mean don't set the output
+		seenPwm = true;
 	}
 
-	if (!seen)
+	if (seenPort || seenPwm)
+	{
+		ReconfigureOutputOnExtrude(port, pwm);
+		if (seenPort)
+		{
+			Move::CreateLaserTask();								// we use the laser task to manage ancillary PWM
+		}
+	}
+	else
 	{
 		if (extrusionAncilliaryPwmGpOutNumber < 0)
 		{
@@ -4245,6 +4272,30 @@ GCodeResult Platform::GetSetAncillaryPwm(GCodeBuffer& gb, const StringRef& reply
 		}
 	}
 	return GCodeResult::ok;
+}
+
+// Change the output on extrude port and PWM. Must not be called by the Laser task.
+// The Laser task only writes the configured port if its PWM is positive, so the old port is switched off here.
+// That write happens outside the lock because DueX ports are written over I2C, which may block.
+// Returns the port that was switched off, or -1 if none was.
+int32_t Platform::ReconfigureOutputOnExtrude(int32_t port, float pwm) noexcept
+{
+	int32_t oldPort;
+	float oldPwm;
+	{
+		TaskCriticalSectionLocker lock;							// the Laser task must never see one value changed but not the other
+		oldPort = extrusionAncilliaryPwmGpOutNumber;
+		oldPwm = extrusionAncilliaryPwmValue;
+		extrusionAncilliaryPwmGpOutNumber = port;
+		extrusionAncilliaryPwmValue = pwm;
+	}
+
+	if ((oldPort >= 0) && (oldPwm > 0.0) && ((oldPort != port) || (pwm <= 0.0)))
+	{
+		GetGpOutPort(oldPort).WriteAnalog(0.0);
+		return oldPort;
+	}
+	return -1;
 }
 
 #if MCU_HAS_UNIQUE_ID

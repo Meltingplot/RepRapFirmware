@@ -1083,8 +1083,18 @@ void RepRap::EmergencyStop() noexcept
 		}
 	}
 
+	const int32_t outputOnExtrudePort = platform->ReconfigureOutputOnExtrude(-1, 0.0);	// before move->Exit(), so the Laser task can finish a DueX write it may be blocked in
 	heat->Exit();									// this also turns off all heaters
 	move->Exit();									// this stops the motors stepping
+#if SUPPORT_CAN_EXPANSION
+	// The CAN receiver is the only caller with a higher priority than the Laser task, so only it can have preempted that task between its decision and its write
+	if (outputOnExtrudePort >= 0)
+	{
+		platform->GetGpOutPort(outputOnExtrudePort).WriteAnalog(0.0);
+	}
+#else
+	(void)outputOnExtrudePort;
+#endif
 
 #if SUPPORT_CAN_EXPANSION
 # if SUPPORT_REMOTE_COMMANDS
@@ -1108,7 +1118,7 @@ GCodeResult RepRap::ProcessM111(GCodeBuffer& gb, const StringRef& reply) THROWS(
 #if SUPPORT_CAN_EXPANSION
 	if (gb.Seen('B'))
 	{
-		const uint32_t board = gb.GetUIValue();
+		const uint32_t board = gb.GetCanAddress('B', false, true);
 		if (board != CanInterface::GetCanAddress())
 		{
 			return CanInterface::HandleM111(board, gb, reply);
@@ -2363,7 +2373,18 @@ uint32_t RepRap::SendAlert(MessageType mt, c_string msg, c_string title, int sPa
 
 	platform->MessageF(MessageType::LogInfo, "M291: - %s - %s", (strlen(title) > 0 ? title : "[no title]"), msg);
 
-	mt = (MessageType)((uint32_t)mt & ((uint32_t)UsbMessage | (uint32_t)Usb2Message | (uint32_t)TelnetMessage | (uint32_t)AuxMessage | (uint32_t)Aux2Message));
+	// A PanelDue displays the message box itself, so don't echo the text to it
+	uint32_t textDestinations = (uint32_t)UsbMessage | (uint32_t)Usb2Message | (uint32_t)TelnetMessage;
+	if (!platform->IsAuxPanelDue(0))
+	{
+		textDestinations |= (uint32_t)AuxMessage;
+	}
+	if (!platform->IsAuxPanelDue(1))
+	{
+		textDestinations |= (uint32_t)Aux2Message;
+	}
+
+	mt = (MessageType)((uint32_t)mt & textDestinations);
 	if (mt != NoDestinationMessage)
 	{
 		// Source was USB, Telnet or serial so also send the message back to the sending channel
