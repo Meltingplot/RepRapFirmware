@@ -1,0 +1,275 @@
+# Raw pointers that RepRapFirmware may keep although they can be reseated, see README.md. pointer-check.py fails for every
+# other one. One key per line, then a comment:
+#   Class::member, Namespace::variable   members and variables with a name that is unique in the firmware
+#   path/below/src.cpp: name             static variables, anonymous namespaces and anonymous classes
+#
+# The first list is the state of 3.7-dev at 995d16ed4 in Duet3_MB6HC, Duet3_MB6XD and Duet3Mini5plus, with the type as the
+# comment. A new entry needs the reason why the pointer is safe without a pointer class, e.g. which tasks read and write it.
+# "make update" rewrites the list from the firmware and keeps the comments of the entries that stay.
+Accelerometers/Accelerometers.cpp: accelerometer                      # LISAccelerometer *
+Accelerometers/Accelerometers.cpp: accelerometerFile                  # FileStore * volatile
+Accelerometers/Accelerometers.cpp: accelerometerTask                  # Task *
+ArrayHandle::slotPtr                                                  # IndexSlot *
+AuxDevice::receivedData                                               # uint8_t *
+AuxDevice::uart                                                       # AsyncSerial *
+BinaryParser::header                                                  # CodeHeader *
+BinaryParser::seenParameter                                           # CodeParameter const *
+BinaryParser::seenParameterValue                                      # char const *
+ButtonMenuItem::command                                               # char const *
+ButtonMenuItem::m_acFile                                              # char const *
+ButtonMenuItem::text                                                  # char const *
+CAN/CanInterface.cpp: can0dev                                         # CanDevice *
+CAN/CanInterface.cpp: can1dev                                         # CanDevice *
+CAN/CanInterface.cpp: lastMotionBuffer                                # CanMessageBuffer * volatile
+CAN/CanInterface.cpp: pendingMotionBuffers                            # CanMessageBuffer * volatile
+CAN/CanMotion.cpp: CanMotion::movementBufferList                      # CanMessageBuffer *
+CAN/CanMotion.cpp: CanMotion::stopList                                # DriversStopList * volatile
+CanMotion::DriversStopList::next                                      # DriversStopList *
+ConfigurableFolder::defaultValue                                      # char const *
+ConfigurableFolder::userValue                                         # char const *
+DDA::next                                                             # DDA *
+DDA::prev                                                             # DDA *
+DDA::tool                                                             # Tool const *
+DDARing::addPointer                                                   # DDA *
+DDARing::getPointer                                                   # DDA * volatile
+DDARing::lastFeedForwardTool                                          # Tool const *
+DataTransfer::lastTxBuffer                                            # char *
+DataTransfer::rxBuffer                                                # char *
+DataTransfer::txBuffer                                                # char *
+DataTransfer::usbDevice                                               # SerialCDC *
+Display::encoder                                                      # RotaryEncoder *
+Display::lcd                                                          # Lcd *
+Display::menu                                                         # Menu *
+DriveMovement::nextDM                                                 # DriveMovement *
+DriveMovement::retiredSegment                                         # MoveSegment * volatile
+DriveMovement::segments                                               # MoveSegment * volatile
+EndstopOrZProbe::next                                                 # EndstopOrZProbe *
+EndstopsManager::activeEndstops                                       # EndstopOrZProbe * volatile
+EndstopsManager::axisEndstops                                         # Endstop * []
+EndstopsManager::defaultZProbe                                        # ZProbe *
+EndstopsManager::extruderInputEndstop                                 # GpInPortEndstop *
+EndstopsManager::extrudersEndstop                                     # StallDetectionEndstop *
+EndstopsManager::zProbes                                              # ZProbe * []
+Event::eventsPending                                                  # Event *
+Event::next                                                           # Event *
+ExpansionBoardData::driverData                                        # DriverData *
+ExpansionBoardData::typeName                                          # char const *
+ExpressionParser::currentp                                            # char const *
+ExpressionParser::gb                                                  # GCodeBuffer const *
+FansManager::fans                                                     # Fan * []
+Filament::filamentList                                                # Filament *
+Filament::next                                                        # Filament *
+FilamentMonitor::filamentSensors                                      # FilamentMonitor * []
+FileData::f                                                           # FileStore *
+FileInfoParser::ParseTableEntry::key                                  # char const *
+FileInfoParser::fileBeingParsed                                       # FileStore *
+FileInfoParser::vars                                                  # GlobalVariables *
+FileStore::writeBuffer                                                # FileWriteBuffer *
+FileWriteBuffer::buf                                                  # char *
+FileWriteBuffer::next                                                 # FileWriteBuffer *
+FilesMenuItem::command                                                # char const *
+FilesMenuItem::initialDirectory                                       # char const *
+FilesMenuItem::m_acFile                                               # char const *
+FtpResponder::dataBuf                                                 # OutputBuffer *
+FtpResponder::dataSocket                                              # Socket *
+GCodeBuffer::buffer                                                   # char *
+GCodeBuffer::fileInput                                                # FileGCodeInput *
+GCodeBuffer::machineState                                             # GCodeMachineState *
+GCodeBuffer::normalInput                                              # GCodeInput *
+GCodeException::message                                               # char const *
+GCodeMachineState::BlockState::prev                                   # BlockState *
+GCodeMachineState::currentBlockState                                  # BlockState *
+GCodeMachineState::previous                                           # GCodeMachineState *
+GCodeQueue::freeItems                                                 # QueuedCode *
+GCodeQueue::queuedItems                                               # QueuedCode *
+GCodes::deferredPauseCommandPending                                   # char const *
+GCodes::fileBeingHashed                                               # FileStore *
+GCodes::gcodeSources                                                  # GCodeBuffer * []
+GCodes::httpInput                                                     # NetworkGCodeInput *
+GCodes::powerFailScript                                               # char *
+GCodes::resourceOwners                                                # GCodeBuffer const * []
+GCodes::sdTimingFile                                                  # FileStore *
+GCodes::telnetInput                                                   # NetworkGCodeInput *
+GCodes::usb2Input                                                     # UsbGCodeInput *
+GCodes::usbInput                                                      # UsbGCodeInput *
+HangprinterKinematics::StaticForcesConfig::Tmax                       # float const *
+HangprinterKinematics::StaticForcesConfig::Tmin                       # float const *
+HangprinterKinematics::StaticForcesResult::tensions                   # float *
+Heap::HeapBlock::next                                                 # HeapBlock *
+Heap::IndexBlock::next                                                # IndexBlock *
+Heap::IndexSlot::storage                                              # StorageSpace *
+Heap::heapRoot                                                        # HeapBlock *
+Heap::indexRoot                                                       # IndexBlock *
+Heap::lastSpace                                                       # StorageSpace *
+Heap::lastSpaceBlock                                                  # HeapBlock *
+Heat::heaters                                                         # Heater * []
+Heat::lastStandbyTools                                                # Tool const * []
+Heat::sensorsRoot                                                     # TemperatureSensor * volatile
+HeightController::heightControllerTask                                # Task *
+HttpResponder::HttpSession::iface                                     # NetworkInterface const *
+HttpResponder::KeyValueIndices::key                                   # char const *
+HttpResponder::KeyValueIndices::value                                 # char const *
+HttpResponder::commandWords                                           # char const * []
+I2C::sharedI2C                                                        # SharedI2CMaster *
+InputMonitor::monitorsList                                            # InputMonitor * volatile
+InputMonitor::next                                                    # InputMonitor *
+Kinematics::KinematicsTypeDescriptor::createFunction                  # CreationFunction
+Kinematics::KinematicsTypeDescriptor::kinematicsName                  # char const *
+Kinematics::KinematicsTypeDescriptor::kinematicsTypeListRoot          # KinematicsTypeDescriptor *
+Kinematics::KinematicsTypeDescriptor::next                            # KinematicsTypeDescriptor *
+LISAccelerometer::taskWaiting                                         # TaskHandle volatile
+Lcd::fonts                                                            # LcdFont const * const *
+LcdFont::ptr                                                          # uint8_t const *
+LedStripManager::strips                                               # LedStripBase * []
+LineReader::f                                                         # FileStore *
+LocalLedStrip::chunkBuffer                                            # uint8_t *
+LwipEthernetInterface::listeningPcbs                                  # altcp_pcb * []
+LwipEthernetInterface::sockets                                        # LwipSocket * []
+LwipEthernetInterface::tlsConfig                                      # altcp_tls_config *
+LwipEthernetInterface::tlsListeningPcbs                               # altcp_pcb * []
+LwipSocket::connectionPcb                                             # altcp_pcb *
+LwipSocket::receivedData                                              # pbuf * volatile
+MemoryChecker::end                                                    # uint32_t const *
+MemoryChecker::start                                                  # uint32_t const *
+MemoryWatcher::checkedData                                            # uint32_t volatile *
+Menu::highlightedItem                                                 # MenuItem *
+Menu::selectableItems                                                 # MenuItem *
+Menu::unSelectableItems                                               # MenuItem *
+MenuItem::next                                                        # MenuItem *
+MenuItem::visStr                                                      # char const *
+MessageBox::mboxList                                                  # MessageBox *
+MessageBox::next                                                      # MessageBox *
+MonoLcd::image                                                        # uint8_t *
+Move::DriverEnablePins                                                # Pin const *
+Move::activeDMs                                                       # DriveMovement *
+Move::heightController                                                # HeightController *
+Move::kinematics                                                      # Kinematics *
+Move::laserTask                                                       # Task *
+Move::phaseStepDMs                                                    # DriveMovement *
+MoveSegment::freeList                                                 # MoveSegment *
+MoveSegment::next                                                     # MoveSegment *
+MovementState::codeQueue                                              # GCodeQueue *
+MovementState::currentTool                                            # Tool *
+MqttClient::Subscription::next                                        # Subscription *
+MqttClient::Subscription::topic                                       # char *
+MqttClient::currSub                                                   # Subscription *
+MqttClient::instance                                                  # MqttClient *
+MqttClient::prevSub                                                   # Subscription *
+MqttClientConfig::id                                                  # char *
+MqttClientConfig::password                                            # char *
+MqttClientConfig::subs                                                # Subscription *
+MqttClientConfig::username                                            # char *
+MqttClientConfig::willMessage                                         # char *
+MqttClientConfig::willTopic                                           # char *
+Network::clients                                                      # NetworkClient *
+Network::interfaces                                                   # NetworkInterface * []
+Network::nextResponderToPoll                                          # NetworkResponder *
+Network::responders                                                   # NetworkResponder *
+NetworkBuffer::freelist                                               # NetworkBuffer *
+NetworkBuffer::next                                                   # NetworkBuffer *
+NetworkClient::clients                                                # NetworkClient *
+NetworkClient::next                                                   # NetworkClient *
+NetworkResponder::fileBeingSent                                       # FileStore *
+NetworkResponder::fileBuffer                                          # NetworkBuffer *
+NetworkResponder::next                                                # NetworkResponder *
+NetworkResponder::outBuf                                              # OutputBuffer *
+NetworkResponder::skt                                                 # Socket *
+Networking/ESP8266WiFi/WiFiInterface.cpp: wifiInterface               # WiFiInterface *
+Networking/LwipEthernet/LwipEthernetInterface.cpp: ethernetInterface  # LwipEthernetInterface *
+Networking/LwipEthernet/LwipEthernetInterface.cpp: pbufPoolBase       # uint8_t *
+Networking/MQTT/mqtt_pal.h: (anonymous)::m                            # Mutex *
+Networking/MulticastDiscovery/MulticastResponder.cpp: fgmcHandler     # FGMCProtocol *
+Networking/MulticastDiscovery/MulticastResponder.cpp: ourPcb          # udp_pcb *
+Networking/MulticastDiscovery/MulticastResponder.cpp: pbufToFree      # pbuf *
+Networking/MulticastDiscovery/MulticastResponder.cpp: receivedPbuf    # pbuf * volatile
+ObjectExplorationContext::gb                                          # GCodeBuffer const *
+ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::iopVal       # IoPort const *
+ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::omVal        # ObjectModel const *
+ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::sVal         # char const *
+ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::uniqueIdVal  # UniqueId const *
+ObjectModelArrayTableEntry::GetElement                                # function *
+ObjectModelArrayTableEntry::GetNumElements                            # function *
+ObjectModelArrayTableEntry::lockPointer                               # ReadWriteLock *
+ObjectModelClassDescriptor::omd                                       # uint8_t const *
+ObjectModelClassDescriptor::omt                                       # ObjectModelTableEntry const *
+ObjectModelClassDescriptor::parent                                    # ObjectModelClassDescriptor const *
+ObjectModelTableEntry::func                                           # DataFetchPtr_t
+ObjectModelTableEntry::name                                           # char const *
+OutputBuffer::freeOutputBuffers                                       # OutputBuffer * volatile
+OutputBuffer::last                                                    # OutputBuffer *
+OutputBuffer::next                                                    # OutputBuffer *
+OutputStack::items                                                    # OutputBuffer * []
+PanelDueUpdater::currentInterruptCallbackFn                           # InterruptCallbackFn
+PanelDueUpdater::device                                               # Device *
+PanelDueUpdater::firmwareFile                                         # FileStore *
+PanelDueUpdater::flasher                                              # Flasher *
+PanelDueUpdater::flasherObserver                                      # FlasherObserver *
+PanelDueUpdater::samba                                                # Samba *
+PanelDueUpdater::serialPort                                           # SerialPort *
+PinDescription::pinNames                                              # char const *
+Platform/RepRap.cpp: hsmciTask                                        # TaskHandle
+Platform::asyncPorts                                                  # AsyncSerial * []
+Platform::genericDebugBuffer                                          # String *
+Platform::logger                                                      # Logger *
+Platform::mainSharedSpiDevice                                         # SharedSpiDevice *
+Platform::moveWarningBuffer                                           # String *
+Platform::panelDueUpdater                                             # PanelDueUpdater *
+QueuedCode::next                                                      # QueuedCode *
+RawMove::movementTool                                                 # Tool const *
+RepRap::DebugLogRecord::msg                                           # c_string
+RepRap::display                                                       # Display *
+RepRap::expansion                                                     # ExpansionManager *
+RepRap::fansManager                                                   # FansManager *
+RepRap::gCodes                                                        # GCodes *
+RepRap::heat                                                          # Heat *
+RepRap::move                                                          # Move *
+RepRap::network                                                       # Network *
+RepRap::platform                                                      # Platform *
+RepRap::portControl                                                   # PortControl *
+RepRap::printMonitor                                                  # PrintMonitor *
+RepRap::sbcInterface                                                  # SbcInterface *
+SBC/DataTransfer.cpp: sbcTaskHandle                                   # TaskHandle
+SBC/SbcInterface.cpp: sbcTask                                         # Task *
+SbcInterface::asyncWriteBuffer                                        # FileWriteBuffer *
+SbcInterface::asyncWriteData                                          # char const *
+SbcInterface::asyncWriteErrorFlag                                     # atomic *
+SbcInterface::codeBuffer                                              # char *
+SbcInterface::filePath                                                # char const *
+SbcInterface::fileReadBuffer                                          # char *
+SbcInterface::fileWriteBuffer                                         # char const *
+SbcInterface::pendingUsbDevice                                        # SerialCDC *
+StepTimer::callback                                                   # TimerCallbackFunction
+StepTimer::next                                                       # StepTimer *
+StepTimer::pendingList                                                # StepTimer * volatile
+Storage/MassStorage.cpp: freeWriteBuffers                             # FileWriteBuffer *
+Storage/MassStorage.cpp: monthNames                                   # char const * []
+StringHandle::slotPtr                                                 # IndexSlot *
+StringParser::fileBeingWritten                                        # FileStore *
+TelnetResponder::gcodeReply                                           # OutputBuffer *
+TemperatureSensor::SensorTypeDescriptor::createFunction               # CreationFunction
+TemperatureSensor::SensorTypeDescriptor::next                         # SensorTypeDescriptor *
+TemperatureSensor::SensorTypeDescriptor::sensorTypeListRoot           # SensorTypeDescriptor *
+TemperatureSensor::SensorTypeDescriptor::sensorTypeName               # char const *
+TemperatureSensor::next                                               # TemperatureSensor *
+TextMenuItem::text                                                    # char const *
+Tool::filament                                                        # Filament *
+Tool::next                                                            # Tool *
+Tool::toolList                                                        # Tool *
+UsbDeviceRrf::device                                                  # SerialCDC *
+UsbDeviceRrf::originalDevice                                          # SerialCDC *
+ValueMenuItem::textValue                                              # char const *
+VariableSet::LinkedVariable::next                                     # LinkedVariable *
+VariableSet::root                                                     # LinkedVariable *
+WiFiInterface::bufferIn                                               # MessageBufferIn *
+WiFiInterface::bufferOut                                              # MessageBufferOut *
+WiFiInterface::espWaitingTask                                         # TaskHandle
+WiFiInterface::sockets                                                # WiFiSocket * []
+WiFiInterface::uploader                                               # WifiFirmwareUploader *
+WiFiSocket::receivedData                                              # NetworkBuffer *
+WifiFirmwareUploader::uploadFile                                      # FileStore *
+__cxxabiv1::__terminate_handler                                       # terminate_handler
+gmac_device::netif                                                    # netif *
+gmac_device::p_netif                                                  # netif *
+gmac_device::rx_pbuf                                                  # pbuf * []
+lwipRamHeap                                                           # void *
+serialWiFiDevice                                                      # AsyncSerial *
