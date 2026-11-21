@@ -74,11 +74,14 @@ void StringHandle::InternalAssign(const char *_ecv_array s, size_t len) noexcept
 
 void StringHandle::Delete() noexcept
 {
-	if (slotPtr != nullptr)
+	Heap::IndexSlot *_ecv_null const slot = slotPtr;
+	if (slot != nullptr)
 	{
+		// Clear the pointer to the handle entry before releasing it. Another task may copy this handle at any time, e.g. the object model
+		// reading inputs[].currentFile, and the copy must find either a slot that still holds our reference or no slot at all.
+		slotPtr = nullptr;
 		ReadLocker locker(Heap::heapLock);						// prevent other tasks modifying the heap
-		Heap::DeleteSlot(slotPtr);
-		slotPtr = nullptr;										// clear the pointer to the handle entry
+		Heap::DeleteSlot(slot);
 	}
 }
 
