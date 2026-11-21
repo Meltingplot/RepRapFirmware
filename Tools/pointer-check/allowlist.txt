@@ -3,273 +3,282 @@
 #   Class::member, Namespace::variable   members and variables with a name that is unique in the firmware
 #   path/below/src.cpp: name             static variables, anonymous namespaces and anonymous classes
 #
-# The first list is the state of 3.7-dev at 995d16ed4 in Duet3_MB6HC, Duet3_MB6XD and Duet3Mini5plus, with the type as the
-# comment. A new entry needs the reason why the pointer is safe without a pointer class, e.g. which tasks read and write it.
+# The first list is the state of 3.7-dev at 995d16ed4 in Duet3_MB6HC, Duet3_MB6XD and Duet3Mini5plus. Each comment gives the
+# type, the verdict of the census in census.md and the reason:
+#   SAFE-PERMANENT  set once at start-up and never freed
+#   SAFE-ONE-TASK   read and written in one task only
+#   SAFE-LOCKED     the other tasks hold the lock that the writer holds
+#   SAFE-ORDER      every reader has a higher priority than the writer and does not block while it holds the pointer, and the
+#                   writer reseats the pointer before it frees the object
+#   SAFE-NO-DEREF   never dereferenced
+#   SUSPECT         a reader can reach memory that is no longer valid; the finding of census.md and its fix are in brackets.
+#                   An entry stays SUSPECT until its fix is merged.
+# A new entry needs the reason why the pointer is safe without a pointer class, e.g. which tasks read and write it.
 # "make update" rewrites the list from the firmware and keeps the comments of the entries that stay.
-Accelerometers/Accelerometers.cpp: accelerometer                      # LISAccelerometer *
-Accelerometers/Accelerometers.cpp: accelerometerFile                  # FileStore * volatile
-Accelerometers/Accelerometers.cpp: accelerometerTask                  # Task *
-ArrayHandle::slotPtr                                                  # IndexSlot *
-AuxDevice::receivedData                                               # uint8_t *
-AuxDevice::uart                                                       # AsyncSerial *
-BinaryParser::header                                                  # CodeHeader *
-BinaryParser::seenParameter                                           # CodeParameter const *
-BinaryParser::seenParameterValue                                      # char const *
-ButtonMenuItem::command                                               # char const *
-ButtonMenuItem::m_acFile                                              # char const *
-ButtonMenuItem::text                                                  # char const *
-CAN/CanInterface.cpp: can0dev                                         # CanDevice *
-CAN/CanInterface.cpp: can1dev                                         # CanDevice *
-CAN/CanInterface.cpp: lastMotionBuffer                                # CanMessageBuffer * volatile
-CAN/CanInterface.cpp: pendingMotionBuffers                            # CanMessageBuffer * volatile
-CAN/CanMotion.cpp: CanMotion::movementBufferList                      # CanMessageBuffer *
-CAN/CanMotion.cpp: CanMotion::stopList                                # DriversStopList * volatile
-CanMotion::DriversStopList::next                                      # DriversStopList *
-ConfigurableFolder::defaultValue                                      # char const *
-ConfigurableFolder::userValue                                         # char const *
-DDA::next                                                             # DDA *
-DDA::prev                                                             # DDA *
-DDA::tool                                                             # Tool const *
-DDARing::addPointer                                                   # DDA *
-DDARing::getPointer                                                   # DDA * volatile
-DDARing::lastFeedForwardTool                                          # Tool const *
-DataTransfer::lastTxBuffer                                            # char *
-DataTransfer::rxBuffer                                                # char *
-DataTransfer::txBuffer                                                # char *
-DataTransfer::usbDevice                                               # SerialCDC *
-Display::encoder                                                      # RotaryEncoder *
-Display::lcd                                                          # Lcd *
-Display::menu                                                         # Menu *
-DriveMovement::nextDM                                                 # DriveMovement *
-DriveMovement::retiredSegment                                         # MoveSegment * volatile
-DriveMovement::segments                                               # MoveSegment * volatile
-EndstopOrZProbe::next                                                 # EndstopOrZProbe *
-EndstopsManager::activeEndstops                                       # EndstopOrZProbe * volatile
-EndstopsManager::axisEndstops                                         # Endstop * []
-EndstopsManager::defaultZProbe                                        # ZProbe *
-EndstopsManager::extruderInputEndstop                                 # GpInPortEndstop *
-EndstopsManager::extrudersEndstop                                     # StallDetectionEndstop *
-EndstopsManager::zProbes                                              # ZProbe * []
-Event::eventsPending                                                  # Event *
-Event::next                                                           # Event *
-ExpansionBoardData::driverData                                        # DriverData *
-ExpansionBoardData::typeName                                          # char const *
-ExpressionParser::currentp                                            # char const *
-ExpressionParser::gb                                                  # GCodeBuffer const *
-FansManager::fans                                                     # Fan * []
-Filament::filamentList                                                # Filament *
-Filament::next                                                        # Filament *
-FilamentMonitor::filamentSensors                                      # FilamentMonitor * []
-FileData::f                                                           # FileStore *
-FileInfoParser::ParseTableEntry::key                                  # char const *
-FileInfoParser::fileBeingParsed                                       # FileStore *
-FileInfoParser::vars                                                  # GlobalVariables *
-FileStore::writeBuffer                                                # FileWriteBuffer *
-FileWriteBuffer::buf                                                  # char *
-FileWriteBuffer::next                                                 # FileWriteBuffer *
-FilesMenuItem::command                                                # char const *
-FilesMenuItem::initialDirectory                                       # char const *
-FilesMenuItem::m_acFile                                               # char const *
-FtpResponder::dataBuf                                                 # OutputBuffer *
-FtpResponder::dataSocket                                              # Socket *
-GCodeBuffer::buffer                                                   # char *
-GCodeBuffer::fileInput                                                # FileGCodeInput *
-GCodeBuffer::machineState                                             # GCodeMachineState *
-GCodeBuffer::normalInput                                              # GCodeInput *
-GCodeException::message                                               # char const *
-GCodeMachineState::BlockState::prev                                   # BlockState *
-GCodeMachineState::currentBlockState                                  # BlockState *
-GCodeMachineState::previous                                           # GCodeMachineState *
-GCodeQueue::freeItems                                                 # QueuedCode *
-GCodeQueue::queuedItems                                               # QueuedCode *
-GCodes::deferredPauseCommandPending                                   # char const *
-GCodes::fileBeingHashed                                               # FileStore *
-GCodes::gcodeSources                                                  # GCodeBuffer * []
-GCodes::httpInput                                                     # NetworkGCodeInput *
-GCodes::powerFailScript                                               # char *
-GCodes::resourceOwners                                                # GCodeBuffer const * []
-GCodes::sdTimingFile                                                  # FileStore *
-GCodes::telnetInput                                                   # NetworkGCodeInput *
-GCodes::usb2Input                                                     # UsbGCodeInput *
-GCodes::usbInput                                                      # UsbGCodeInput *
-HangprinterKinematics::StaticForcesConfig::Tmax                       # float const *
-HangprinterKinematics::StaticForcesConfig::Tmin                       # float const *
-HangprinterKinematics::StaticForcesResult::tensions                   # float *
-Heap::HeapBlock::next                                                 # HeapBlock *
-Heap::IndexBlock::next                                                # IndexBlock *
-Heap::IndexSlot::storage                                              # StorageSpace *
-Heap::heapRoot                                                        # HeapBlock *
-Heap::indexRoot                                                       # IndexBlock *
-Heap::lastSpace                                                       # StorageSpace *
-Heap::lastSpaceBlock                                                  # HeapBlock *
-Heat::heaters                                                         # Heater * []
-Heat::lastStandbyTools                                                # Tool const * []
-Heat::sensorsRoot                                                     # TemperatureSensor * volatile
-HeightController::heightControllerTask                                # Task *
-HttpResponder::HttpSession::iface                                     # NetworkInterface const *
-HttpResponder::KeyValueIndices::key                                   # char const *
-HttpResponder::KeyValueIndices::value                                 # char const *
-HttpResponder::commandWords                                           # char const * []
-I2C::sharedI2C                                                        # SharedI2CMaster *
-InputMonitor::monitorsList                                            # InputMonitor * volatile
-InputMonitor::next                                                    # InputMonitor *
-Kinematics::KinematicsTypeDescriptor::createFunction                  # CreationFunction
-Kinematics::KinematicsTypeDescriptor::kinematicsName                  # char const *
-Kinematics::KinematicsTypeDescriptor::kinematicsTypeListRoot          # KinematicsTypeDescriptor *
-Kinematics::KinematicsTypeDescriptor::next                            # KinematicsTypeDescriptor *
-LISAccelerometer::taskWaiting                                         # TaskHandle volatile
-Lcd::fonts                                                            # LcdFont const * const *
-LcdFont::ptr                                                          # uint8_t const *
-LedStripManager::strips                                               # LedStripBase * []
-LineReader::f                                                         # FileStore *
-LocalLedStrip::chunkBuffer                                            # uint8_t *
-LwipEthernetInterface::listeningPcbs                                  # altcp_pcb * []
-LwipEthernetInterface::sockets                                        # LwipSocket * []
-LwipEthernetInterface::tlsConfig                                      # altcp_tls_config *
-LwipEthernetInterface::tlsListeningPcbs                               # altcp_pcb * []
-LwipSocket::connectionPcb                                             # altcp_pcb *
-LwipSocket::receivedData                                              # pbuf * volatile
-MemoryChecker::end                                                    # uint32_t const *
-MemoryChecker::start                                                  # uint32_t const *
-MemoryWatcher::checkedData                                            # uint32_t volatile *
-Menu::highlightedItem                                                 # MenuItem *
-Menu::selectableItems                                                 # MenuItem *
-Menu::unSelectableItems                                               # MenuItem *
-MenuItem::next                                                        # MenuItem *
-MenuItem::visStr                                                      # char const *
-MessageBox::mboxList                                                  # MessageBox *
-MessageBox::next                                                      # MessageBox *
-MonoLcd::image                                                        # uint8_t *
-Move::DriverEnablePins                                                # Pin const *
-Move::activeDMs                                                       # DriveMovement *
-Move::heightController                                                # HeightController *
-Move::kinematics                                                      # Kinematics *
-Move::laserTask                                                       # Task *
-Move::phaseStepDMs                                                    # DriveMovement *
-MoveSegment::freeList                                                 # MoveSegment *
-MoveSegment::next                                                     # MoveSegment *
-MovementState::codeQueue                                              # GCodeQueue *
-MovementState::currentTool                                            # Tool *
-MqttClient::Subscription::next                                        # Subscription *
-MqttClient::Subscription::topic                                       # char *
-MqttClient::currSub                                                   # Subscription *
-MqttClient::instance                                                  # MqttClient *
-MqttClient::prevSub                                                   # Subscription *
-MqttClientConfig::id                                                  # char *
-MqttClientConfig::password                                            # char *
-MqttClientConfig::subs                                                # Subscription *
-MqttClientConfig::username                                            # char *
-MqttClientConfig::willMessage                                         # char *
-MqttClientConfig::willTopic                                           # char *
-Network::clients                                                      # NetworkClient *
-Network::interfaces                                                   # NetworkInterface * []
-Network::nextResponderToPoll                                          # NetworkResponder *
-Network::responders                                                   # NetworkResponder *
-NetworkBuffer::freelist                                               # NetworkBuffer *
-NetworkBuffer::next                                                   # NetworkBuffer *
-NetworkClient::clients                                                # NetworkClient *
-NetworkClient::next                                                   # NetworkClient *
-NetworkResponder::fileBeingSent                                       # FileStore *
-NetworkResponder::fileBuffer                                          # NetworkBuffer *
-NetworkResponder::next                                                # NetworkResponder *
-NetworkResponder::outBuf                                              # OutputBuffer *
-NetworkResponder::skt                                                 # Socket *
-Networking/ESP8266WiFi/WiFiInterface.cpp: wifiInterface               # WiFiInterface *
-Networking/LwipEthernet/LwipEthernetInterface.cpp: ethernetInterface  # LwipEthernetInterface *
-Networking/LwipEthernet/LwipEthernetInterface.cpp: pbufPoolBase       # uint8_t *
-Networking/MQTT/mqtt_pal.h: (anonymous)::m                            # Mutex *
-Networking/MulticastDiscovery/MulticastResponder.cpp: fgmcHandler     # FGMCProtocol *
-Networking/MulticastDiscovery/MulticastResponder.cpp: ourPcb          # udp_pcb *
-Networking/MulticastDiscovery/MulticastResponder.cpp: pbufToFree      # pbuf *
-Networking/MulticastDiscovery/MulticastResponder.cpp: receivedPbuf    # pbuf * volatile
-ObjectExplorationContext::gb                                          # GCodeBuffer const *
-ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::iopVal       # IoPort const *
-ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::omVal        # ObjectModel const *
-ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::sVal         # char const *
-ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::uniqueIdVal  # UniqueId const *
-ObjectModelArrayTableEntry::GetElement                                # function *
-ObjectModelArrayTableEntry::GetNumElements                            # function *
-ObjectModelArrayTableEntry::lockPointer                               # ReadWriteLock *
-ObjectModelClassDescriptor::omd                                       # uint8_t const *
-ObjectModelClassDescriptor::omt                                       # ObjectModelTableEntry const *
-ObjectModelClassDescriptor::parent                                    # ObjectModelClassDescriptor const *
-ObjectModelTableEntry::func                                           # DataFetchPtr_t
-ObjectModelTableEntry::name                                           # char const *
-OutputBuffer::freeOutputBuffers                                       # OutputBuffer * volatile
-OutputBuffer::last                                                    # OutputBuffer *
-OutputBuffer::next                                                    # OutputBuffer *
-OutputStack::items                                                    # OutputBuffer * []
-PanelDueUpdater::currentInterruptCallbackFn                           # InterruptCallbackFn
-PanelDueUpdater::device                                               # Device *
-PanelDueUpdater::firmwareFile                                         # FileStore *
-PanelDueUpdater::flasher                                              # Flasher *
-PanelDueUpdater::flasherObserver                                      # FlasherObserver *
-PanelDueUpdater::samba                                                # Samba *
-PanelDueUpdater::serialPort                                           # SerialPort *
-PinDescription::pinNames                                              # char const *
-Platform/RepRap.cpp: hsmciTask                                        # TaskHandle
-Platform::asyncPorts                                                  # AsyncSerial * []
-Platform::genericDebugBuffer                                          # String *
-Platform::logger                                                      # Logger *
-Platform::mainSharedSpiDevice                                         # SharedSpiDevice *
-Platform::moveWarningBuffer                                           # String *
-Platform::panelDueUpdater                                             # PanelDueUpdater *
-QueuedCode::next                                                      # QueuedCode *
-RawMove::movementTool                                                 # Tool const *
-RepRap::DebugLogRecord::msg                                           # c_string
-RepRap::display                                                       # Display *
-RepRap::expansion                                                     # ExpansionManager *
-RepRap::fansManager                                                   # FansManager *
-RepRap::gCodes                                                        # GCodes *
-RepRap::heat                                                          # Heat *
-RepRap::move                                                          # Move *
-RepRap::network                                                       # Network *
-RepRap::platform                                                      # Platform *
-RepRap::portControl                                                   # PortControl *
-RepRap::printMonitor                                                  # PrintMonitor *
-RepRap::sbcInterface                                                  # SbcInterface *
-SBC/DataTransfer.cpp: sbcTaskHandle                                   # TaskHandle
-SBC/SbcInterface.cpp: sbcTask                                         # Task *
-SbcInterface::asyncWriteBuffer                                        # FileWriteBuffer *
-SbcInterface::asyncWriteData                                          # char const *
-SbcInterface::asyncWriteErrorFlag                                     # atomic *
-SbcInterface::codeBuffer                                              # char *
-SbcInterface::filePath                                                # char const *
-SbcInterface::fileReadBuffer                                          # char *
-SbcInterface::fileWriteBuffer                                         # char const *
-SbcInterface::pendingUsbDevice                                        # SerialCDC *
-StepTimer::callback                                                   # TimerCallbackFunction
-StepTimer::next                                                       # StepTimer *
-StepTimer::pendingList                                                # StepTimer * volatile
-Storage/MassStorage.cpp: freeWriteBuffers                             # FileWriteBuffer *
-Storage/MassStorage.cpp: monthNames                                   # char const * []
-StringHandle::slotPtr                                                 # IndexSlot *
-StringParser::fileBeingWritten                                        # FileStore *
-TelnetResponder::gcodeReply                                           # OutputBuffer *
-TemperatureSensor::SensorTypeDescriptor::createFunction               # CreationFunction
-TemperatureSensor::SensorTypeDescriptor::next                         # SensorTypeDescriptor *
-TemperatureSensor::SensorTypeDescriptor::sensorTypeListRoot           # SensorTypeDescriptor *
-TemperatureSensor::SensorTypeDescriptor::sensorTypeName               # char const *
-TemperatureSensor::next                                               # TemperatureSensor *
-TextMenuItem::text                                                    # char const *
-Tool::filament                                                        # Filament *
-Tool::next                                                            # Tool *
-Tool::toolList                                                        # Tool *
-UsbDeviceRrf::device                                                  # SerialCDC *
-UsbDeviceRrf::originalDevice                                          # SerialCDC *
-ValueMenuItem::textValue                                              # char const *
-VariableSet::LinkedVariable::next                                     # LinkedVariable *
-VariableSet::root                                                     # LinkedVariable *
-WiFiInterface::bufferIn                                               # MessageBufferIn *
-WiFiInterface::bufferOut                                              # MessageBufferOut *
-WiFiInterface::espWaitingTask                                         # TaskHandle
-WiFiInterface::sockets                                                # WiFiSocket * []
-WiFiInterface::uploader                                               # WifiFirmwareUploader *
-WiFiSocket::receivedData                                              # NetworkBuffer *
-WifiFirmwareUploader::uploadFile                                      # FileStore *
-__cxxabiv1::__terminate_handler                                       # terminate_handler
-gmac_device::netif                                                    # netif *
-gmac_device::p_netif                                                  # netif *
-gmac_device::rx_pbuf                                                  # pbuf * []
-lwipRamHeap                                                           # void *
-serialWiFiDevice                                                      # AsyncSerial *
+Accelerometers/Accelerometers.cpp: accelerometer                      # LISAccelerometer *; SUSPECT: MAIN deletes only while accelerometerFile is null; CAN Rx can null it mid-run (K14, see census.md)
+Accelerometers/Accelerometers.cpp: accelerometerFile                  # FileStore * volatile; SUSPECT: shared by MAIN, ACCEL and CAN Rx; CAN Rx can close a local run's file (K14, see census.md)
+Accelerometers/Accelerometers.cpp: accelerometerTask                  # Task *; SAFE-PERMANENT: MAIN only; created once by M955, never freed
+ArrayHandle::slotPtr                                                  # IndexSlot *; SUSPECT: #50 order ok for higher-prio readers; same/lower-prio copy can hit a freed slot (standalone, see census.md; the SBC-mode path through a single global is fixed upstream 43a6b4fa8 (K9))
+AuxDevice::receivedData                                               # uint8_t *; SAFE-ONE-TASK: MAIN only; caller's stack buffer, used only within the M261 polling loop
+AuxDevice::uart                                                       # AsyncSerial *; SAFE-PERMANENT: set once in Platform::Init to a permanent AsyncSerial, never changed
+BinaryParser::header                                                  # CodeHeader *; SAFE-PERMANENT: set once to the permanent gb.buffer on first Put; MAIN only
+BinaryParser::seenParameter                                           # CodeParameter const *; SAFE-ONE-TASK: MAIN only, points into the permanent gb.buffer
+BinaryParser::seenParameterValue                                      # char const *; SAFE-ONE-TASK: MAIN only, points into the permanent gb.buffer
+ButtonMenuItem::command                                               # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer or a literal, item freed before buffer reuse
+ButtonMenuItem::m_acFile                                              # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer, or nullptr for message box buttons
+ButtonMenuItem::text                                                  # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer or a literal
+CAN/CanInterface.cpp: can0dev                                         # CanDevice *; SAFE-PERMANENT: points to static CanDevice; nulled only in emergency-stop Shutdown, never freed
+CAN/CanInterface.cpp: can1dev                                         # CanDevice *; SAFE-PERMANENT: set once in Init to a static CanDevice, never cleared or freed
+CAN/CanInterface.cpp: lastMotionBuffer                                # CanMessageBuffer * volatile; SAFE-LOCKED: tail of motion queue; used only under task critical section with a non-null head
+CAN/CanInterface.cpp: pendingMotionBuffers                            # CanMessageBuffer * volatile; SAFE-LOCKED: Move pushes, CanSender pops, both under task critical section; freed after unlink
+CAN/CanMotion.cpp: CanMotion::movementBufferList                      # CanMessageBuffer *; SAFE-ONE-TASK: Move task only (DDA::Prepare)
+CAN/CanMotion.cpp: CanMotion::stopList                                # DriversStopList * volatile; SAFE-LOCKED: Move edits under stopListMutex; ISR-level readers can't be preempted
+CanMotion::DriversStopList::next                                      # DriversStopList *; SAFE-LOCKED: link of CanMotion::stopList, same rules
+ConfigurableFolder::defaultValue                                      # char const *; SAFE-PERMANENT: string literal set in the constructor, never changed
+ConfigurableFolder::userValue                                         # char const *; SAFE-LOCKED: ReadWriteLock: writer WriteLocker in Configure, readers ReadLockedPointer
+DDA::next                                                             # DDA *; SAFE-PERMANENT: ring link; DDAs are never freed, M595 only inserts at standstill
+DDA::prev                                                             # DDA *; SAFE-PERMANENT: ring link; DDAs are never freed
+DDA::tool                                                             # Tool const *; SUSPECT: dangles after M563 deletes the tool; PauseMoves reads prevDda->tool (K14, see census.md)
+DDARing::addPointer                                                   # DDA *; SAFE-PERMANENT: points into the DDA ring, which is never freed
+DDARing::getPointer                                                   # DDA * volatile; SAFE-PERMANENT: points into the DDA ring, which is never freed
+DDARing::lastFeedForwardTool                                          # Tool const *; SUSPECT: LASER-only, but can outlive the Tool that M563 deletes (K14, see census.md)
+DataTransfer::lastTxBuffer                                            # char *; SAFE-ONE-TASK: SBC task only; set once in Init (SAME70), swapped with txBuffer by SBC task, never freed
+DataTransfer::rxBuffer                                                # char *; SAFE-ONE-TASK: SBC task and the SPI/USB transfers it starts; allocated once in Init, never freed
+DataTransfer::txBuffer                                                # char *; SAFE-ONE-TASK: SBC task and the SPI/USB transfers it starts; allocated once in Init, never freed
+DataTransfer::usbDevice                                               # SerialCDC *; SAFE-ONE-TASK: SBC task only; points to static serialUSB/serialUSB2, never freed
+Display::encoder                                                      # RotaryEncoder *; SUSPECT: MAIN frees on M918; OM read by NETWORK (prio 1) without lock (standalone, see census.md)
+Display::lcd                                                          # Lcd *; SUSPECT: MAIN frees on M918; OM read by NETWORK (prio 1) without lock (standalone, see census.md)
+Display::menu                                                         # Menu *; SAFE-ONE-TASK: MAIN only (Display::Spin, M918); not in the OM
+DriveMovement::nextDM                                                 # DriveMovement *; SAFE-PERMANENT: link between members of Move::dms[], never freed; changed at step priority
+DriveMovement::retiredSegment                                         # MoveSegment * volatile; SAFE-LOCKED: step ISR or interrupts off only; points into the segment pool
+DriveMovement::segments                                               # MoveSegment * volatile; SAFE-LOCKED: head changes only at step priority or with interrupts off; pooled segments
+EndstopOrZProbe::next                                                 # EndstopOrZProbe *; SAFE-ORDER: link of activeEndstops; objects reached via next are never freed while linked
+EndstopsManager::activeEndstops                                       # EndstopOrZProbe * volatile; SUSPECT: M558/M502 can free a Z probe that is still linked here; needs clearing first (K3 fixed by RRF #56, K17 open)
+EndstopsManager::axisEndstops                                         # Endstop * []; SUSPECT: M574 P path deletes before nulling; CAN Rx reads without endstopsLock (K12, fixed upstream 43a6b4fa8)
+EndstopsManager::defaultZProbe                                        # ZProbe *; SAFE-PERMANENT: set once in Init, never freed
+EndstopsManager::extruderInputEndstop                                 # GpInPortEndstop *; SAFE-PERMANENT: created once on first use, never freed
+EndstopsManager::extrudersEndstop                                     # StallDetectionEndstop *; SAFE-PERMANENT: created once on first use, never freed
+EndstopsManager::zProbes                                              # ZProbe * []; SUSPECT: M558 locks, but M502 deletes unlocked; also see activeEndstops/pendingList (K3 fixed by RRF #56; M502 without zProbesLock is standalone, see census.md)
+Event::eventsPending                                                  # Event *; SAFE-LOCKED: changes under TaskCriticalSectionLocker; MAIN alone removes the head it processes
+Event::next                                                           # Event *; SAFE-LOCKED: walked and changed only under TaskCriticalSectionLocker
+ExpansionBoardData::driverData                                        # DriverData *; SAFE-LOCKED: the OM readers and, since RRF #54 (K1), the M569 accessors hold a read lock on boardsLock
+ExpansionBoardData::typeName                                          # char const *; SAFE-PERMANENT: reseated by CanReceiver, old strings never freed; OM reads it unlocked
+ExpressionParser::currentp                                            # char const *; SAFE-ONE-TASK: member of a stack-local parser, never shared between tasks
+ExpressionParser::gb                                                  # GCodeBuffer const *; SAFE-ONE-TASK: member of a stack-local parser; GCodeBuffers are never freed
+FansManager::fans                                                     # Fan * []; SUSPECT: fansLock; OM copies into variables escape the lock (K5, fixed by RRF #57)
+Filament::filamentList                                                # Filament *; SAFE-PERMANENT: Filaments are never freed; new ones are pushed at the head
+Filament::next                                                        # Filament *; SAFE-PERMANENT: Filaments are never freed
+FilamentMonitor::filamentSensors                                      # FilamentMonitor * []; SAFE-LOCKED: all access under filamentMonitorsLock; ISR detached before delete
+FileData::f                                                           # FileStore *; SUSPECT: owner task only, except OM job.filePosition (NETWORK) and Logger (any task) (standalone, see census.md; the Logger part is K13, fixed upstream 43a6b4fa8)
+FileInfoParser::ParseTableEntry::key                                  # char const *; SAFE-PERMANENT: constexpr table of string literals in flash
+FileInfoParser::fileBeingParsed                                       # FileStore *; SAFE-LOCKED: only used inside GetFileInfo while holding parserMutex
+FileInfoParser::vars                                                  # GlobalVariables *; SAFE-LOCKED: set at the start of each GetFileInfo call, used only under parserMutex
+FileStore::writeBuffer                                                # FileWriteBuffer *; SAFE-ONE-TASK: used only by the task that owns the open file; SBC handoff via asyncWriteBuffer
+FileWriteBuffer::buf                                                  # char *; SAFE-PERMANENT: points into static storage; set at startup only
+FileWriteBuffer::next                                                 # FileWriteBuffer *; SAFE-LOCKED: free-list link, changed only under TaskCriticalSectionLocker
+FilesMenuItem::command                                                # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer
+FilesMenuItem::initialDirectory                                       # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer
+FilesMenuItem::m_acFile                                               # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer
+FtpResponder::dataBuf                                                 # OutputBuffer *; SAFE-ONE-TASK: all accesses in NETWORK; MAIN's TryTerminate only sets the terminate flag
+FtpResponder::dataSocket                                              # Socket *; SAFE-ONE-TASK: NETWORK only; points to a permanent socket object
+GCodeBuffer::buffer                                                   # char *; SAFE-PERMANENT: allocated once with AllocPermanent, never freed; OM only tests it for null
+GCodeBuffer::fileInput                                                # FileGCodeInput *; SAFE-PERMANENT: set in the constructor at startup, never changed or freed
+GCodeBuffer::machineState                                             # GCodeMachineState *; SUSPECT: OM reads it unlocked; safe only for readers above the deleting task (SBC vs MAIN) (K2, fixed by RRF #58; standalone inputs[] reader in census.md)
+GCodeBuffer::normalInput                                              # GCodeInput *; SAFE-PERMANENT: set in the constructor at startup, never changed or freed
+GCodeException::message                                               # char const *; SUSPECT: must be a literal; Heater.cpp:644 and SwitchEndstop.cpp:155 pass a stack buffer (K7, fixed by RRF #61)
+GCodeMachineState::BlockState::prev                                   # BlockState *; SAFE-LOCKED: owner GB only, under gb.mutex; not in the object model
+GCodeMachineState::currentBlockState                                  # BlockState *; SAFE-LOCKED: owner GB only, under gb.mutex; reseated before the old block is deleted
+GCodeMachineState::previous                                           # GCodeMachineState *; SUSPECT: OM walks this chain unlocked while MAIN or the SBC task pops and deletes states (K2, fixed by RRF #58)
+GCodeQueue::freeItems                                                 # QueuedCode *; SAFE-ONE-TASK: MAIN only; nodes are allocated once and never freed
+GCodeQueue::queuedItems                                               # QueuedCode *; SAFE-ONE-TASK: MAIN only; nodes are allocated once and never freed
+GCodes::deferredPauseCommandPending                                   # char const *; SAFE-PERMANENT: points only to string literals; MAIN only
+GCodes::fileBeingHashed                                               # FileStore *; SAFE-ONE-TASK: MAIN only (M38); cleared when the file is closed
+GCodes::gcodeSources                                                  # GCodeBuffer * []; SAFE-PERMANENT: filled in the GCodes constructor before other tasks start, never changed
+GCodes::httpInput                                                     # NetworkGCodeInput *; SAFE-PERMANENT: set in the GCodes constructor, never changed or freed; NETWORK reads it
+GCodes::powerFailScript                                               # char *; SUSPECT: reseated before delete: safe for SBC readers, not for NETWORK (same prio as MAIN) (standalone, see census.md)
+GCodes::resourceOwners                                                # GCodeBuffer const * []; SAFE-PERMANENT: targets are the never-freed GCodeBuffers; claim under TaskCriticalSectionLocker
+GCodes::sdTimingFile                                                  # FileStore *; SAFE-ONE-TASK: MAIN only (SD timing test); stale after Close but not used again
+GCodes::telnetInput                                                   # NetworkGCodeInput *; SAFE-PERMANENT: set in the GCodes constructor, never changed or freed; NETWORK reads it
+GCodes::usb2Input                                                     # UsbGCodeInput *; SAFE-PERMANENT: set in the GCodes constructor, never changed or freed
+GCodes::usbInput                                                      # UsbGCodeInput *; SAFE-PERMANENT: set in the GCodes constructor, never changed or freed
+HangprinterKinematics::StaticForcesConfig::Tmax                       # float const *; SAFE-ONE-TASK: stack-local struct, lives for one StaticForces call
+HangprinterKinematics::StaticForcesConfig::Tmin                       # float const *; SAFE-ONE-TASK: stack-local struct, lives for one StaticForces call
+HangprinterKinematics::StaticForcesResult::tensions                   # float *; SAFE-ONE-TASK: stack-local struct, points to the caller's array for one call
+Heap::HeapBlock::next                                                 # HeapBlock *; SAFE-PERMANENT: heap blocks are permanent; list grows only under the heap write lock
+Heap::IndexBlock::next                                                # IndexBlock *; SAFE-PERMANENT: index blocks are permanent; appended fully built under the heap write lock
+Heap::IndexSlot::storage                                              # StorageSpace *; SAFE-LOCKED: deref only under heapLock; freeing a slot a reader has not counted is the F2 race
+Heap::heapRoot                                                        # HeapBlock *; SAFE-LOCKED: changed only under the heap write lock; blocks are never freed
+Heap::indexRoot                                                       # IndexBlock *; SAFE-LOCKED: set once under the heap write lock; index blocks are never freed
+Heap::lastSpace                                                       # StorageSpace *; SAFE-LOCKED: used only with the heap write lock held
+Heap::lastSpaceBlock                                                  # HeapBlock *; SAFE-LOCKED: used only with the heap write lock held
+Heat::heaters                                                         # Heater * []; SUSPECT: heatersLock; tick ISR safe (DeleteObject nulls first); variable copies escape lock (K5, fixed by RRF #57)
+Heat::lastStandbyTools                                                # Tool const * []; SAFE-NO-DEREF: only compared with a Tool pointer, never dereferenced
+Heat::sensorsRoot                                                     # TemperatureSensor * volatile; SUSPECT: sensorsLock for all walks; OM copies into variables escape the lock (K5, fixed by RRF #57)
+HeightController::heightControllerTask                                # Task *; SAFE-PERMANENT: created once by M951, never freed (SUPPORT_ASYNC_MOVES: MB6HC/MB6XD)
+HttpResponder::HttpSession::iface                                     # NetworkInterface const *; SAFE-PERMANENT: target permanent; but RemoveSession from MAIN and NETWORK can race on numSessions (see note)
+HttpResponder::KeyValueIndices::key                                   # char const *; SAFE-ONE-TASK: points into the same responder's clientMessage; NETWORK only
+HttpResponder::KeyValueIndices::value                                 # char const *; SAFE-ONE-TASK: points into the same responder's clientMessage; NETWORK only
+HttpResponder::commandWords                                           # char const * []; SAFE-ONE-TASK: points into the same responder's clientMessage; NETWORK only
+I2C::sharedI2C                                                        # SharedI2CMaster *; SAFE-PERMANENT: created once on first I2C use (built before publish), never freed
+InputMonitor::monitorsList                                            # InputMonitor * volatile; SAFE-LOCKED: expansion mode only; list under listLock, interrupt detached before delete
+InputMonitor::next                                                    # InputMonitor *; SAFE-LOCKED: link of monitorsList, under listLock
+Kinematics::KinematicsTypeDescriptor::createFunction                  # CreationFunction; SAFE-PERMANENT: set by static constructors before tasks start, never changed
+Kinematics::KinematicsTypeDescriptor::kinematicsName                  # char const *; SAFE-PERMANENT: unused member, never written or read
+Kinematics::KinematicsTypeDescriptor::kinematicsTypeListRoot          # KinematicsTypeDescriptor *; SAFE-PERMANENT: built by static constructors before tasks start
+Kinematics::KinematicsTypeDescriptor::next                            # KinematicsTypeDescriptor *; SAFE-PERMANENT: built by static constructors before tasks start
+LISAccelerometer::taskWaiting                                         # TaskHandle volatile; SAFE-PERMANENT: ACCEL task and INT1 ISR only; points to the never-freed ACCEL task
+Lcd::fonts                                                            # LcdFont const * const *; SAFE-PERMANENT: points to the const font table in flash, set in the constructor
+LcdFont::ptr                                                          # uint8_t const *; SAFE-PERMANENT: const font data in flash, set in a const initialiser
+LedStripManager::strips                                               # LedStripBase * []; SUSPECT: ledLock; OM copies into variables escape the lock (K5, fixed by RRF #57)
+LineReader::f                                                         # FileStore *; SAFE-ONE-TASK: member of a stack-local reader inside fileread(); never shared
+LocalLedStrip::chunkBuffer                                            # uint8_t *; SUSPECT: freed in ~LocalLedStrip without waiting for DMA (SAME5x heap buffer) (minor, see census.md)
+LwipEthernetInterface::listeningPcbs                                  # altcp_pcb * []; SAFE-LOCKED: created and closed under lwipMutex; lwIP side uses its own pcb list under the same lock
+LwipEthernetInterface::sockets                                        # LwipSocket * []; SAFE-PERMANENT: array of permanent objects; exists inert in SBC mode on MB6HC/MB6XD
+LwipEthernetInterface::tlsConfig                                      # altcp_tls_config *; SUSPECT: TLS listener can outlive the flags; later FreeTlsConfig frees conf still used by it (standalone network stack, see census.md)
+LwipEthernetInterface::tlsListeningPcbs                               # altcp_pcb * []; SAFE-LOCKED: pointer itself is locked; but a stale listener can survive M586 S0 while down (see tlsConfig)
+LwipSocket::connectionPcb                                             # altcp_pcb *; SUSPECT: UsingTls derefs pcb without lwipMutex; ETHERNET may free it meanwhile (standalone network stack, see census.md)
+LwipSocket::receivedData                                              # pbuf * volatile; SUSPECT: NETWORK keeps a stale pbuf across lock gap; ETHERNET or MAIN can free it first (standalone network stack, see census.md)
+MemoryChecker::end                                                    # uint32_t const *; SAFE-ONE-TASK: debug helper on the NETWORK task stack (SAME5x WiFi only)
+MemoryChecker::start                                                  # uint32_t const *; SAFE-ONE-TASK: debug helper on the NETWORK task stack (SAME5x WiFi only)
+MemoryWatcher::checkedData                                            # uint32_t volatile *; SAFE-ONE-TASK: debug helper on the NETWORK task stack, watches its own stack
+Menu::highlightedItem                                                 # MenuItem *; SAFE-ONE-TASK: MAIN only (Display::Spin, M918)
+Menu::selectableItems                                                 # MenuItem *; SAFE-ONE-TASK: MAIN only (Display::Spin, M918)
+Menu::unSelectableItems                                               # MenuItem *; SAFE-ONE-TASK: MAIN only (Display::Spin, M918)
+MenuItem::next                                                        # MenuItem *; SAFE-ONE-TASK: MAIN only; menu item list link
+MenuItem::visStr                                                      # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer
+MessageBox::mboxList                                                  # MessageBox *; SUSPECT: JSON reports hold mboxLock; expression lookup reads it before taking the lock (K8, fixed upstream 43a6b4fa8)
+MessageBox::next                                                      # MessageBox *; SAFE-LOCKED: walked and changed only by MessageBox functions under mboxLock
+MonoLcd::image                                                        # uint8_t *; SAFE-ORDER: set in ctor, freed with the Lcd; MAIN, plus SBC once in PrepareToLoadIap
+Move::DriverEnablePins                                                # Pin const *; SAFE-PERMANENT: set once in Init to a constexpr table (MB6XD only)
+Move::activeDMs                                                       # DriveMovement *; SAFE-PERMANENT: head of a list of Move::dms[] members, never freed; changed at step priority
+Move::heightController                                                # HeightController *; SAFE-PERMANENT: created once by M951, never freed (MB6HC/MB6XD)
+Move::kinematics                                                      # Kinematics *; SUSPECT: reseat-then-delete protects SBC/ISR readers, not NETWORK (same priority as MAIN) (standalone, see census.md)
+Move::laserTask                                                       # Task *; SUSPECT: Exit deletes before nulling; Move task may Give() in between (e-stop only) (K12, fixed by RRF #62; K20 in census.md)
+Move::phaseStepDMs                                                    # DriveMovement *; SAFE-PERMANENT: list of Move::dms[] members, never freed
+MoveSegment::freeList                                                 # MoveSegment *; SAFE-LOCKED: pool head, changed only with interrupts disabled
+MoveSegment::next                                                     # MoveSegment *; SAFE-LOCKED: link in pooled segment lists; attached lists change at step priority only
+MovementState::codeQueue                                              # GCodeQueue *; SAFE-PERMANENT: created once in the GCodes constructor, never freed
+MovementState::currentTool                                            # Tool *; SUSPECT: OM reads Number() unlocked; safe for SBC, not for NETWORK (same prio as MAIN) (standalone, see census.md)
+MqttClient::Subscription::next                                        # Subscription *; SAFE-PERMANENT: append-only list, nodes never freed
+MqttClient::Subscription::topic                                       # char *; SAFE-PERMANENT: allocated once with the node, never freed
+MqttClient::currSub                                                   # Subscription *; SAFE-ONE-TASK: NETWORK iterator over never-freed nodes
+MqttClient::instance                                                  # MqttClient *; SAFE-PERMANENT: set once in Activate before NETWORK starts; never freed
+MqttClient::prevSub                                                   # Subscription *; SAFE-ONE-TASK: NETWORK only; :122-125 derefs prevSub->topic right after nulling it (debug print)
+MqttClientConfig::id                                                  # char *; SUSPECT: NETWORK may read a string MAIN just deleted after M586 P4 S0 + M586.4 (standalone network stack, see census.md)
+MqttClientConfig::password                                            # char *; SUSPECT: same race as MqttClientConfig::id (standalone network stack, see census.md)
+MqttClientConfig::subs                                                # Subscription *; SAFE-PERMANENT: head of a never-freed list
+MqttClientConfig::username                                            # char *; SUSPECT: same race as MqttClientConfig::id (standalone network stack, see census.md)
+MqttClientConfig::willMessage                                         # char *; SUSPECT: same race as MqttClientConfig::id (standalone network stack, see census.md)
+MqttClientConfig::willTopic                                           # char *; SUSPECT: same race as MqttClientConfig::id (standalone network stack, see census.md)
+Network::clients                                                      # NetworkClient *; SAFE-PERMANENT: set once in Activate before the NETWORK task is created
+Network::interfaces                                                   # NetworkInterface * []; SAFE-PERMANENT: permanent interface objects; OM-exposed
+Network::nextResponderToPoll                                          # NetworkResponder *; SAFE-ONE-TASK: NETWORK iterator over never-freed responders
+Network::responders                                                   # NetworkResponder *; SAFE-PERMANENT: built once in Activate before NETWORK starts
+NetworkBuffer::freelist                                               # NetworkBuffer *; SUSPECT: unlocked freelist; MAIN WiFi socket Terminate races NETWORK Allocate/Release (standalone network stack, see census.md)
+NetworkBuffer::next                                                   # NetworkBuffer *; SUSPECT: same race as freelist and WiFiSocket::receivedData (standalone network stack, see census.md)
+NetworkClient::clients                                                # NetworkClient *; SAFE-PERMANENT: set by constructors in Activate; clients never freed
+NetworkClient::next                                                   # NetworkClient *; SAFE-PERMANENT: immutable after construction
+NetworkResponder::fileBeingSent                                       # FileStore *; SAFE-ONE-TASK: NETWORK only; unmount invalidation handled by FileStore (N7)
+NetworkResponder::fileBuffer                                          # NetworkBuffer *; SAFE-ONE-TASK: NETWORK only; may receive a doubly-listed buffer via the WiFi freelist race
+NetworkResponder::next                                                # NetworkResponder *; SAFE-PERMANENT: immutable after Activate
+NetworkResponder::outBuf                                              # OutputBuffer *; SAFE-ONE-TASK: only NETWORK uses it; MAIN path releases a null outBuf of MqttClient
+NetworkResponder::skt                                                 # Socket *; SAFE-PERMANENT: targets permanent; MAIN terminate of MQTT socket triggers the receivedData race instead
+Networking/ESP8266WiFi/WiFiInterface.cpp: wifiInterface               # WiFiInterface *; SAFE-PERMANENT: set once in the constructor
+Networking/LwipEthernet/LwipEthernetInterface.cpp: ethernetInterface  # LwipEthernetInterface *; SAFE-PERMANENT: set once in the constructor
+Networking/LwipEthernet/LwipEthernetInterface.cpp: pbufPoolBase       # uint8_t *; SAFE-ONE-TASK: MAIN-only bump allocator; SBC buffers live in this pool too
+Networking/MQTT/mqtt_pal.h: (anonymous)::m                            # Mutex *; SAFE-PERMANENT: created once at first Accept, never freed
+Networking/MulticastDiscovery/MulticastResponder.cpp: fgmcHandler     # FGMCProtocol *; SAFE-PERMANENT: allocated on first Start, never freed
+Networking/MulticastDiscovery/MulticastResponder.cpp: ourPcb          # udp_pcb *; SAFE-LOCKED: all create/remove/use under lwipMutex
+Networking/MulticastDiscovery/MulticastResponder.cpp: pbufToFree      # pbuf *; SAFE-ONE-TASK: NETWORK only; freed under lwipMutex
+Networking/MulticastDiscovery/MulticastResponder.cpp: receivedPbuf    # pbuf * volatile; SAFE-ORDER: ETHERNET publishes into empty slot and forgets p; NETWORK takes, uses, frees it
+ObjectExplorationContext::gb                                          # GCodeBuffer const *; SAFE-ONE-TASK: member of a stack-local context; GCodeBuffers are never freed
+ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::iopVal       # IoPort const *; SUSPECT: transient in OM reports; stored as-is in variables, so it can outlive its sensor (K6, fixed by RRF #57)
+ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::omVal        # ObjectModel const *; SUSPECT: transient; expression lookup fetches it before taking the table lock (K5 fixed by RRF #57, K8 fixed upstream 43a6b4fa8)
+ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::sVal         # char const *; SUSPECT: may point into a deletable object (message box); stored as-is in variables (K6, fixed by RRF #57)
+ObjectModel/ObjectModel.h: ExpressionValue::(anonymous)::uniqueIdVal  # UniqueId const *; SAFE-PERMANENT: points to Platform or the fixed expansion board table, never freed
+ObjectModelArrayTableEntry::GetElement                                # function *; SAFE-PERMANENT: member of constexpr tables in flash, never written at run time
+ObjectModelArrayTableEntry::GetNumElements                            # function *; SAFE-PERMANENT: member of constexpr tables in flash, never written at run time
+ObjectModelArrayTableEntry::lockPointer                               # ReadWriteLock *; SAFE-PERMANENT: member of constexpr tables in flash; points to static locks
+ObjectModelClassDescriptor::omd                                       # uint8_t const *; SAFE-PERMANENT: member of const class descriptors in flash
+ObjectModelClassDescriptor::omt                                       # ObjectModelTableEntry const *; SAFE-PERMANENT: member of const class descriptors in flash
+ObjectModelClassDescriptor::parent                                    # ObjectModelClassDescriptor const *; SAFE-PERMANENT: member of const class descriptors in flash
+ObjectModelTableEntry::func                                           # DataFetchPtr_t; SAFE-PERMANENT: member of constexpr tables in flash; points to lambdas
+ObjectModelTableEntry::name                                           # char const *; SAFE-PERMANENT: member of constexpr tables in flash; points to string literals
+OutputBuffer::freeOutputBuffers                                       # OutputBuffer * volatile; SAFE-LOCKED: pool head, changed only under TaskCriticalSectionLocker; task context only
+OutputBuffer::last                                                    # OutputBuffer *; SAFE-LOCKED: tail of a chain, used by its producer or under the queue's mutex
+OutputBuffer::next                                                    # OutputBuffer *; SAFE-LOCKED: chain link; reused only after the last reference is released under the crit. sect
+OutputStack::items                                                    # OutputBuffer * []; SAFE-LOCKED: each queue guarded by its owner's mutex or task; Push/Pop in TaskCriticalSectionLocker
+PanelDueUpdater::currentInterruptCallbackFn                           # InterruptCallbackFn; SAFE-ONE-TASK: MAIN only (M997 S4 state machine); holds a pointer to a static function
+PanelDueUpdater::device                                               # Device *; SAFE-ONE-TASK: MAIN only (M997 S4 state machine)
+PanelDueUpdater::firmwareFile                                         # FileStore *; SAFE-ONE-TASK: MAIN only (M997 S4 state machine)
+PanelDueUpdater::flasher                                              # Flasher *; SAFE-ONE-TASK: MAIN only (M997 S4 state machine)
+PanelDueUpdater::flasherObserver                                      # FlasherObserver *; SAFE-ONE-TASK: MAIN only (M997 S4 state machine)
+PanelDueUpdater::samba                                                # Samba *; SAFE-ONE-TASK: MAIN only (M997 S4 state machine)
+PanelDueUpdater::serialPort                                           # SerialPort *; SAFE-ONE-TASK: MAIN only (M997 S4 state machine)
+PinDescription::pinNames                                              # char const *; SAFE-PERMANENT: constexpr pin table in flash
+Platform/RepRap.cpp: hsmciTask                                        # TaskHandle; SAFE-ORDER: SD task sets it before enabling the HSMCI IRQ; ISR reads it; Task objects static
+Platform::asyncPorts                                                  # AsyncSerial * []; SAFE-PERMANENT: created in the Platform constructor, never freed
+Platform::genericDebugBuffer                                          # String *; SAFE-PERMANENT: allocated once by M111, never freed; Move task and step ISR check for null
+Platform::logger                                                      # Logger *; SAFE-PERMANENT: created once by M929, never freed; every task's Message and the OM read it
+Platform::mainSharedSpiDevice                                         # SharedSpiDevice *; SAFE-PERMANENT: set once in Platform::Init, never freed
+Platform::moveWarningBuffer                                           # String *; SAFE-PERMANENT: allocated once by M111 before its flag gates open, never freed
+Platform::panelDueUpdater                                             # PanelDueUpdater *; SAFE-PERMANENT: created once by M997 S4 in MAIN, never freed
+QueuedCode::next                                                      # QueuedCode *; SAFE-ONE-TASK: MAIN only; nodes are allocated once and never freed
+RawMove::movementTool                                                 # Tool const *; SAFE-ORDER: Move reads it only while segmentsLeft>0; M563 frees tools only at standstill
+RepRap::DebugLogRecord::msg                                           # c_string; SAFE-PERMANENT: points to string literals only; written by NETWORK, read and cleared by M122
+RepRap::display                                                       # Display *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::expansion                                                     # ExpansionManager *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::fansManager                                                   # FansManager *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::gCodes                                                        # GCodes *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::heat                                                          # Heat *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::move                                                          # Move *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::network                                                       # Network *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::platform                                                      # Platform *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::portControl                                                   # PortControl *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::printMonitor                                                  # PrintMonitor *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+RepRap::sbcInterface                                                  # SbcInterface *; SAFE-PERMANENT: set once in RepRap::Init before other tasks start, never freed
+SBC/DataTransfer.cpp: sbcTaskHandle                                   # TaskHandle; SAFE-PERMANENT: set once by SBC task before the SPI IRQ is enabled; GiveFromISR is null-safe
+SBC/SbcInterface.cpp: sbcTask                                         # Task *; SAFE-PERMANENT: set once in Init before the task is created; never freed
+SbcInterface::asyncWriteBuffer                                        # FileWriteBuffer *; SAFE-ORDER: MAIN->SBC handoff under fileMutex; SBC owns it while fileOperation==writeAsync
+SbcInterface::asyncWriteData                                          # char const *; SAFE-ORDER: MAIN->SBC handoff with asyncWriteBuffer; SBC advances it only during writeAsync
+SbcInterface::asyncWriteErrorFlag                                     # atomic *; SAFE-ORDER: points into static FileStore; set before the slot is freed; reuse waits for the slot
+SbcInterface::codeBuffer                                              # char *; SAFE-PERMANENT: allocated once in Init, never freed; contents under TaskCriticalSectionLocker
+SbcInterface::filePath                                                # char const *; SAFE-ORDER: MAIN sets under fileMutex; SBC (higher prio) copies it only while its op is pending
+SbcInterface::fileReadBuffer                                          # char *; SAFE-ORDER: MAIN sets under fileMutex; SBC fills it only while fileOperation==read, clamped
+SbcInterface::fileWriteBuffer                                         # char const *; SAFE-ORDER: MAIN sets under fileMutex; SBC reads/advances it only while fileOperation==write
+SbcInterface::pendingUsbDevice                                        # SerialCDC *; SAFE-PERMANENT: MAIN->SBC handoff of static serialUSB/serialUSB2; never freed
+StepTimer::callback                                                   # TimerCallbackFunction; SAFE-PERMANENT: points to code; the StepTimer holding it may be freed, see pendingList
+StepTimer::next                                                       # StepTimer *; SUSPECT: link of pendingList; a freed LocalZProbe can stay linked (see pendingList) (K11, fixed by RRF #63)
+StepTimer::pendingList                                                # StepTimer * volatile; SUSPECT: a deleted LocalZProbe leaves its timer linked here; owner must cancel first (K11, fixed by RRF #63)
+Storage/MassStorage.cpp: freeWriteBuffers                             # FileWriteBuffer *; SAFE-LOCKED: free-list head, changed only under TaskCriticalSectionLocker
+Storage/MassStorage.cpp: monthNames                                   # char const * []; SAFE-PERMANENT: static table of string literals, never written
+StringHandle::slotPtr                                                 # IndexSlot *; SUSPECT: #50 order ok for higher-prio readers; same/lower-prio copy can hit a freed slot (standalone, see census.md)
+StringParser::fileBeingWritten                                        # FileStore *; SUSPECT: MAIN only, but FinishWritingBinary reads the CRC after Close returned the slot (K14, see census.md)
+TelnetResponder::gcodeReply                                           # OutputBuffer *; SAFE-LOCKED: gcodeReplyMutex everywhere; appending to a buffer being sent can leak, not double-free
+TemperatureSensor::SensorTypeDescriptor::createFunction               # CreationFunction; SAFE-PERMANENT: set during static init before the scheduler starts, never changed
+TemperatureSensor::SensorTypeDescriptor::next                         # SensorTypeDescriptor *; SAFE-PERMANENT: set during static init before the scheduler starts, never changed
+TemperatureSensor::SensorTypeDescriptor::sensorTypeListRoot           # SensorTypeDescriptor *; SAFE-PERMANENT: set during static init before the scheduler starts, never changed
+TemperatureSensor::SensorTypeDescriptor::sensorTypeName               # char const *; SAFE-PERMANENT: set during static init before the scheduler starts, never changed
+TemperatureSensor::next                                               # TemperatureSensor *; SAFE-LOCKED: sensor list link; written and walked under Heat::sensorsLock
+TextMenuItem::text                                                    # char const *; SAFE-ONE-TASK: MAIN only; commandBuffer, literal or MessageBox text (only MAIN deletes it)
+Tool::filament                                                        # Filament *; SAFE-PERMANENT: points to a Filament, which is never freed
+Tool::next                                                            # Tool *; SAFE-LOCKED: tool list changed under toolListLock write lock; other tasks read it locked
+Tool::toolList                                                        # Tool *; SAFE-LOCKED: head of the tool list, changed under toolListLock write lock
+UsbDeviceRrf::device                                                  # SerialCDC *; SAFE-ORDER: target is a static SerialCDC; only MAIN sets nullptr, SBC (higher prio) re-points it
+UsbDeviceRrf::originalDevice                                          # SerialCDC *; SAFE-PERMANENT: set once in Init to a static SerialCDC, never changed
+ValueMenuItem::textValue                                              # char const *; SAFE-ONE-TASK: MAIN only; set and used in Draw, points at RepRap::message
+VariableSet::LinkedVariable::next                                     # LinkedVariable *; SUSPECT: lock held except for a single-key report (GlobalVariables.cpp:50); customInfo frees nodes (K9, fixed upstream 43a6b4fa8)
+VariableSet::root                                                     # LinkedVariable *; SUSPECT: lock held except for a single-key report (GlobalVariables.cpp:50); customInfo frees nodes (K9, fixed upstream 43a6b4fa8)
+WiFiInterface::bufferIn                                               # MessageBufferIn *; SAFE-PERMANENT: set once in Activate to a static buffer
+WiFiInterface::bufferOut                                              # MessageBufferOut *; SAFE-PERMANENT: static target; note M587 EAP before Activate writes through a null bufferOut
+WiFiInterface::espWaitingTask                                         # TaskHandle; SAFE-LOCKED: tasks serialised by interfaceMutex; ISR gated by transferPending; target static
+WiFiInterface::sockets                                                # WiFiSocket * []; SAFE-PERMANENT: array of permanent objects
+WiFiInterface::uploader                                               # WifiFirmwareUploader *; SAFE-PERMANENT: allocated once in Activate, never freed
+WiFiSocket::receivedData                                              # NetworkBuffer *; SUSPECT: MAIN Terminate releases buffers NETWORK is reading or DMA-filling (standalone network stack, see census.md)
+WifiFirmwareUploader::uploadFile                                      # FileStore *; SAFE-ORDER: state handoff: MAIN writes only when idle, NETWORK owns it until it sets idle
+__cxxabiv1::__terminate_handler                                       # terminate_handler; SAFE-PERMANENT: libsupc++ terminate handler; RRF never calls set_terminate
+gmac_device::netif                                                    # netif *; SAFE-PERMANENT: SAME5x (Mini5plus) only; points to the static netif
+gmac_device::p_netif                                                  # netif *; SAFE-PERMANENT: SAME70 (MB6HC/MB6XD) only; points to the static netif
+gmac_device::rx_pbuf                                                  # pbuf * []; SUSPECT: second Start after PHY init failure re-inits lwIP and RX ring under a live ETHERNET task (standalone network stack, see census.md)
+lwipRamHeap                                                           # void *; SAFE-ONE-TASK: MAIN only; a repeated Start after PHY failure leaks it (see rx_pbuf)
+serialWiFiDevice                                                      # AsyncSerial *; SAFE-PERMANENT: set once in the constructor
