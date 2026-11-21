@@ -293,7 +293,7 @@ void GCodeMachineState::CopyStateFrom(const GCodeMachineState& other) noexcept
 }
 
 // Set the error message and associated state
-void GCodeMachineState::SetError(const char *_ecv_array msg, int parameter) noexcept
+void GCodeMachineState::SetError(GCodeExceptionMessage msg, int parameter) noexcept
 {
 	if (stateMachineResult != GCodeResult::error)
 	{
@@ -311,7 +311,7 @@ void GCodeMachineState::SetError(const GCodeException& exc) noexcept
 	}
 }
 
-void GCodeMachineState::SetWarning(const char *_ecv_array msg) noexcept
+void GCodeMachineState::SetWarning(GCodeExceptionMessage msg) noexcept
 {
 	if (stateMachineResult == GCodeResult::ok)
 	{

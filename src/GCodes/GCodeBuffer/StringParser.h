@@ -92,9 +92,9 @@ public:
 	void AppendFullCommand(const StringRef &s) const noexcept;
 	void AddParameters(VariableSet& vs, int codeRunning) THROWS(GCodeException);
 
-	GCodeException ConstructParseException(const char *_ecv_array str) const noexcept;
-	GCodeException ConstructParseException(const char *_ecv_array str, const char *_ecv_array param) const noexcept;
-	GCodeException ConstructParseException(const char *_ecv_array str, uint32_t param) const noexcept;
+	GCodeException ConstructParseException(GCodeExceptionMessage str) const noexcept;
+	GCodeException ConstructParseException(GCodeExceptionMessage str, const char *_ecv_array param) const noexcept;
+	GCodeException ConstructParseException(GCodeExceptionMessage str, uint32_t param) const noexcept;
 
 	int GetColumn() const noexcept;											// Get the current column if we can, else return -1
 

@@ -2173,17 +2173,17 @@ void StringParser::AddParameters(VariableSet& vs, int codeRunning) THROWS(GCodeE
 	}
 }
 
-GCodeException StringParser::ConstructParseException(const char *_ecv_array str) const noexcept
+GCodeException StringParser::ConstructParseException(GCodeExceptionMessage str) const noexcept
 {
 	return GCodeException(&gb, GetColumn(), str);
 }
 
-GCodeException StringParser::ConstructParseException(const char *_ecv_array str, const char *_ecv_array param) const noexcept
+GCodeException StringParser::ConstructParseException(GCodeExceptionMessage str, const char *_ecv_array param) const noexcept
 {
 	return GCodeException(&gb, GetColumn(), str, param);
 }
 
-GCodeException StringParser::ConstructParseException(const char *_ecv_array str, uint32_t param) const noexcept
+GCodeException StringParser::ConstructParseException(GCodeExceptionMessage str, uint32_t param) const noexcept
 {
 	return GCodeException(&gb, GetColumn(), str, param);
 }
