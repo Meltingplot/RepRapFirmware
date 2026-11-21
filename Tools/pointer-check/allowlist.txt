@@ -60,7 +60,7 @@ DriveMovement::nextDM                                                 # DriveMov
 DriveMovement::retiredSegment                                         # MoveSegment * volatile; SAFE-LOCKED: step ISR or interrupts off only; points into the segment pool
 DriveMovement::segments                                               # MoveSegment * volatile; SAFE-LOCKED: head changes only at step priority or with interrupts off; pooled segments
 EndstopOrZProbe::next                                                 # EndstopOrZProbe *; SAFE-ORDER: link of activeEndstops; objects reached via next are never freed while linked
-EndstopsManager::activeEndstops                                       # EndstopOrZProbe * volatile; SUSPECT: M558/M502 can free a Z probe that is still linked here; needs clearing first (K3 fixed by RRF #56, K17 open)
+EndstopsManager::activeEndstops                                       # EndstopOrZProbe * volatile; SUSPECT: entries stay linked after a move without a trigger, and a later input change acts on them (K17, RRF #66); M558/M502 clear it before deleting a probe (K3, fixed by RRF #56)
 EndstopsManager::axisEndstops                                         # Endstop * []; SAFE-ORDER: M574 deletes with DeleteObject under endstopsLock (K12, fixed upstream 43a6b4fa8); OM readers hold the lock; CanReceiver reads in a task critical section and outranks MAIN
 EndstopsManager::defaultZProbe                                        # ZProbe *; SAFE-PERMANENT: set once in Init, never freed
 EndstopsManager::extruderInputEndstop                                 # GpInPortEndstop *; SAFE-PERMANENT: created once on first use, never freed
