@@ -669,8 +669,7 @@ void Move::Exit() noexcept
 		ring.Exit();
 	}
 #if SUPPORT_LASER || SUPPORT_IOBITS
-	delete laserTask;
-	laserTask = nullptr;
+	DeleteObject(laserTask);						// this clears the pointer before it deletes the task, which WakeLaserTask and an Exit call from a higher priority task rely on
 #endif
 	moveTask.TerminateAndUnlink();
 }
