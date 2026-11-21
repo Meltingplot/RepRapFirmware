@@ -81,9 +81,10 @@ constexpr uint32_t IAP_IMAGE_START = 0x20018000;	// IAP is loaded into the last 
 # define SUPPORT_FTP			1
 # define SUPPORT_TELNET			1
 # define SUPPORT_ROTARY_DELTA	0					// leave out rotary delta kinematics to save flash space
-# define SUPPORT_HANGPRINTER	0					// leave out hangprinter kinematics to save flash space
 # define SUPPORT_FIVEBARSCARA	0					// leave out 5-bar SCARA kinematics to save flash space
 #endif
+
+# define SUPPORT_HANGPRINTER	0					// leave out hangprinter kinematics to save flash space, also it need CAN
 
 #define SUPPORT_ASYNC_MOVES		0
 
@@ -287,7 +288,7 @@ constexpr SpiParameters SharedSpiParams =
 // Aliases are separate by the , character.
 // If a pin name is prefixed by ! then this means the pin is hardware inverted. The same pin may have names for both the inverted and non-inverted cases,
 // for example the inverted heater pins on the expansion connector are available as non-inverted servo pins on a DueX.
-constexpr PinDescription PinTable[] =
+inline constexpr PinDescription PinTable[] =
 {	//	TC					PWM					ADC				Capability				PinNames
 	// Port A
 	{ TcOutput::tioa0,	PwmOutput::none,	AdcInput::none,		PinCapability::wpwm,	"fan2"										},	// PA00 Fan 2

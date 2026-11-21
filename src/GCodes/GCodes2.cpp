@@ -233,6 +233,10 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 		case 0: // Rapid move
 		case 1: // Ordinary move
 			BREAK_IF_NOT_EXECUTING
+			if (!AllowJogWhileHeld(gb, reply, result))
+			{
+				break;
+			}
 			if (GetMovementState(gb).segmentsLeft != 0)						// do this check first to avoid locking movement unnecessarily
 			{
 				return false;
@@ -259,6 +263,10 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 		case 3: // Anti clockwise arc
 			// We only support X and Y axes in these (and optionally Z for corkscrew moves), but you can map them to other axes in the tool definitions
 			BREAK_IF_NOT_EXECUTING
+			if (!CheckMovementNotHeld(gb, reply, result))
+			{
+				break;
+			}
 			if (GetMovementState(gb).segmentsLeft != 0)					// do this check first to avoid locking movement unnecessarily
 			{
 				return false;
@@ -387,6 +395,10 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 			break;
 
 		case 28: // Home
+			if (!CheckMovementNotHeld(gb, reply, result))
+			{
+				break;
+			}
 			if (!LockCurrentMovementSystemAndWaitForStandstill(gb))
 			{
 				return false;
@@ -396,6 +408,10 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 			break;
 
 		case 29: // Grid-based bed probing
+			if (!CheckMovementNotHeld(gb, reply, result))
+			{
+				break;
+			}
 			if (!LockCurrentMovementSystemAndWaitForStandstill(gb))			// do this first to make sure that a new grid isn't being defined
 			{
 				return false;
@@ -461,6 +477,10 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 			break;
 
 		case 30: // Z probe/manually set at a position and set that as point P
+			if (!CheckMovementNotHeld(gb, reply, result))
+			{
+				break;
+			}
 			if (!LockCurrentMovementSystemAndWaitForStandstill(gb))
 			{
 				return false;
@@ -484,6 +504,10 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 			break;
 
 		case 32: // Probe Z at multiple positions and generate the bed transform
+			if (!CheckMovementNotHeld(gb, reply, result))
+			{
+				break;
+			}
 			if (!LockCurrentMovementSystemAndWaitForStandstill(gb))
 			{
 				return false;
@@ -503,6 +527,10 @@ bool GCodes::HandleGcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 			break;
 
 		case 38: // Straight probe - move until either the probe is triggered or the commanded move ends
+			if (!CheckMovementNotHeld(gb, reply, result))
+			{
+				break;
+			}
 			if (!LockCurrentMovementSystemAndWaitForStandstill(gb))
 			{
 				return false;
@@ -747,7 +775,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 
 		GCodeResult result;
 		if (   gb.GetCommandFraction() > 0
-			&& code != 36 && code != 201 && code != 260 && code != 261 && code != 505
+			&& code != 25 && code != 36 && code != 201 && code != 260 && code != 261 && code != 505
 #if SUPPORT_SCANNING_PROBES
 			&& code != 558
 #endif
@@ -783,9 +811,15 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 #endif
 					StopPrint(&gb, StopPrintReason::normalCompletion);
 				}
-				else if (pauseState == PauseState::paused)
+				else if (pauseState == PauseState::paused || (reprap.GetMove().IsFeedHoldActive() && reprap.GetPrintMonitor().IsPrinting()))
 				{
-					// Cancelling a print that has been paused
+					// Cancelling a print that has been paused, or one that a feed hold has brought to a stop. The held moves are dropped, because cancel.g and stop.g need movement
+					if (reprap.GetMove().IsFeedHoldActive())
+					{
+						DiscardQueuedMotion();
+						DiscardJobReadAhead();
+						pauseState = PauseState::paused;				// the hold has gone with the moves, so this keeps the job from reading on and brings us back here while we wait for standstill
+					}
 					if (!LockAllMovementSystemsAndWaitForStandstill(gb))	// make sure everything has stopped
 					{
 						return false;
@@ -1170,6 +1204,17 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 #endif
 
 			case 24: // Print/resume-printing the selected file
+				if (reprap.GetMove().IsFeedHoldActive())
+				{
+					// This must come before any wait for standstill, because the held ring never reaches it.
+					// If the print is paused as well, carry on and resume it too, else releasing the hold is all there is to do
+					reprap.GetMove().ReleaseFeedHold();
+					RestoreReadAheadPositions();
+					if (pauseState != PauseState::paused)
+					{
+						break;
+					}
+				}
 				if (pauseState == PauseState::pausing || pauseState == PauseState::resuming)
 				{
 					// ignore the resume request
@@ -1291,7 +1336,11 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 				break;
 
 			case 25: // Pause the print
-				if (pauseState != PauseState::notPaused)
+				if (gb.GetCommandFraction() == 1)
+				{
+					result = DoFeedHold(gb, reply);
+				}
+				else if (pauseState != PauseState::notPaused)
 				{
 					reply.copy("Printing is already paused!");
 					result = GCodeResult::error;
@@ -1452,7 +1501,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 						break;
 #endif
 					default:
-						result = GCodeResult::errorNotSupported;
+						result = GCodeResult::warningNotSupported;
 						break;
 					}
 				}
@@ -1962,7 +2011,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 #if SUPPORT_CAN_EXPANSION
 				if (gb.Seen('B'))
 				{
-					const uint32_t board = gb.GetUIValue();
+					const uint32_t board = gb.GetCanAddress('B', true, true);
 					if (board != CanInterface::GetCanAddress())
 					{
 						result = CanInterface::GetRemoteFirmwareDetails(board, gb, reply);
@@ -2324,7 +2373,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 
 					// If
 #if SUPPORT_CAN_EXPANSION
-					const uint32_t board = (gb.Seen('B')) ? gb.GetUIValue() : CanInterface::GetCanAddress();
+					const uint32_t board = (gb.Seen('B')) ? gb.GetCanAddress('B', true, true) : CanInterface::GetCanAddress();
 					if (board != CanInterface::GetCanAddress())
 					{
 						result = CanInterface::RemoteDiagnostics(mt, board, type, gb, reply);
@@ -2612,7 +2661,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 					const int frac = gb.GetCommandFraction();
 					if (frac > 1)
 					{
-						result = GCodeResult::errorNotSupported;
+						result = GCodeResult::warningNotSupported;
 						break;
 					}
 
@@ -3551,7 +3600,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 			case 505:	// set sys folder (M505), set web folder (M505.1)
 				if (gb.GetCommandFraction() > 1)
 				{
-					result = GCodeResult::errorNotSupported;
+					result = GCodeResult::warningNotSupported;
 				}
 				else if (gb.Seen('P'))
 				{
@@ -4574,9 +4623,9 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 					{
 						reply.copy(	(code == 913) ? "Motor current % of normal - "
 #if HAS_SMART_DRIVERS || SUPPORT_CAN_EXPANSION
-									: (code == 917) ? "Motor standstill current % of normal - "
+									: (code == 917) ? "Configured motor standstill current % of normal - "
 #endif
-											: "Motor current (mA) - "
+											: "Configured motor current (mA) - "
 								);
 						for (size_t axis = 0; axis < numTotalAxes; ++axis)
 						{
@@ -4794,7 +4843,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 #if SUPPORT_CAN_EXPANSION
 				if (gb.Seen('B'))
 				{
-					const uint32_t address = gb.GetUIValue();
+					const uint32_t address = gb.GetCanAddress('B', true, true);
 					if (address != CanInterface::GetCanAddress())
 					{
 						result = reprap.GetExpansion().ResetRemote(address, gb, reply);
