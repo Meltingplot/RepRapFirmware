@@ -29,6 +29,8 @@
 #define SAME70					1
 
 // RepRapFirmware.h
+#define THROWS(...)				noexcept(false)
+
 void HeapTestAssertFailed(uint32_t line, const char *file) noexcept;
 #define RRF_ASSERT(_expr) do { if (!(_expr)) { HeapTestAssertFailed(__LINE__, __FILE__); return; } } while (false)
 

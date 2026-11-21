@@ -171,20 +171,23 @@ TypeCode ArrayHandle::GetElementType(size_t index) const noexcept
 // Decrease the reference count for the array referred to and delete it if it reaches zero
 void ArrayHandle::Delete() noexcept
 {
-	if (slotPtr != nullptr)
+	Heap::IndexSlot *_ecv_null const slot = slotPtr;
+	if (slot != nullptr)
 	{
+		// Clear the pointer to the handle entry before releasing it, as in StringHandle::Delete. A task that copies this handle meanwhile
+		// must find either a slot that still holds our reference or no slot at all, and must not see the contents being released.
+		slotPtr = nullptr;
 		ReadLocker locker(Heap::heapLock);						// prevent other tasks modifying the heap
-		if (slotPtr->refCount == 1)
+		if (slot->refCount == 1)
 		{
 			// The call to Heap:::DeleteSlot will deallocate the slot, so release the contents first
-			ArrayStorageSpace *const aSpace = reinterpret_cast<ArrayStorageSpace*>(_ecv_not_null(slotPtr->storage));
+			ArrayStorageSpace *const aSpace = reinterpret_cast<ArrayStorageSpace*>(_ecv_not_null(slot->storage));
 			for (size_t i = 0; i < aSpace->count; ++i)
 			{
 				aSpace->elements[i].Release();					// release the element
 			}
 		}
-		Heap::DeleteSlot(slotPtr);
-		slotPtr = nullptr;										// clear the pointer to the handle entry
+		Heap::DeleteSlot(slot);
 	}
 }
 
