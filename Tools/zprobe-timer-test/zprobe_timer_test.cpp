@@ -216,6 +216,8 @@ void LocalZProbe::SetIREmitter(bool) const noexcept { }
 GCodeResult LocalZProbe::GetCalibratedReading(float&) const noexcept { return GCodeResult::error; }
 
 // src/Endstops/EndstopsManager.h, the members that ProgramZProbe and SetZProbeDefaults use
+class EndstopOrZProbe;															// only the pointer type of activeEndstops is used
+
 class EndstopsManager
 {
 public:
@@ -224,6 +226,7 @@ public:
 
 	static ReadWriteLock zProbesLock;
 	ZProbe *_ecv_from _ecv_null zProbes[MaxZProbes] = { };
+	EndstopOrZProbe *_ecv_from _ecv_null volatile activeEndstops = nullptr;	// SetZProbeDefaults clears it (#56), EndstopsManager.h:103
 };
 
 ReadWriteLock EndstopsManager::zProbesLock;
