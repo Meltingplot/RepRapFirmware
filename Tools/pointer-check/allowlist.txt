@@ -6,6 +6,8 @@
 # The first list is the state of 3.7-dev at 995d16ed4 in Duet3_MB6HC, Duet3_MB6XD and Duet3Mini5plus, with the type as the
 # comment. A new entry needs the reason why the pointer is safe without a pointer class, e.g. which tasks read and write it.
 # "make update" rewrites the list from the firmware and keeps the comments of the entries that stay.
+# Pointers that an upstream merge brings in are added with their type and the upstream commit, like the first list; the review
+# of how they are shared gives them their reason.
 Accelerometers/Accelerometers.cpp: accelerometer                      # LISAccelerometer *
 Accelerometers/Accelerometers.cpp: accelerometerFile                  # FileStore * volatile
 Accelerometers/Accelerometers.cpp: accelerometerTask                  # Task *
@@ -15,6 +17,8 @@ AuxDevice::uart                                                       # AsyncSer
 BinaryParser::header                                                  # CodeHeader *
 BinaryParser::seenParameter                                           # CodeParameter const *
 BinaryParser::seenParameterValue                                      # char const *
+BufferedStreamGCodeInput::directBuffers                               # uint8_t * [], upstream eed7cf1fc
+BufferedStreamGCodeInput::directTail                                  # uint8_t const *, upstream eed7cf1fc
 ButtonMenuItem::command                                               # char const *
 ButtonMenuItem::m_acFile                                              # char const *
 ButtonMenuItem::text                                                  # char const *
@@ -23,8 +27,8 @@ CAN/CanInterface.cpp: can1dev                                         # CanDevic
 CAN/CanInterface.cpp: lastMotionBuffer                                # CanMessageBuffer * volatile
 CAN/CanInterface.cpp: pendingMotionBuffers                            # CanMessageBuffer * volatile
 CAN/CanMotion.cpp: CanMotion::movementBufferList                      # CanMessageBuffer *
-CAN/CanMotion.cpp: CanMotion::stopList                                # DriversStopList * volatile
 CanMotion::DriversStopList::next                                      # DriversStopList *
+CanMotion::StopListState::stopList                                    # DriversStopList * volatile, upstream 43a6b4fa8, was CanMotion::stopList
 ConfigurableFolder::defaultValue                                      # char const *
 ConfigurableFolder::userValue                                         # char const *
 DDA::next                                                             # DDA *
@@ -32,7 +36,10 @@ DDA::prev                                                             # DDA *
 DDA::tool                                                             # Tool const *
 DDARing::addPointer                                                   # DDA *
 DDARing::getPointer                                                   # DDA * volatile
+DDARing::holdBarrier                                                  # DDA * volatile, upstream e7e30e13f
 DDARing::lastFeedForwardTool                                          # Tool const *
+DDARing::lastHomingMoveDda                                            # DDA *, upstream e7e30e13f
+DDARing::returnMoveDda                                                # DDA * volatile, upstream 7e9556797
 DataTransfer::lastTxBuffer                                            # char *
 DataTransfer::rxBuffer                                                # char *
 DataTransfer::txBuffer                                                # char *
