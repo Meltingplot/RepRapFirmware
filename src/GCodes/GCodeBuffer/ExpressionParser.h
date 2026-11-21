@@ -65,10 +65,10 @@ public:
 	const char *_ecv_array GetEndptr() const noexcept { return currentp; }
 
 private:
-	[[noreturn]] void __attribute__((noinline)) ThrowParseException(const char *_ecv_array str) const THROWS(GCodeException);
-	[[noreturn]] void __attribute__((noinline)) ThrowParseException(const char *_ecv_array str, const char *_ecv_array param) const THROWS(GCodeException);
-	[[noreturn]] void __attribute__((noinline)) ThrowParseException(const char *_ecv_array str, uint32_t param) const THROWS(GCodeException);
-	[[noreturn]] void __attribute__((noinline)) ThrowVariableException(const char *_ecv_array str, const char *_ecv_array name, size_t nameLength) const THROWS(GCodeException);
+	[[noreturn]] void __attribute__((noinline)) ThrowParseException(GCodeExceptionMessage str) const THROWS(GCodeException);
+	[[noreturn]] void __attribute__((noinline)) ThrowParseException(GCodeExceptionMessage str, const char *_ecv_array param) const THROWS(GCodeException);
+	[[noreturn]] void __attribute__((noinline)) ThrowParseException(GCodeExceptionMessage str, uint32_t param) const THROWS(GCodeException);
+	[[noreturn]] void __attribute__((noinline)) ThrowVariableException(GCodeExceptionMessage str, const char *_ecv_array name, size_t nameLength) const THROWS(GCodeException);
 
 	void __attribute__((noinline)) ParseInternal(ExpressionValue& val, bool evaluate, uint8_t priority) THROWS(GCodeException);
 	void __attribute__((noinline)) ParseExpectKet(ExpressionValue& rslt, bool evaluate, char expectedKet) THROWS(GCodeException);

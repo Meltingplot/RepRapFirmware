@@ -261,8 +261,8 @@ public:
 	bool ObsoleteFieldQueried() const noexcept { return obsoleteFieldQueried; }
 	void SetObsoleteFieldQueried() noexcept { obsoleteFieldQueried = true; }
 
-	GCodeException ConstructParseException(const char *_ecv_array msg) const noexcept;
-	GCodeException ConstructParseException(const char *_ecv_array msg, const char *_ecv_array sparam) const noexcept;
+	GCodeException ConstructParseException(GCodeExceptionMessage msg) const noexcept;
+	GCodeException ConstructParseException(GCodeExceptionMessage msg, const char *_ecv_array sparam) const noexcept;
 	void CheckStack(uint32_t calledFunctionStackUsage) const THROWS(GCodeException);
 
 private:

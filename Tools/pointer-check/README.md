@@ -27,7 +27,8 @@ pointers, and whose pointer is not const:
 - Code under `src/` that comes from elsewhere does not count: lwIP, the GMAC driver, MQTT-C, the Wiznet driver,
   `src/Libraries`, BOSSA, `src/libc` and `src/libcpp`. `VENDORED` in `pointer-check.py` lists these folders.
 
-`selftest/src/sample.cpp` has one example of each case.
+`selftest/src/sample.cpp` has one example of each case. `selftest/src/no-pointers.cpp` has none: `make selftest` runs
+`--update` on it, which must write an allowlist with the header and no entries.
 
 ## How it works
 
@@ -45,6 +46,10 @@ alone. For `Duet3_MB6HC` at 06707c314, the `.bin` with and without `-g` differed
 What the check does not see:
 - A class template that is never instantiated, and a type that no compiled code uses: the compiler writes no debug information
   for them. They are not in the firmware either. The check sees them as soon as code uses them.
+- A source file of which the linker keeps no section, e.g. a file that the configuration leaves empty with `#if`: the linker
+  (`--gc-sections`) drops its debug information with its code. At 85a1fe59c this applied to 4 of the 176 objects outside the
+  `VENDORED` folders in `Duet3_MB6HC`, 13 of 176 in `Duet3_MB6XD` and 18 of 198 in `Duet3Mini5plus`. None of them keeps a
+  non-empty section in the linker map, so their code is not in the firmware either.
 - Configurations that it does not build. The default is those of `make all` (`Duet3_MB6HC`, `Duet3_MB6XD`, `Duet3Mini5plus`);
   `Duet3_CAN0` and `Duet3_MB6HC_no_SD` are not included.
 
@@ -57,7 +62,7 @@ container of DuetSoftwareFramework has both: `firmware/build.sh shell`, then `ma
     make check CONFIGS=Duet3_MB6HC  # only this configuration; entries of the others show up as notes
     make scan                       # check the ELF files that are already there, without building
     make update                     # build, then rewrite allowlist.txt from the firmware
-    make selftest                   # check pointer-check.py against selftest/src/sample.cpp
+    make selftest                   # check pointer-check.py against selftest/src/sample.cpp and no-pointers.cpp
 
 Each new pointer gives one line, in the format that compilers use:
 

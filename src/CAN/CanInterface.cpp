@@ -1343,11 +1343,6 @@ GCodeResult CanInterface::GetSetRemoteDriverStallParameters(const CanDriversList
 	return GCodeResult::ok;
 }
 
-// Static buffer to allow a string to be stored that is referred to by a thrown exception.
-// This isn't ideal, however I consider it unlikely that both motion systems will execute homing moves involving remote drivers at the same time.
-// An alternative would be to enlarge the GCodeException class to store a copy of the string instead of a pointer to it.
-static String<StringLength100> enableEndstopsReply;
-
 // Enable a stall endstop on a remote board
 void CanInterface::EnableRemoteStallEndstop(DriverId did, float speed, bool useEncoder) THROWS(GCodeException)
 {
@@ -1362,10 +1357,10 @@ void CanInterface::EnableRemoteStallEndstop(DriverId did, float speed, bool useE
 	msg->speed = speed;
 	msg->endstopType = useEncoder ? CanMessageEnableStallEndstop::typeEncoder : CanMessageEnableStallEndstop::typeMotorLoad;
 
-	enableEndstopsReply.Clear();
-	if (CanInterface::SendRequestAndGetStandardReply(buf, rid, enableEndstopsReply.GetRef(), nullptr) != GCodeResult::ok)
+	String<StringLength100> reply;
+	if (CanInterface::SendRequestAndGetStandardReply(buf, rid, reply.GetRef(), nullptr) != GCodeResult::ok)
 	{
-		ThrowGCodeException(enableEndstopsReply.c_str());
+		throw GCodeException(-1, -1, "%s", reply.c_str());
 	}
 }
 

@@ -152,7 +152,7 @@ void SwitchEndstop::PrimeAxis(const Kinematics &_ecv_from kin, const AxisDrivers
 			String<StringLength100> reply;
 			if (CanInterface::EnableHandle(boardNumbers[i], h, true, &states[i], reply.GetRef()) != GCodeResult::ok)
 			{
-				ThrowGCodeException(reply.c_str());
+				throw GCodeException(-1, -1, "%s", reply.c_str());
 			}
 		}
 	}

@@ -11,6 +11,7 @@
 #if SUPPORT_TMC2660
 
 #include <RepRapFirmware.h>
+#include <GCodes/GCodeException.h>
 #include "DriverMode.h"
 #include <Endstops/EndstopDefs.h>
 
@@ -40,7 +41,7 @@ namespace SmartDrivers
 	bool SetRegister(size_t driver, SmartDriverRegister reg, uint32_t regVal) noexcept;
 	uint32_t GetRegister(size_t driver, SmartDriverRegister reg) noexcept;
 	StandardDriverStatus GetStatus(size_t driver, bool accumulated, bool clearAccumulated) noexcept;
-	const char *_ecv_array _ecv_null CheckStallDetectionEnabled(size_t driver, float speed) noexcept;
+	GCodeExceptionMessage CheckStallDetectionEnabled(size_t driver, float speed) noexcept;
 }
 
 #endif

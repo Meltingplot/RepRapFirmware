@@ -1606,7 +1606,7 @@ VariableSet& GCodeBuffer::GetVariables() const noexcept
 	return mc->variables;
 }
 
-void GCodeBuffer::ThrowGCodeException(const char *_ecv_array msg) const THROWS(GCodeException)
+void GCodeBuffer::ThrowGCodeException(GCodeExceptionMessage msg) const THROWS(GCodeException)
 {
 	const int column =
 #if HAS_SBC_INTERFACE
@@ -1616,7 +1616,7 @@ void GCodeBuffer::ThrowGCodeException(const char *_ecv_array msg) const THROWS(G
 	throw GCodeException(this, column, msg);
 }
 
-void GCodeBuffer::ThrowGCodeException(const char *_ecv_array msg, uint32_t param) const THROWS(GCodeException)
+void GCodeBuffer::ThrowGCodeException(GCodeExceptionMessage msg, uint32_t param) const THROWS(GCodeException)
 {
 	const int column =
 #if HAS_SBC_INTERFACE
@@ -1626,7 +1626,7 @@ void GCodeBuffer::ThrowGCodeException(const char *_ecv_array msg, uint32_t param
 	throw GCodeException(this, column, msg, param);
 }
 
-[[noreturn]] void GCodeBuffer::ThrowGCodeException(const char *_ecv_array msg, const char *_ecv_array param) const THROWS(GCodeException)
+[[noreturn]] void GCodeBuffer::ThrowGCodeException(GCodeExceptionMessage msg, const char *_ecv_array param) const THROWS(GCodeException)
 {
 	const int column =
 #if HAS_SBC_INTERFACE

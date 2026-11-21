@@ -80,8 +80,8 @@ void LineReader::SkipTabsAndSpaces() noexcept
 NamedEnum(NamedConstant, unsigned int, _false, iterations, line, _null, pi, _result, _true, input);
 NamedEnum(Function, unsigned int, abs, acos, asin, atan, atan2, ceil, cos, datetime, degrees, drop, exists, exp, fileexists, fileread, find, floor, isnan, log, max, min, mod, pow, radians, random, round, sin, sqrt, square, take, tan, vector);
 
-const char *_ecv_array const InvalidExistsMessage = "invalid 'exists' expression";
-const char *_ecv_array const ExpectedNonNegativeIntMessage = "expected non-negative integer";
+constexpr const char *_ecv_array InvalidExistsMessage = "invalid 'exists' expression";
+constexpr const char *_ecv_array ExpectedNonNegativeIntMessage = "expected non-negative integer";
 
 ExpressionParser::ExpressionParser(const GCodeBuffer *_ecv_null p_gb, const char *_ecv_array text, const char *_ecv_array textLimit, int p_column) noexcept
 	: currentp(text), startp(text), endp(textLimit), gb(p_gb), column(p_column)
@@ -2540,7 +2540,11 @@ void ExpressionParser::GetVariableValue(ExpressionValue& rslt, const VariableSet
 		// else fall through to throw error
 	}
 
-	ThrowVariableException(isParameter ? "unknown parameter '%s'" : "unknown variable '%s'", name, nameLength);
+	if (isParameter)
+	{
+		ThrowVariableException("unknown parameter '%s'", name, nameLength);
+	}
+	ThrowVariableException("unknown variable '%s'", name, nameLength);
 }
 
 // Parse a quoted string, given that the current character is double-quote
@@ -2630,23 +2634,23 @@ int ExpressionParser::GetColumn() const noexcept
 	return (column < 0) ? column : (currentp - startp) + column;
 }
 
-void ExpressionParser::ThrowParseException(const char *_ecv_array str) const THROWS(GCodeException)
+void ExpressionParser::ThrowParseException(GCodeExceptionMessage str) const THROWS(GCodeException)
 {
 	throw GCodeException(gb, GetColumn(), str);
 }
 
-void ExpressionParser::ThrowParseException(const char *_ecv_array str, const char *_ecv_array param) const THROWS(GCodeException)
+void ExpressionParser::ThrowParseException(GCodeExceptionMessage str, const char *_ecv_array param) const THROWS(GCodeException)
 {
 	throw GCodeException(gb, GetColumn(), str, param);
 }
 
-void ExpressionParser::ThrowParseException(const char *_ecv_array str, uint32_t param) const THROWS(GCodeException)
+void ExpressionParser::ThrowParseException(GCodeExceptionMessage str, uint32_t param) const THROWS(GCodeException)
 {
 	throw GCodeException(gb, GetColumn(), str, param);
 }
 
 // The name passed to this function carries the '^' index markers that ParseIdentifierExpression appended, so report only the part before them
-void ExpressionParser::ThrowVariableException(const char *_ecv_array str, const char *_ecv_array name, size_t nameLength) const THROWS(GCodeException)
+void ExpressionParser::ThrowVariableException(GCodeExceptionMessage str, const char *_ecv_array name, size_t nameLength) const THROWS(GCodeException)
 {
 	String<StringLength50> shortName;
 	shortName.copy(name, nameLength);
