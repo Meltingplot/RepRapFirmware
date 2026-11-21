@@ -60,7 +60,7 @@ DriveMovement::nextDM                                                 # DriveMov
 DriveMovement::retiredSegment                                         # MoveSegment * volatile; SAFE-LOCKED: step ISR or interrupts off only; points into the segment pool
 DriveMovement::segments                                               # MoveSegment * volatile; SAFE-LOCKED: head changes only at step priority or with interrupts off; pooled segments
 EndstopOrZProbe::next                                                 # EndstopOrZProbe *; SAFE-ORDER: link of activeEndstops; objects reached via next are never freed while linked
-EndstopsManager::activeEndstops                                       # EndstopOrZProbe * volatile; SUSPECT: entries stay linked after a move without a trigger, and a later input change acts on them (K17, RRF #66); M558/M502 clear it before deleting a probe (K3, fixed by RRF #56)
+EndstopsManager::activeEndstops                                       # EndstopOrZProbe * volatile; SAFE-ORDER: M558, M502 and M574 clear it before they delete a probe or endstop (K3, fixed by RRF #56); the step ISR and the CAN receiver read it at step priority, and act on it only while a segment checks endstops (K17, fixed by RRF #66)
 EndstopsManager::axisEndstops                                         # Endstop * []; SAFE-ORDER: M574 deletes with DeleteObject under endstopsLock (K12, fixed upstream 43a6b4fa8); OM readers hold the lock; CanReceiver reads in a task critical section and outranks MAIN
 EndstopsManager::defaultZProbe                                        # ZProbe *; SAFE-PERMANENT: set once in Init, never freed
 EndstopsManager::extruderInputEndstop                                 # GpInPortEndstop *; SAFE-PERMANENT: created once on first use, never freed
@@ -92,7 +92,7 @@ GCodeBuffer::buffer                                                   # char *; 
 GCodeBuffer::fileInput                                                # FileGCodeInput *; SAFE-PERMANENT: set in the constructor at startup, never changed or freed
 GCodeBuffer::machineState                                             # GCodeMachineState *; SUSPECT: OM reads it unlocked; safe only for readers above the deleting task (SBC vs MAIN) (K2, fixed by RRF #58; standalone inputs[] reader in census.md)
 GCodeBuffer::normalInput                                              # GCodeInput *; SAFE-PERMANENT: set in the constructor at startup, never changed or freed
-GCodeException::message                                               # char const *; SUSPECT: must be a literal; Heater.cpp:644 and SwitchEndstop.cpp:155 pass a stack buffer (K7, fixed by RRF #61)
+GCodeException::message                                               # char const *; SUSPECT: must be a literal; Heater.cpp:644 and SwitchEndstop.cpp:155 pass a stack buffer (K7, fixed by RRF #61; RRF #67 makes a message that is not a constant a compile error)
 GCodeMachineState::BlockState::prev                                   # BlockState *; SAFE-LOCKED: owner GB only, under gb.mutex; not in the object model
 GCodeMachineState::currentBlockState                                  # BlockState *; SAFE-LOCKED: owner GB only, under gb.mutex; reseated before the old block is deleted
 GCodeMachineState::previous                                           # GCodeMachineState *; SUSPECT: OM walks this chain unlocked while MAIN or the SBC task pops and deletes states (K2, fixed by RRF #58)
@@ -160,7 +160,7 @@ Move::DriverEnablePins                                                # Pin cons
 Move::activeDMs                                                       # DriveMovement *; SAFE-PERMANENT: head of a list of Move::dms[] members, never freed; changed at step priority
 Move::heightController                                                # HeightController *; SAFE-PERMANENT: created once by M951, never freed (MB6HC/MB6XD)
 Move::kinematics                                                      # Kinematics *; SUSPECT: reseat-then-delete protects SBC/ISR readers, not NETWORK (same priority as MAIN) (standalone, see census.md)
-Move::laserTask                                                       # Task *; SUSPECT: Exit deletes before nulling; Move task may Give() in between (e-stop only) (K12, fixed by RRF #62; K20 in census.md)
+Move::laserTask                                                       # Task *; SAFE-ORDER: DeleteObject clears it before the delete (K12, fixed by RRF #62); the Move task and ISRs read it, above MAIN and SBC; a second emergency stop is K20 in census.md
 Move::phaseStepDMs                                                    # DriveMovement *; SAFE-PERMANENT: list of Move::dms[] members, never freed
 MoveSegment::freeList                                                 # MoveSegment *; SAFE-LOCKED: pool head, changed only with interrupts disabled
 MoveSegment::next                                                     # MoveSegment *; SAFE-LOCKED: link in pooled segment lists; attached lists change at step priority only
@@ -255,8 +255,8 @@ SbcInterface::fileReadBuffer                                          # char *; 
 SbcInterface::fileWriteBuffer                                         # char const *; SAFE-ORDER: MAIN sets under fileMutex; SBC reads/advances it only while fileOperation==write
 SbcInterface::pendingUsbDevice                                        # SerialCDC *; SAFE-PERMANENT: MAIN->SBC handoff of static serialUSB/serialUSB2; never freed
 StepTimer::callback                                                   # TimerCallbackFunction; SAFE-PERMANENT: points to code; the StepTimer holding it may be freed, see pendingList
-StepTimer::next                                                       # StepTimer *; SUSPECT: link of pendingList; a freed LocalZProbe can stay linked (see pendingList) (K11, fixed by RRF #63)
-StepTimer::pendingList                                                # StepTimer * volatile; SUSPECT: a deleted LocalZProbe leaves its timer linked here; owner must cancel first (K11, fixed by RRF #63)
+StepTimer::next                                                       # StepTimer *; SAFE-LOCKED: link of pendingList, same rules
+StepTimer::pendingList                                                # StepTimer * volatile; SAFE-LOCKED: changed and walked in the step ISR or under BasePriorityBooster(NvicPriorityStep) (StepTimer.cpp:538-567); LocalZProbe cancels its timer before it is freed (K11, fixed by RRF #63), the other timers are static or members of Move
 Storage/MassStorage.cpp: freeWriteBuffers                             # FileWriteBuffer *; SAFE-LOCKED: free-list head, changed only under TaskCriticalSectionLocker
 Storage/MassStorage.cpp: monthNames                                   # char const * []; SAFE-PERMANENT: static table of string literals, never written
 StringHandle::slotPtr                                                 # IndexSlot *; SUSPECT: #50 order ok for higher-prio readers; same/lower-prio copy can hit a freed slot (standalone, see census.md)
