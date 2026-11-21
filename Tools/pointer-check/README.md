@@ -14,6 +14,9 @@ Neither order is visible in the declaration `T *p`. The aim is that every pointe
 shared, through a pointer class instead of a raw pointer. This check finds the raw pointers. The pointer classes do not exist
 yet, so for now every existing pointer is in `allowlist.txt`.
 
+`census.md` has the census of all entries: who reads and writes each pointer, at which task priority, the verdict that its
+comment in `allowlist.txt` gives, and the findings with their fixes.
+
 ## What counts
 
 The check counts every class member, static member and variable outside a function whose type is a pointer or an array of

@@ -1,11 +1,12 @@
 // Host test of Move::SetKinematics (src/Movement/Move.cpp), compiled from the real function text that the Makefile extracts.
 //
 // The object model reads the kinematics pointer from another task: move.kinematics is OBJECT_MODEL_FUNC(self->kinematics) in
-// Move.cpp, and the SBC task (TaskPriority::SbcPriority), or a network task without an SBC, serves object model requests while
-// the main task (TaskPriority::SpinPriority) runs M665 or M669, which call SetKinematics when the type changes. That task can
-// preempt the main task at any instruction, so at every moment of the change move.kinematics must name an intact object: the
-// old one until its deletion starts, then the new one. The test plays that task while the old kinematics is destroyed, before
-// its memory is freed and after.
+// Move.cpp, and the SBC task (TaskPriority::SbcPriority) serves object model requests while the main task
+// (TaskPriority::SpinPriority) runs M665 or M669, which call SetKinematics when the type changes. The SBC task can preempt the
+// main task at any instruction, so at every moment of the change move.kinematics must name an intact object: the old one until
+// its deletion starts, then the new one. The test plays that task while the old kinematics is destroyed, before its memory is
+// freed and after. Without an SBC the network task serves the object model at the main task's priority with time slicing; this
+// order does not protect that reader (Tools/pointer-check/census.md).
 
 #include <cstdio>
 #include <new>
