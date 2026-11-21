@@ -116,7 +116,7 @@ GCodeBuffer::GCodeBuffer(GCodeChannel::RawType channel, GCodeInput *_ecv_from no
 	  disabled(false), timerRunning(false), motionCommanded(false), hadExplicitLineNumber(false), buffer(nullptr), bufferLength(0)
 
 #if HAS_SBC_INTERFACE
-	  , isWaitingForMacro(false), abortRecorded(false), connectionEndRecorded(false), isBinaryBuffer(false), invalidated(false),
+	  , isWaitingForMacro(false), abortRecorded(false), macroErrorRecorded(false), connectionEndRecorded(false), isBinaryBuffer(false), invalidated(false),
 	  channelEpoch(0), channelEpochKnown(false), abortGateSet(false)
 #endif
 {

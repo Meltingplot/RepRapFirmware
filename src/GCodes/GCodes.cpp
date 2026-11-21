@@ -1098,7 +1098,8 @@ void GCodes::DoEmergencyStop() noexcept
 
 #if HAS_SBC_INTERFACE
 
-// Called by the SBC task when it has recorded the abort of a channel or the end of a connection. The main task applies it at the start of its next spin
+// Called by the SBC task when it has recorded a failed macro, the abort of a channel or the end of a connection. The main task applies it at the start
+// of its next spin
 void GCodes::ChannelAbortRecorded() noexcept
 {
 	requestsFromOtherTasks |= ChannelAbortRequest;
