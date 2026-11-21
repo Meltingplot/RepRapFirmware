@@ -2214,13 +2214,12 @@ bool DataTransfer::WriteReadFile(FileHandle handle, size_t bufferSize) noexcept
 
 bool DataTransfer::WriteFileData(FileHandle handle, const char *data, size_t& length) noexcept
 {
-	// Check if anything can be written
-	size_t freeSpace = FreeTxSpace();
-	if (freeSpace <= sizeof(FileHandleHeader))
+	// Check if the headers and at least one byte of data can be written
+	if (!CanWritePacket(sizeof(FileHandleHeader) + 1))
 	{
 		return false;
 	}
-	size_t bytesToWrite = min<size_t>(length, freeSpace - sizeof(PacketHeader) - sizeof(FileHandleHeader));
+	size_t bytesToWrite = min<size_t>(length, FreeTxSpace() - sizeof(PacketHeader) - sizeof(FileHandleHeader));
 
 	// Write packet header
 	(void)WritePacketHeader(FirmwareRequest::WriteFile, bytesToWrite + sizeof(FileHandleHeader));
