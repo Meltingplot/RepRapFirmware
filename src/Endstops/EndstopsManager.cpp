@@ -499,8 +499,7 @@ GCodeResult EndstopsManager::HandleM574(GCodeBuffer& gb, const StringRef& reply,
 
 		WriteLocker lock(endstopsLock);
 
-		delete axisEndstops[lastAxisSeen];
-		axisEndstops[lastAxisSeen] = nullptr;
+		DeleteObject(axisEndstops[lastAxisSeen]);		// this clears the pointer before it deletes the endstop, which the CAN receive task relies on
 		SwitchEndstop * const sw = new SwitchEndstop(lastAxisSeen, lastPosSeen);
 		const GCodeResult rslt = sw->Configure(gb, reply);
 		if (rslt == GCodeResult::ok)
