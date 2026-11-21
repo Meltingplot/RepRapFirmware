@@ -247,6 +247,9 @@ public:
 	void Invalidate(bool i = true) noexcept { invalidated = i; }			// Invalidate this channel (or not)
 	bool IsAbortRecorded() const noexcept { return abortRecorded; }			// Has the SBC task recorded an abort of this channel that the main task has yet to apply?
 	void SetAbortRecorded(bool r) noexcept { abortRecorded = r; }			// Called when an abort of this channel has been recorded (or applied)
+	bool IsMacroErrorRecorded() const noexcept { return macroErrorRecorded; }	// Has the SBC task recorded a failed macro of this channel that the main task has yet to pop?
+	void SetMacroErrorRecorded(bool r) noexcept { macroErrorRecorded = r; }	// Called when a failed macro of this channel has been recorded (or popped)
+	bool IsRecordPending() const noexcept { return abortRecorded || macroErrorRecorded; }	// Must the SBC task keep off this GB until the main task has applied a record?
 
 	// Channel epoch, see SbcMessageFormats.h. Only the SBC task changes the epoch of the channel and the abort gate
 	bool IsChannelEpochKnown() const noexcept { return channelEpochKnown; }	// Is the epoch of this channel known in this connection?
@@ -424,6 +427,8 @@ private:
 	volatile bool isWaitingForMacro;	// Is this GB waiting in DoFileMacro?
 	volatile bool macroFileClosed;		// Last macro file has been closed in RRF, tell the SBC
 	volatile bool abortRecorded;		// The SBC has aborted this channel. Set by the SBC task, taken by the main task before it applies the abort
+	volatile bool macroErrorRecorded;	// DSF could not run the macro on top of the stack, which the GB did not wait for. Set by the SBC task and taken by the main task
+										// before it pops the macro, both with the GB mutex held
 	volatile bool connectionEndRecorded;	// The connection that the codes on the stack belong to has been lost. Set by the SBC task together with abortRecorded,
 										// taken by the main task together with abortRecorded before it applies it to the levels (EndConnectionOfCodes). Until then
 										// their epochs count as invalid and none of their replies is written (IsCodeOfEndedConnection, read by any task)
