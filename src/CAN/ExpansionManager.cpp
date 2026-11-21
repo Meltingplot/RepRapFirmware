@@ -127,6 +127,10 @@ ExpansionManager::ExpansionManager() noexcept : numExpansionBoards(0), numBoards
 // Update the state of a board. Caller should have a write lock on boardsLock before calling this.
 void ExpansionManager::UpdateBoardState(CanAddress address, BoardState newState) noexcept
 {
+	if (address >= ARRAY_SIZE(boards))
+	{
+		return;
+	}
 	ExpansionBoardData& board = boards[address];
 	TaskCriticalSectionLocker lock;
 
@@ -277,6 +281,10 @@ static void AdoptMovementDelay(uint32_t movementDelay, CanAddress address) noexc
 void ExpansionManager::ProcessBoardStatusReport(const CanMessageBuffer *buf) noexcept
 {
 	const CanAddress address = buf->id.Src();
+	if (address >= ARRAY_SIZE(boards))
+	{
+		return;
+	}
 	ExpansionBoardData& board = boards[address];
 	board.whenLastStatusReportReceived = millis();
 	if (board.state != BoardState::running && board.state != BoardState::flashing)
@@ -320,7 +328,7 @@ void ExpansionManager::ProcessBoardStatusReport(const CanMessageBuffer *buf) noe
 		board.hasInductiveSensor = msg.hasInductiveSensor;
 
 		size_t offset = msg.GetAnalogHandlesOffset();
-		for (unsigned int i = 0; i < msg.numAnalogHandles && offset + sizeof(AnalogHandleDataV1) < buf->dataLength; ++i)
+		for (unsigned int i = 0; i < msg.numAnalogHandles && offset + sizeof(AnalogHandleDataV1) <= buf->dataLength; i++)
 		{
 			AnalogHandleDataV1 data;
 			memcpy(&data, (const uint8_t *_ecv_array)&msg + offset, sizeof(AnalogHandleDataV1));
@@ -368,7 +376,7 @@ void ExpansionManager::ProcessBoardStatusReport(const CanMessageBuffer *buf) noe
 		board.hasInductiveSensor = msg.hasInductiveSensor;
 
 		size_t offset = msg.GetAnalogHandlesOffset();
-		for (unsigned int i = 0; i < msg.numAnalogHandles && offset + sizeof(AnalogHandleDataV0) < buf->dataLength; ++i)
+		for (unsigned int i = 0; i < msg.numAnalogHandles && offset + sizeof(AnalogHandleDataV0) <= buf->dataLength; i++)
 		{
 			AnalogHandleDataV0 data;
 			memcpy(&data, (const uint8_t *_ecv_array)&msg + offset, sizeof(AnalogHandleDataV0));
@@ -386,11 +394,16 @@ void ExpansionManager::ProcessBoardStatusReport(const CanMessageBuffer *buf) noe
 void ExpansionManager::ProcessDriveStatusReport(const CanMessageBuffer *buf) noexcept
 {
 	const CanAddress address = buf->id.Src();
+	if (address >= ARRAY_SIZE(boards))
+	{
+		return;
+	}
 	ExpansionBoardData& board = boards[address];
 	if (board.HasDrivers())
 	{
 		const CanMessageDriversStatus& msg = buf->msg.driversStatus;
-		for (size_t driver = 0; driver < min<size_t>(board.numDrivers, msg.numDriversReported); ++driver)
+		const size_t maxDrivers = msg.hasClosedLoopData ? ARRAY_SIZE(msg.closedLoopData) : ARRAY_SIZE(msg.openLoopData);
+		for (size_t driver = 0; driver < min<size_t>(min<size_t>(board.numDrivers, msg.numDriversReported), maxDrivers); driver++)
 		{
 			DriverData& dd = board.driverData[driver];
 			if (msg.hasClosedLoopData)
@@ -453,8 +466,6 @@ const ExpansionBoardData *_ecv_null ExpansionManager::GetBoardDetails(uint8_t ad
 // Tell an expansion board to update
 GCodeResult ExpansionManager::UpdateRemoteFirmware(uint32_t boardAddress, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
-	CanInterface::CheckCanAddress(boardAddress, gb);
-
 	const unsigned int moduleNumber = (gb.Seen('S')) ? gb.GetLimitedUIValue('S', 4) : 0;
 	if (moduleNumber != (unsigned int)FirmwareModule::main && moduleNumber != (unsigned int)FirmwareModule::bootloader)
 	{
@@ -531,7 +542,6 @@ void ExpansionManager::AddClosedLoopRun(CanAddress address, unsigned int numData
 
 GCodeResult ExpansionManager::ResetRemote(uint32_t boardAddress, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
-	CanInterface::CheckCanAddress(boardAddress, gb);
 	CanMessageBuffer * const buf = CanInterface::AllocateBuffer(&gb);
 	const CanRequestId rid = CanInterface::AllocateRequestId(boardAddress, buf);
 	buf->SetupRequestMessage<CanMessageReset>(rid, CanInterface::GetCanAddress(), (uint8_t)boardAddress);
@@ -614,7 +624,7 @@ GCodeResult ExpansionManager::ConfigureConnectionTimeout(GCodeBuffer& gb, const 
 {
 	if (gb.Seen('B'))
 	{
-		const uint32_t address = gb.GetLimitedUIValue('B', 1, CanId::MaxCanAddress + 1);
+		const uint32_t address = gb.GetCanAddress('B', false, true);
 		if (gb.Seen('T'))
 		{
 			const uint32_t timeout = gb.GetLimitedUIValue('T', MinConnectionTimeoutSeconds, std::numeric_limits<uint16_t>::max() + 1);

@@ -1083,8 +1083,21 @@ void RepRap::EmergencyStop() noexcept
 		}
 	}
 
+	const Platform::OutputOnExtrudeConfig oldOutputOnExtrude = platform->ReconfigureOutputOnExtrude(Platform::OutputOnExtrudeConfig());	// before move->Exit(), so the Laser task can finish a DueX write it may be blocked in
 	heat->Exit();									// this also turns off all heaters
 	move->Exit();									// this stops the motors stepping
+#if SUPPORT_CAN_EXPANSION
+	// A caller with the same or a higher priority than the Laser task, such as the CAN receiver, may have preempted that task between its decision and its write
+	for (size_t i = 0; i < ARRAY_SIZE(oldOutputOnExtrude.ports); i++)
+	{
+		if ((oldOutputOnExtrude.ports[i] >= 0) && (oldOutputOnExtrude.pwm[i] > 0.0))
+		{
+			platform->GetGpOutPort(oldOutputOnExtrude.ports[i]).WriteAnalog(0.0);
+		}
+	}
+#else
+	(void)oldOutputOnExtrude;
+#endif
 
 #if SUPPORT_CAN_EXPANSION
 # if SUPPORT_REMOTE_COMMANDS
@@ -1108,7 +1121,7 @@ GCodeResult RepRap::ProcessM111(GCodeBuffer& gb, const StringRef& reply) THROWS(
 #if SUPPORT_CAN_EXPANSION
 	if (gb.Seen('B'))
 	{
-		const uint32_t board = gb.GetUIValue();
+		const uint32_t board = gb.GetCanAddress('B', false, true);
 		if (board != CanInterface::GetCanAddress())
 		{
 			return CanInterface::HandleM111(board, gb, reply);
@@ -1958,26 +1971,28 @@ size_t RepRap::GetStatusIndex() const noexcept
 #if HAS_VOLTAGE_MONITOR
 			: (!platform->HasDriverPower() && !gCodes->IsSimulating())	? 3		// Off i.e. powered down
 #endif
-			: (gCodes->GetPauseState() == PauseState::pausing)			? 4		// Pausing
-			: (gCodes->GetPauseState() == PauseState::resuming)			? 5		// Resuming
-			: (gCodes->GetPauseState() == PauseState::paused)			? 6		// Paused
-			: (gCodes->IsCancellingPrint())								? 7		// Cancelling
+			: move->IsFeedHoldActive()									? 4		// Feed hold, which overrides the pause and print states because it stops their motion too
+			: move->IsReturningToHeldPosition()							? 6		// Resuming, on the way back to where the feed hold stopped after jogging
+			: (gCodes->GetPauseState() == PauseState::pausing)			? 5		// Pausing
+			: (gCodes->GetPauseState() == PauseState::resuming)			? 6		// Resuming
+			: (gCodes->GetPauseState() == PauseState::paused)			? 7		// Paused
+			: (gCodes->IsCancellingPrint())								? 8		// Cancelling
 			: (printMonitor->IsPrinting())
-			  	  ? ((gCodes->IsSimulating())							? 8		// Simulating
-			  		  : 												  9		// Printing
+			  	  ? ((gCodes->IsSimulating())							? 9		// Simulating
+			  		  : 												  10	// Printing
 			  	  	)
-			: (gCodes->IsDoingToolChange())								? 10	// Changing tool
+			: (gCodes->IsDoingToolChange())								? 11	// Changing tool
 			: (gCodes->DoingFileMacro() || !move->NoLiveMovement(0) ||
 			   gCodes->WaitingForAcknowledgement() ||
-			   heat->IsTuningHeater())									? 11	// Busy
-			:															  12;	// Idle
+			   heat->IsTuningHeater())									? 12	// Busy
+			:															  13;	// Idle
 
 }
 
 // Get the status character for the new-style status response
 char RepRap::GetStatusCharacter() const noexcept
 {
-	return "CFHODRSAMPTBI"[GetStatusIndex()];
+	return "CFHOLDRSAMPTBI"[GetStatusIndex()];
 }
 
 c_string RepRap::GetStatusString() const noexcept
@@ -1988,6 +2003,7 @@ c_string RepRap::GetStatusString() const noexcept
 		"updating",
 		"halted",
 		"off",
+		"held",
 		"pausing",
 		"resuming",
 		"paused",
@@ -2363,7 +2379,18 @@ uint32_t RepRap::SendAlert(MessageType mt, c_string msg, c_string title, int sPa
 
 	platform->MessageF(MessageType::LogInfo, "M291: - %s - %s", (strlen(title) > 0 ? title : "[no title]"), msg);
 
-	mt = (MessageType)((uint32_t)mt & ((uint32_t)UsbMessage | (uint32_t)Usb2Message | (uint32_t)TelnetMessage | (uint32_t)AuxMessage | (uint32_t)Aux2Message));
+	// A PanelDue displays the message box itself, so don't echo the text to it
+	uint32_t textDestinations = (uint32_t)UsbMessage | (uint32_t)Usb2Message | (uint32_t)TelnetMessage;
+	if (!platform->IsAuxPanelDue(0))
+	{
+		textDestinations |= (uint32_t)AuxMessage;
+	}
+	if (!platform->IsAuxPanelDue(1))
+	{
+		textDestinations |= (uint32_t)Aux2Message;
+	}
+
+	mt = (MessageType)((uint32_t)mt & textDestinations);
 	if (mt != NoDestinationMessage)
 	{
 		// Source was USB, Telnet or serial so also send the message back to the sending channel
