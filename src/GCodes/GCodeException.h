@@ -68,7 +68,7 @@ private:
 		int32_t i;
 		uint32_t u;
 	} param;
-	String<StringLength50> stringParam;
+	String<StringLength100> stringParam;				// long enough for the reply text from a heater or an expansion board
 };
 
 // Functions to create and throw an exception. Using these avoids allocating the GCodeException object on the local stack when it is not going to be used.
