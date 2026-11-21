@@ -463,7 +463,7 @@ public:
 	float GetStandstillCurrentPercent() const noexcept;
 	void SetStandstillCurrentPercent(float percent) noexcept;
 
-	const char *_ecv_array _ecv_null CheckStallDetectionEnabled(float speed) const noexcept;
+	GCodeExceptionMessage CheckStallDetectionEnabled(float speed) const noexcept;
 
 	int8_t GetCurrentScaler() const noexcept { return currentScaler; }
 	bool SetCurrentScaler(int8_t cs) noexcept;
@@ -769,7 +769,7 @@ unsigned int TmcDriverState::GetMicrostepping(bool& interpolation) const noexcep
 }
 
 // Check that stall detection can occur at the specified speed
-const char *_ecv_array _ecv_null TmcDriverState::CheckStallDetectionEnabled(float speed) const noexcept
+GCodeExceptionMessage TmcDriverState::CheckStallDetectionEnabled(float speed) const noexcept
 {
 	if (GetDriverMode() > DriverMode::spreadCycle)			// if in stealthChop or direct mode
 	{
@@ -2515,8 +2515,8 @@ StandardDriverStatus SmartDrivers::GetStatus(size_t driver, bool accumulated, bo
 	return StandardDriverStatus();
 }
 
-// Check whether stall detection is viable. If yes, return nullptr. If no, return a message string in flash memory containing a single %u placeholder for the driver number.
-const char *_ecv_array _ecv_null SmartDrivers::CheckStallDetectionEnabled(size_t driver, float speed) noexcept
+// Check whether stall detection is viable. If yes, return a message whose text is null. If no, return a message containing a single %u placeholder for the driver number.
+GCodeExceptionMessage SmartDrivers::CheckStallDetectionEnabled(size_t driver, float speed) noexcept
 {
 	return (driver < numTmcDrivers)
 			? driverStates[driver].CheckStallDetectionEnabled(speed)
@@ -2529,13 +2529,13 @@ GCodeResult SmartDrivers::SetStallEndstopReporting(uint16_t driverNumber, float 
 {
 	if (driverNumber < numTmcDrivers)
 	{
-		const char *_ecv_array _ecv_null const msg = driverStates[driverNumber].CheckStallDetectionEnabled(speed);
-		if (msg == nullptr)
+		const GCodeExceptionMessage msg = driverStates[driverNumber].CheckStallDetectionEnabled(speed);
+		if (msg.IsNull())
 		{
 			stallEndstopsEnabled.SetBit(driverNumber);
 			return GCodeResult::ok;
 		}
-		reply.printf(msg, driverNumber);
+		reply.printf(msg.GetText(), driverNumber);
 		return GCodeResult::error;
 	}
 	else

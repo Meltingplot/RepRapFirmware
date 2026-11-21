@@ -9,6 +9,7 @@
 #define TMC22xx_H_
 
 #include <RepRapFirmware.h>
+#include <GCodes/GCodeException.h>
 
 #if SUPPORT_TMC22xx
 
@@ -72,7 +73,7 @@ namespace SmartDrivers
 	uint32_t GetDriverMaxClockFrequency() noexcept;
 
 #if HAS_STALL_DETECT
-	const char *_ecv_array _ecv_null CheckStallDetectionEnabled(size_t driver, float speed) noexcept;
+	GCodeExceptionMessage CheckStallDetectionEnabled(size_t driver, float speed) noexcept;
 	LocalDriversBitmap GetStalledDrivers(LocalDriversBitmap driversOfInterest) noexcept;
 
  #if SUPPORT_REMOTE_COMMANDS

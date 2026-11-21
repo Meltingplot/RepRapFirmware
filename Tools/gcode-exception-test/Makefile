@@ -4,7 +4,8 @@
 #
 #   make              build build/gcode-exception-test
 #   make asan         the same with AddressSanitizer and UBSan, build/asan-gcode-exception-test
-#   make check        build both and run them
+#   make compile-check  check that a GCodeException message must be a compile-time constant (compile-check/)
+#   make check        build both and run them, and run the compile check
 
 RRF ?= ../..
 SRC := $(RRF)/src
@@ -25,7 +26,7 @@ LIBSOURCES := $(RRFLIBS)/src/General/StringRef.cpp $(RRFLIBS)/src/General/SafeVs
 SOURCES := gcode_exception_test.cpp $(SRC)/GCodes/GCodeException.cpp $(LIBSOURCES)
 HEADERS := $(wildcard shim/*.h shim/*/*.h shim/*/*/*.h) $(SRC)/GCodes/GCodeException.h Makefile
 
-.PHONY: all asan check clean
+.PHONY: all asan compile-check check clean
 all: build/gcode-exception-test
 asan: build/asan-gcode-exception-test
 
@@ -41,7 +42,10 @@ build/asan-gcode-exception-test: $(SOURCES) gen/Throwers.inc $(HEADERS)
 	@mkdir -p build
 	$(CXX) $(BASEFLAGS) $(CXXFLAGS) $(ASANFLAGS) $(INC) $(SOURCES) -o $@
 
-check: all asan
+compile-check: compile-check/run.sh compile-check/accept.cpp compile-check/reject.cpp $(HEADERS)
+	sh compile-check/run.sh $(CXX) $(BASEFLAGS) $(INC)
+
+check: all asan compile-check
 	build/gcode-exception-test
 	build/asan-gcode-exception-test
 

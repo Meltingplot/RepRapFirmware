@@ -621,12 +621,12 @@ bool ObjectExplorationContext::ShouldReport(const ObjectModelEntryFlags f) const
 	return wanted && ((uint8_t)f & (uint8_t)excludedFlags) == 0;
 }
 
-GCodeException ObjectExplorationContext::ConstructParseException(const char *_ecv_array msg) const noexcept
+GCodeException ObjectExplorationContext::ConstructParseException(GCodeExceptionMessage msg) const noexcept
 {
 	return GCodeException(gb, column, msg);
 }
 
-GCodeException ObjectExplorationContext::ConstructParseException(const char *_ecv_array msg, const char *_ecv_array sparam) const noexcept
+GCodeException ObjectExplorationContext::ConstructParseException(GCodeExceptionMessage msg, const char *_ecv_array sparam) const noexcept
 {
 	return GCodeException(gb, column, msg, sparam);
 }

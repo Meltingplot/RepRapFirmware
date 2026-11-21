@@ -46,8 +46,26 @@ The Makefile reads the sources from this repository, `../..` (override with `RRF
 (`RRFLIBS=`, `CANLIB=`). The firmware builds do not use this folder: make and CMake only read `src/`, and a resource filter in
 `.project` hides it from Eclipse.
 
+## Compile check
+
+Every constructor of `GCodeException`, and every function that passes a message on to one, takes a `GCodeExceptionMessage`
+(`GCodeException.h`). Its constructor is `consteval`, so a message that is not a compile-time constant does not compile, and the
+firmware build fails at the next site that passes the text of a buffer. `compile-check/run.sh` compiles the real
+`GCodeException.h` with the stand-ins in `shim/`:
+- `compile-check/accept.cpp` must compile: literals, a `constexpr` named message, a function that returns a constant or null
+  message, and text that is built at run time passed as the string parameter of a `"%s"` message;
+- each case of `compile-check/reject.cpp` must fail, with every error on the line of that case: a pointer known only at run
+  time, the text of a reply buffer as `SwitchEndstop::PrimeAxis` and `Heater::SetTemperature` threw it, a `const` pointer that
+  is not `constexpr`, a choice between two literals at run time, and a function that returns a plain pointer.
+
+The other forwarders (`GCodeBuffer::ThrowGCodeException`, `ExpressionParser::ThrowParseException`, `ConstructParseException`,
+`GCodeMachineState::SetError` and `SetWarning`) need classes that this test only stands in for, so only the firmware build checks
+them.
+
 ## Build and run (WSL, g++ 13)
 
-    make check        # build/gcode-exception-test and build/asan-gcode-exception-test (AddressSanitizer + UBSan), then run both
+    make check        # build/gcode-exception-test and build/asan-gcode-exception-test (AddressSanitizer + UBSan), then run both,
+                      # and run the compile check
+    make compile-check
 
 Each case prints `PASS` or `FAIL` with the reason. The exit code is 1 if any case fails.
