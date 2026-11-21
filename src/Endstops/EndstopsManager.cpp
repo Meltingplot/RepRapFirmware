@@ -628,7 +628,10 @@ const char *_ecv_array EndstopsManager::TranslateEndStopResult(bool hit, bool at
 void EndstopsManager::SetZProbeDefaults() noexcept
 {
 	activeEndstops = nullptr;			// we are about to remove the Z probes, so make sure they are not in the active list
-	zProbes[0]->SetDefaults();
+	if (zProbes[0] != nullptr)
+	{
+		zProbes[0]->SetDefaults();
+	}
 	for (size_t i = 0; i < MaxZProbes; ++i)
 	{
 		DeleteObject(zProbes[i]);
@@ -735,8 +738,8 @@ GCodeResult EndstopsManager::HandleM558(GCodeBuffer& gb, const StringRef &reply)
 		return GCodeResult::error;
 	}
 
-	// If the type is given then we replace the probe, so we must lock movement first in case a probing move is executing or about to be queued
-	if (seenType && !reprap.GetGCodes().LockAllMovementSystemsAndWaitForStandstill(gb))
+	// A probe that gets replaced may be in use by a probing move, including in the step interrupt, so wait for all movement to stop first
+	if ((seenType || gb.Seen('C')) && !reprap.GetGCodes().LockAllMovementSystemsAndWaitForStandstill(gb))
 	{
 		return GCodeResult::notFinished;
 	}
