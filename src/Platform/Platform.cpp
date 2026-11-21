@@ -228,7 +228,6 @@ constexpr ObjectModelTableEntry Platform::objectModelTable[] =
 #if HAS_MASS_STORAGE
 	{ "iapFileNameSD",		OBJECT_MODEL_FUNC_NOSELF(IAP_UPDATE_FILE),															ObjectModelEntryFlags::verbose },
 #endif
-	{ "maxHeaters",			OBJECT_MODEL_FUNC_NOSELF((int32_t)MaxHeaters),														ObjectModelEntryFlags::verbose },
 	{ "maxMotors",			OBJECT_MODEL_FUNC_NOSELF((int32_t)NumDirectDrivers),												ObjectModelEntryFlags::verbose },
 #if HAS_CPU_TEMP_SENSOR
 	{ "mcuTemp",			OBJECT_MODEL_FUNC(self, 1),																			ObjectModelEntryFlags::liveNotPanelDue },
@@ -278,7 +277,7 @@ constexpr ObjectModelTableEntry Platform::objectModelTable[] =
 constexpr uint8_t Platform::objectModelTableDescriptor[] =
 {
 	4,																		// number of sections
-	11 + HAS_SBC_INTERFACE + HAS_MASS_STORAGE + HAS_VOLTAGE_MONITOR + HAS_12V_MONITOR + HAS_CPU_TEMP_SENSOR
+	10 + HAS_SBC_INTERFACE + HAS_MASS_STORAGE + HAS_VOLTAGE_MONITOR + HAS_12V_MONITOR + HAS_CPU_TEMP_SENSOR
 	  + SUPPORT_CAN_EXPANSION + (int)SUPPORT_DIRECT_LCD + MCU_HAS_UNIQUE_ID + HAS_WIFI_NETWORKING,		// section 0: boards[0]
 #if HAS_CPU_TEMP_SENSOR
 	3,																		// section 1: mcuTemp
@@ -2453,6 +2452,15 @@ bool Platform::IsChanRaw(size_t chan) const noexcept
 #endif
 }
 
+bool Platform::IsAuxPanelDue(size_t auxNumber) const noexcept
+{
+#if NUM_ASYNC_CHANNELS != 0
+	return (auxNumber < NumAuxChannels) && (auxDevices[auxNumber].GetMode() == AuxMode::panelDue);
+#else
+	return false;
+#endif
+}
+
 # if NUM_ASYNC_CHANNELS != 0 && !defined(DUET_NG)			// we don't support this on Duet 2 because we are running low on flash memory space
 
 /**
@@ -2805,7 +2813,7 @@ GCodeResult Platform::SendI2cOrModbus(GCodeBuffer& gb, const StringRef &reply) T
 			return rslt;
 		}
 
-		uint8_t data[MaxI2cOrModbusValues] = {0};
+		uint8_t data[MaxI2cOrModbusValues + 6] = {0};		// STX, 2 length chars, 2 checksum chars, ETX
 		uint8_t numBytesAsciiHex[2] = {0};
 		ConvertHexToAsciiHex(numToSend, numBytesAsciiHex);
 
@@ -2894,7 +2902,7 @@ GCodeResult Platform::ReceiveI2cOrModbus(GCodeBuffer& gb, const StringRef &reply
 	size_t auxChannel = 0;
 	if (gb.GetCommandFraction() > 0)
 	{
-		auxChannel = gb.GetLimitedUIValue('P', 1, NumSerialChannels) - FirstAuxChannel;
+		auxChannel = gb.GetLimitedUIValue('P', FirstAuxChannel, NumSerialChannels) - FirstAuxChannel;
 		if (auxDevices[auxChannel].GetMode() != AuxMode::device)
 		{
 			reply.copy("Port has not been set to device mode");
@@ -4204,47 +4212,133 @@ void Platform::OnProcessingCanMessage() noexcept
 // Configure the ancillary PWM
 GCodeResult Platform::GetSetAncillaryPwm(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
-	int32_t tempPort;
-	bool seen = gb.TryGetLimitedIValue('P', tempPort, seen, -1, MaxGpOutPorts - 1);
-	if (seen)
+	OutputOnExtrudeConfig newConfig = outputOnExtrude;
+	bool seenPort = false, seenPwm = false;
+	if (gb.Seen('P'))
 	{
-		if (tempPort >= 0)
+		newConfig.ports[1] = -1;									// a single port is used for forward extrusion only
+		size_t numPorts = ARRAY_SIZE(newConfig.ports);
+		gb.GetIntArray(newConfig.ports, numPorts, false);
+		for (size_t i = 0; i < numPorts; i++)
 		{
-			if (GetGpOutPort(tempPort).IsUnused())
+			const int32_t port = newConfig.ports[i];
+			if ((port < -1) || (port >= (int32_t)MaxGpOutPorts))
 			{
-				reply.printf("GpOut port %" PRIu32 " has not been created", tempPort);
+				reply.printf("GpOut port number %" PRIi32 " out of range", port);
 				return GCodeResult::error;
 			}
+			if (port >= 0)
+			{
+				if (GetGpOutPort(port).IsUnused())
+				{
+					reply.printf("GpOut port %" PRIi32 " has not been created", port);
+					return GCodeResult::error;
+				}
 #if SUPPORT_CAN_EXPANSION
-			if (!GetGpOutPort(tempPort).IsLocal())
-			{
-				reply.printf("Remote GpOut port %" PRIu32 " not allowed here", tempPort);
-				return GCodeResult::error;
-			}
+				if (!GetGpOutPort(port).IsLocal())
+				{
+					reply.printf("Remote GpOut port %" PRIi32 " not allowed here", port);
+					return GCodeResult::error;
+				}
 #endif
+			}
 		}
-
-		extrusionAncilliaryPwmGpOutNumber = tempPort;
-		Move::CreateLaserTask();									// we use the laser task to manage ancillary PWM
+		seenPort = true;
 	}
+
 	if (gb.Seen('S'))
 	{
-		extrusionAncilliaryPwmValue = min<float>(gb.GetFValue(), 1.0);		// negative values are OK, they mean don't set the output
-		seen = true;
+		size_t numValues = ARRAY_SIZE(newConfig.pwm);
+		gb.GetFloatArray(newConfig.pwm, numValues, true);
+		for (float& pwm : newConfig.pwm)
+		{
+			pwm = min<float>(pwm, 1.0);								// negative values are OK, they mean don't set the output
+		}
+		seenPwm = true;
 	}
 
-	if (!seen)
+	if (seenPort || seenPwm)
 	{
-		if (extrusionAncilliaryPwmGpOutNumber < 0)
+		(void)ReconfigureOutputOnExtrude(newConfig);
+		if (seenPort)
 		{
-			reply.copy("Extrusion ancillary PWM is not configured");
+			Move::CreateLaserTask();								// we use the laser task to manage ancillary PWM
 		}
-		else
+	}
+	else if (!IsOutputOnExtrudeActive())
+	{
+		reply.copy("Extrusion ancillary PWM is not configured");
+	}
+	else
+	{
+		reply.copy("Extrusion ancillary PWM");
+		if (outputOnExtrude.ports[0] >= 0)
 		{
-			reply.printf("Extrusion ancillary PWM port %" PRIu32 ", PWM value %.2f", extrusionAncilliaryPwmGpOutNumber, (double)extrusionAncilliaryPwmValue);
+			reply.catf(" port %" PRIi32 ", PWM value %.2f", outputOnExtrude.ports[0], (double)outputOnExtrude.pwm[0]);
+		}
+		if (outputOnExtrude.ports[1] >= 0)
+		{
+			reply.catf("%s retraction port %" PRIi32 ", PWM value %.2f", (outputOnExtrude.ports[0] >= 0) ? ";" : "", outputOnExtrude.ports[1], (double)outputOnExtrude.pwm[1]);
 		}
 	}
 	return GCodeResult::ok;
+}
+
+// Change the output on extrude configuration and return the old one. Must not be called by the Laser task.
+// The Laser task only writes the configured ports with a positive PWM, so old ports that the new configuration no longer drives are switched off here.
+// That write happens outside the lock because DueX ports are written over I2C, which may block.
+Platform::OutputOnExtrudeConfig Platform::ReconfigureOutputOnExtrude(const OutputOnExtrudeConfig& newConfig) noexcept
+{
+	OutputOnExtrudeConfig oldConfig;
+	{
+		TaskCriticalSectionLocker lock;							// the Laser task must never see a mix of the old and new configuration
+		oldConfig = outputOnExtrude;
+		outputOnExtrude = newConfig;
+	}
+
+	const auto stillDriven = [&newConfig](int32_t port) noexcept -> bool
+	{
+		return ((newConfig.ports[0] == port) && (newConfig.pwm[0] > 0.0)) || ((newConfig.ports[1] == port) && (newConfig.pwm[1] > 0.0));
+	};
+
+	for (size_t i = 0; i < ARRAY_SIZE(oldConfig.ports); i++)
+	{
+		const int32_t port = oldConfig.ports[i];
+		if ((port >= 0) && (oldConfig.pwm[i] > 0.0) && !stillDriven(port))
+		{
+			GetGpOutPort(port).WriteAnalog(0.0);
+		}
+	}
+	return oldConfig;
+}
+
+// Called by the Laser task. A port used for both directions is written only once, so that it does not glitch between moves
+void Platform::SetOutputsOnExtrude(bool forward, bool reverse) noexcept
+{
+	const auto write = [this](size_t slot, bool on) noexcept
+	{
+		const int32_t port = outputOnExtrude.ports[slot];
+		const float pwm = outputOnExtrude.pwm[slot];
+		if ((port >= 0) && (pwm > 0.0))
+		{
+			GetGpOutPort(port).WriteAnalog(on ? pwm : 0.0);
+		}
+	};
+
+	const int32_t sharedPort = outputOnExtrude.ports[0];
+	if (sharedPort == outputOnExtrude.ports[1])
+	{
+		const float forwardPwm = outputOnExtrude.pwm[0], reversePwm = outputOnExtrude.pwm[1];
+		if ((sharedPort >= 0) && ((forwardPwm > 0.0) || (reversePwm > 0.0)))
+		{
+			GetGpOutPort(sharedPort).WriteAnalog(max<float>(forward ? forwardPwm : reverse ? reversePwm : 0.0, 0.0));
+		}
+	}
+	else
+	{
+		write(0, forward);
+		write(1, reverse);
+	}
 }
 
 #if MCU_HAS_UNIQUE_ID

@@ -278,6 +278,7 @@ constexpr ObjectModelTableEntry Move::objectModelTable[] =
 	{ "printingJerk",		OBJECT_MODEL_FUNC(InverseConvertSpeedToMmPerMin(self->GetPrintingInstantDv(context.GetLastIndex())), 1),		ObjectModelEntryFlags::none },
 	{ "reducedAcceleration", OBJECT_MODEL_FUNC(InverseConvertAcceleration(self->Acceleration(context.GetLastIndex(), true)), 1),			ObjectModelEntryFlags::none },
 	{ "speed",				OBJECT_MODEL_FUNC(InverseConvertSpeedToMmPerMin(self->MaxFeedrate(context.GetLastIndex())), 1),					ObjectModelEntryFlags::none },
+	{ "state",				OBJECT_MODEL_FUNC(const_cast<const DriverStatus&>(self->driverState[context.GetLastIndex()]).ToString()),		ObjectModelEntryFlags::liveNotPanelDue },
 	{ "stepPos",			OBJECT_MODEL_FUNC(self->GetLiveMotorPosition(context.GetLastIndex())),											ObjectModelEntryFlags::liveNotPanelDue },
 	{ "stepsPerMm",			OBJECT_MODEL_FUNC(self->DriveStepsPerMm(context.GetLastIndex()), 2),											ObjectModelEntryFlags::none },
 	{ "userPosition",		OBJECT_MODEL_FUNC_NOSELF(reprap.GetGCodes().GetUserCoordinate(reprap.GetGCodes().GetCurrentMovementState(context), context.GetLastIndex()), 3), ObjectModelEntryFlags::live },
@@ -307,6 +308,7 @@ constexpr ObjectModelTableEntry Move::objectModelTable[] =
 	{ "printingJerk",		OBJECT_MODEL_FUNC(InverseConvertSpeedToMmPerMin(self->GetPrintingInstantDv(ExtruderToLogicalDrive(context.GetLastIndex()))), 1),	ObjectModelEntryFlags::none },
 	{ "rawPosition",		OBJECT_MODEL_FUNC_NOSELF(reprap.GetGCodes().GetRawExtruderTotalByDrive(context.GetLastIndex()), 1), 								ObjectModelEntryFlags::liveNotPanelDue },
 	{ "speed",				OBJECT_MODEL_FUNC(InverseConvertSpeedToMmPerMin(self->MaxFeedrate(ExtruderToLogicalDrive(context.GetLastIndex()))), 1),				ObjectModelEntryFlags::none },
+	{ "state",				OBJECT_MODEL_FUNC(const_cast<const DriverStatus&>(self->driverState[ExtruderToLogicalDrive(context.GetLastIndex())]).ToString()),	ObjectModelEntryFlags::liveNotPanelDue },
 	{ "stepsPerMm",			OBJECT_MODEL_FUNC(self->DriveStepsPerMm(ExtruderToLogicalDrive(context.GetLastIndex())), 2),										ObjectModelEntryFlags::none },
 
 	// 11. move.extruders[].nonlinear members
@@ -354,11 +356,11 @@ constexpr uint8_t Move::objectModelTableDescriptor[] =
 	2,																		// section 7
 	4,																		// section 8
 #ifdef DUET_NG	// Duet WiFi/Ethernet doesn't have settable standstill current and doesn't support phase stepping
-	23,																		// section 9: move.axes[]
-	17,																		// section 10: move.extruders[]
+	24,																		// section 9: move.axes[]
+	18,																		// section 10: move.extruders[]
 #else
-	24 + (SUPPORT_PHASE_STEPPING || SUPPORT_CAN_EXPANSION),											// section 9: move.axes[]
-	18 + (SUPPORT_PHASE_STEPPING || SUPPORT_CAN_EXPANSION),											// section 10: move.extruders[]
+	25 + (SUPPORT_PHASE_STEPPING || SUPPORT_CAN_EXPANSION),					// section 9: move.axes[]
+	19 + (SUPPORT_PHASE_STEPPING || SUPPORT_CAN_EXPANSION),					// section 10: move.extruders[]
 #endif
 #if SUPPORT_NONLINEAR_EXTRUSION
 	3,																		// section 11: move.extruders[].nonlinear
@@ -743,7 +745,9 @@ void Move::Exit() noexcept
 													);
 						}
 
-						const MovementError err = rings[0].AddStandardMove(nextMove, !IsRawMotorMove(nextMove.moveType));
+						const MovementError err = (nextMove.isHoldJog != 0)
+													? rings[0].AddHoldJog(nextMove, !IsRawMotorMove(nextMove.moveType))
+														: rings[0].AddStandardMove(nextMove, !IsRawMotorMove(nextMove.moveType));
 						if (err == MovementError::ok)
 						{
 							const uint32_t now = millis();
@@ -807,7 +811,9 @@ void Move::Exit() noexcept
 							AxisAndBedTransform(nextMove.coords, nextMove.movementTool, true);
 						}
 
-						const MovementError err = rings[1].AddStandardMove(nextMove, !IsRawMotorMove(nextMove.moveType));
+						const MovementError err = (nextMove.isHoldJog != 0)
+													? rings[1].AddHoldJog(nextMove, !IsRawMotorMove(nextMove.moveType))
+														: rings[1].AddStandardMove(nextMove, !IsRawMotorMove(nextMove.moveType));
 						if (err == MovementError::ok)
 						{
 							const uint32_t now = millis();
@@ -852,6 +858,7 @@ void Move::Exit() noexcept
 		{
 			if (   moveState == MoveState::executing
 				&& reprap.GetGCodes().GetPauseState() == PauseState::notPaused	// for now we don't go into idle hold when we are paused (is this sensible?)
+				&& !IsFeedHoldActive()
 			   )
 			{
 				whenIdleTimerStarted = millis();				// record when we first noticed that the machine was idle
@@ -1027,6 +1034,62 @@ void Move::GetStuckDiagnostics(uint32_t *_ecv_array words) const noexcept
 bool Move::PausePrint(MovementState& ms) noexcept
 {
 	return rings[ms.GetNumber()].PauseMoves(ms);
+}
+
+// Feed hold: stop all rings as soon as their jerk limits allow and keep the queued moves. The rings are always held together, so one flag describes the whole machine.
+// A simulation has no motion to hold and would only stall, so the request is ignored then; this can be reached from the urgent command scanner, not just from M25.1
+void Move::FeedHold() noexcept
+{
+	if (simulationMode == SimulationMode::off)
+	{
+		for (DDARing& ring : rings)
+		{
+			ring.Hold();
+		}
+		reprap.StateUpdated();
+	}
+}
+
+void Move::ReleaseFeedHold() noexcept
+{
+	if (IsFeedHoldActive())
+	{
+		for (DDARing& ring : rings)
+		{
+			ring.ReleaseHold(true);
+		}
+		reprap.StateUpdated();
+		MoveAvailable();										// the Move task may be sleeping on the held ring
+	}
+}
+
+bool Move::IsReturningToHeldPosition() const noexcept
+{
+	for (const DDARing& ring : rings)
+	{
+		if (ring.IsReturningToHeldPosition())
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void Move::GetHeldPosition(const MovementState& ms, float coords[MaxAxes]) const noexcept
+{
+	rings[ms.GetNumber()].GetHeldCoordinates(coords);
+}
+
+// Stop one motion system as soon as its jerk limits allow and discard its queued moves, ending any feed hold.
+// The caller holds a task critical section, so no RTOS call is allowed here; the Move task wakes up by itself when the next move arrives
+void Move::StopMoves(MovementState& ms, float stopCoords[MaxAxes]) noexcept
+{
+	const bool wasHeld = IsFeedHoldActive();
+	rings[ms.GetNumber()].StopMoves(ms, stopCoords);
+	if (wasHeld)
+	{
+		reprap.StateUpdated();
+	}
 }
 
 #if HAS_VOLTAGE_MONITOR || HAS_STALL_DETECT
@@ -1734,7 +1797,7 @@ void Move::SetupNextScanningProbeReading() noexcept
 		}
 //		debugPrintf("nr=%u, wt=%" PRIu32 ", dec=%.3e\n", probeControl.nextReadingNeeded, wakeupTime, (double)probeControl.deceleration);
 		++probeControl.nextReadingNeeded;
-		if (probeControl.timer.ScheduleMovementCallbackFromIsr(wakeupTime + probeControl.startTime))
+		if (probeControl.timer.ScheduleMovementCallback(wakeupTime + probeControl.startTime))
 		{
 			ScanningProbeTimerCallback();
 		}
@@ -2501,7 +2564,7 @@ bool Move::SetLocalDriverStepMode(DriveMovement& dm, uint8_t driver, StepMode mo
 		const uint16_t calculatedPhase = dm.phaseStepControl.CalculateStepPhase(driver);			// Get the phase based on current machine position
 
 		dm.phaseStepControl.SetPhaseOffset(driver, (initialPhase - calculatedPhase) % 4096u);		// Update the offset so calculated phase equals MSCNT
-		dm.phaseStepControl.SetMotorPhase(driver, initialPhase, 1.0);								// Update XDIRECT register with new phase values
+		dm.phaseStepControl.SetMotorPhase(driver, initialPhase, dm.phaseStepControl.holdCurrentFraction);		// Update XDIRECT register with new phase values
 	}
 	// If we are going from phase step to step dir, we need to send some fake steps to the driver to update MSCNT to avoid a jitter when disabling direct_mode
 	// This is suboptimal but it is a configuration command that is unlikely to be run so a few ms delay is unlikely to cause much harm.
@@ -2702,6 +2765,19 @@ bool Move::PhaseStepControlLoop() noexcept
 
 		if (dm->state != DMState::phaseStepping)
 		{
+			// Shut out the step interrupt and the tasks that insert DMs while we move this DM between the lists.
+			// A DM may have been inserted ahead of this one since we followed the link to it, so find the link again
+			BasePriorityBooster booster(NvicPriorityStep);
+			dmp = &phaseStepDMs;
+			while (*dmp != dm && *dmp != nullptr)
+			{
+				dmp = &(not_null(*dmp)->nextDM);
+			}
+			if (*dmp == nullptr)
+			{
+				break;
+			}
+
 			*dmp = dm->nextDM;
 			if (dm->drive >= MaxAxesPlusExtruders)
 			{
@@ -2759,7 +2835,7 @@ bool Move::PhaseStepControlLoop() noexcept
 	if (inserted)
 	{
 		BasePriorityBooster booster(NvicPriorityStep);					// shut out the step interrupt
-		if (!ScheduleNextStepInterrupt())
+		if (ScheduleNextStepInterrupt())
 		{
 			Interrupt();
 		}

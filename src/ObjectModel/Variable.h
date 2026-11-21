@@ -32,6 +32,10 @@ public:
 	void AssignArray(size_t numElements, function_ref<ExpressionValue(size_t)>) noexcept;
 
 private:
+	static bool MakeStorable(ExpressionValue& ev) THROWS(GCodeException);
+	__attribute__ ((noinline)) static void CopyObjectModelArray(ExpressionValue& ev) THROWS(GCodeException);
+	__attribute__ ((noinline)) static void StorePortName(ExpressionValue& ev) noexcept;
+
 	StringHandle name;
 	ExpressionValue val;
 	int16_t scope;								// -1 for a parameter, else the block nesting level when it was created

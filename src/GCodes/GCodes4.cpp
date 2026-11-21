@@ -31,7 +31,7 @@ bool GCodes::WaitForEndstopOrProbingMoveToFinish(GCodeBuffer& gb) noexcept
 {
 	return LockCurrentMovementSystemAndWaitForStandstill(gb)
 #if SUPPORT_CAN_EXPANSION
-			&& CanMotion::RevertStoppedDrivers()
+			&& CanMotion::RevertStoppedDrivers(gb.GetActiveQueueNumber())
 #endif
 		;
 }
@@ -667,7 +667,7 @@ void GCodes::RunStateMachine(GCodeBuffer& gb, const StringRef& reply) noexcept
 			gb.SetState((zPendingRestore) ? GCodeState::resuming2 : GCodeState::resuming3);
 #else
 			SetMoveBufferDefaults(ms);
-			const bool restoreZ = (gb.GetState() != GCodeState::resuming1 || ms.raw.coords[Z_AXIS] <= ms.GetPauseRestorePoint().moveCoords[Z_AXIS]);
+			const bool restoreZ = (gb.GetState() != GCodeState::resuming1 || ms.currentUserPosition[Z_AXIS] <= ms.GetPauseRestorePoint().moveCoords[Z_AXIS]);	// the restore point is in user coordinates
 			for (size_t axis = 0; axis < numVisibleAxes; ++axis)
 			{
 				if (   ms.currentUserPosition[axis] != ms.GetPauseRestorePoint().moveCoords[axis]
@@ -1412,7 +1412,6 @@ void GCodes::RunStateMachine(GCodeBuffer& gb, const StringRef& reply) noexcept
 			// Probing move has stopped
 			reprap.GetHeat().SuspendHeaters(false);
 			doingManualBedProbe = false;
-			hadProbingError = false;
 			++tapsDone;
 			const auto zp = platform.GetZProbeOrDefault(currentZProbeNumber);
 			if (zp->GetProbeType() == ZProbeType::none)
@@ -1426,9 +1425,16 @@ void GCodes::RunStateMachine(GCodeBuffer& gb, const StringRef& reply) noexcept
 				zp->SetProbing(false);
 				if (!zProbeTriggered)
 				{
+					// Stop here as G29 does. Carrying on would compute the dive height from the position the axis stalled at, driving it to the other end of its travel
 					gb.LatestMachineState().SetError("Probe was not triggered during probing move");
-					g30zHeightErrorSum = g30zHeightError = 0.0;
-					hadProbingError = true;
+					if (g30ProbePointIndex >= 0)
+					{
+						// Record the failure, else this point is merely unset and bed calibration silently uses the points before it
+						move.SetZBedProbePoint(g30ProbePointIndex, zp->GetDiveHeight(tapsDone), true, true);
+					}
+					gb.SetState(GCodeState::checkError);
+					RetractZProbe(gb);
+					break;
 				}
 				else
 				{
@@ -1456,7 +1462,7 @@ void GCodes::RunStateMachine(GCodeBuffer& gb, const StringRef& reply) noexcept
 					break;
 				}
 
-				if (tapsDone <= 1 && !hadProbingError)
+				if (tapsDone <= 1)
 				{
 					// Reset the Z axis origin according to the height error so that we can move back up to the dive height
 					ms.raw.coords[Z_AXIS] = zp->GetActiveModeTriggerHeight();
@@ -1511,7 +1517,7 @@ void GCodes::RunStateMachine(GCodeBuffer& gb, const StringRef& reply) noexcept
 
 			if (g30ProbePointIndex >= 0)
 			{
-				move.SetZBedProbePoint(g30ProbePointIndex, g30zHeightError, true, hadProbingError);
+				move.SetZBedProbePoint(g30ProbePointIndex, g30zHeightError, true, false);
 			}
 			else
 			{
