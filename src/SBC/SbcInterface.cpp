@@ -558,12 +558,12 @@ void SbcInterface::ExchangeData() noexcept
 				GCodeBuffer * const fileGb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel::File);
 #if SUPPORT_ASYNC_MOVES
 				GCodeBuffer * const file2Gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel::File2);
-				if (fileGb->IsAbortRecorded() || file2Gb->IsAbortRecorded())
+				if (fileGb->IsRecordPending() || file2Gb->IsRecordPending())
 #else
-				if (fileGb->IsAbortRecorded())
+				if (fileGb->IsRecordPending())
 #endif
 				{
-					packetAcknowledged = false;			// keep off the GBs until the main task has applied the abort of their channel
+					packetAcknowledged = false;			// keep off the GBs until the main task has applied the records of their channels
 					break;
 				}
 
@@ -615,9 +615,9 @@ void SbcInterface::ExchangeData() noexcept
 						debugPrintf("Waiting macro completed on channel %u\n", channel.ToBaseType());
 					}
 				}
-				else if (gb->IsAbortRecorded())
+				else if (gb->IsRecordPending())
 				{
-					packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+					packetAcknowledged = false;			// keep off the GB until the main task has applied the record of its channel
 				}
 				else
 				{
@@ -626,9 +626,10 @@ void SbcInterface::ExchangeData() noexcept
 					{
 						if (error)
 						{
-							gb->CurrentFileMachineState().CloseFile();
-							gb->PopState(false);
-							gb->Init();
+							// DSF could not run a macro that the GB does not wait for, e.g. a missing daemon.g. The main task reads the stack without
+							// the GB mutex, e.g. for M122 and the object model, so it pops the macro itself at the start of its next spin (ApplyRecordedAborts)
+							gb->SetMacroErrorRecorded(true);
+							reprap.GetGCodes().ChannelAbortRecorded();
 						}
 						else
 						{
@@ -677,9 +678,9 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (gb->IsAbortRecorded())
+				if (gb->IsRecordPending())
 				{
-					packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+					packetAcknowledged = false;			// keep off the GB until the main task has applied the record of its channel
 					break;
 				}
 
@@ -718,9 +719,9 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (gb->IsAbortRecorded())
+				if (gb->IsRecordPending())
 				{
-					packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+					packetAcknowledged = false;			// keep off the GB until the main task has applied the record of its channel
 					break;
 				}
 
@@ -775,9 +776,9 @@ void SbcInterface::ExchangeData() noexcept
 					break;
 				}
 
-				if (gb->IsAbortRecorded())
+				if (gb->IsRecordPending())
 				{
-					packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+					packetAcknowledged = false;			// keep off the GB until the main task has applied the record of its channel
 					break;
 				}
 
@@ -881,9 +882,9 @@ void SbcInterface::ExchangeData() noexcept
 					// If the code of that channel is executing on the SBC, mark the GB as finished
 					if ((type & PushFlag) == 0 && gb != nullptr && gb->IsExecutingOnSbc())
 					{
-						if (gb->IsAbortRecorded())
+						if (gb->IsRecordPending())
 						{
-							packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+							packetAcknowledged = false;			// keep off the GB until the main task has applied the record of its channel
 						}
 						else
 						{
@@ -1044,9 +1045,9 @@ void SbcInterface::ExchangeData() noexcept
 				break;
 			}
 
-			if (gb->IsAbortRecorded())
+			if (gb->IsRecordPending())
 			{
-				packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+				packetAcknowledged = false;			// keep off the GB until the main task has applied the record of its channel
 				break;
 			}
 
@@ -1238,9 +1239,9 @@ void SbcInterface::ExchangeData() noexcept
 				break;
 			}
 
-			if (gb->IsAbortRecorded())
+			if (gb->IsRecordPending())
 			{
-				packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+				packetAcknowledged = false;			// keep off the GB until the main task has applied the record of its channel
 				break;
 			}
 
@@ -1425,9 +1426,9 @@ void SbcInterface::ExchangeData() noexcept
 				break;
 			}
 
-			if (gb->IsAbortRecorded())
+			if (gb->IsRecordPending())
 			{
-				packetAcknowledged = false;			// keep off the GB until the main task has applied the abort of its channel
+				packetAcknowledged = false;			// keep off the GB until the main task has applied the record of its channel
 				break;
 			}
 
@@ -2031,15 +2032,26 @@ bool SbcInterface::IsDroppedByEpoch(GCodeBuffer& gb, const PacketHeader& packet)
 	return true;
 }
 
-// Apply the channel aborts and the ends of connections that the SBC task has recorded. This is called by the main task at the start of its spin
+// Apply the failed macros, the channel aborts and the ends of connections that the SBC task has recorded. This is called by the main task at the
+// start of its spin
 void SbcInterface::ApplyRecordedAborts() noexcept
 {
 	for (size_t i = 0; i < NumGCodeChannels; i++)
 	{
 		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(i));
-		if (gb != nullptr && (gb->IsAbortRecorded() || gb->IsConnectionEndRecorded()))
+		if (gb != nullptr && (gb->IsRecordPending() || gb->IsConnectionEndRecorded()))
 		{
 			MutexLocker locker(gb->mutex);
+
+			// Pop the macro that DSF could not run. Unlike an abort, the SBC task records that with the GB mutex held, and only while no abort is
+			// recorded, so an abort recorded as well came after it and is applied after the pop
+			if (gb->IsMacroErrorRecorded())
+			{
+				gb->SetMacroErrorRecorded(false);
+				gb->CurrentFileMachineState().CloseFile();
+				gb->PopState(false);
+				gb->Init();
+			}
 
 			// The SBC task records without the GB mutex. Take the record before applying it, so that a record that comes in meanwhile stays set and
 			// is applied in the next spin. Both flags are taken at once, because InvalidateResources records an abort and the end of the connection
@@ -2219,10 +2231,10 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 	bool gotCommand = false;
 	{
 		// The whole walk must be atomic: readPointer is a cursor into variable-length records, so a concurrent defragment would invalidate it.
-		// The codes of a channel whose abort is recorded wait until the main task has applied it. This is checked here, because the SBC task
-		// records an abort before it stores the next code
+		// The codes of a channel whose abort or failed macro is recorded wait until the main task has applied it. This is checked here, because
+		// the SBC task records either before it stores the next code
 		TaskCriticalSectionLocker locker;
-		if (!gb.IsAbortRecorded() && (rxPointer != txPointer || txEnd != 0))
+		if (!gb.IsRecordPending() && (rxPointer != txPointer || txEnd != 0))
 		{
 			bool updateRxPointer = true;
 			uint16_t readPointer = rxPointer;
