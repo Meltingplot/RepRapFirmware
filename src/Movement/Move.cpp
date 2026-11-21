@@ -4113,10 +4113,36 @@ void Move::TurnSmartDriversOff() noexcept
 // In time we may use it to help implement interrupt-driven local endstops too, but for now those are checked in the step ISR by a direct call to CheckEndstops().
 void Move::OnEndstopOrZProbeStatesChanged() noexcept
 {
-	bool wakeAsyncSender;
+	bool wakeAsyncSender = false;
 	{
 		BasePriorityBooster booster(NvicPriorityStep);		// shut out the step interrupt
-		wakeAsyncSender = CheckEndstops(true);
+
+		// Only check the endstops while a segment that checks them is executing, as the step ISR and the phase stepping control loop do.
+		// A move that ends without an endstop or Z probe triggering leaves them in the active list, so they may belong to an earlier move.
+		// DMs of drives that have no local drivers are in these lists too, so this covers moves executed entirely by remote drivers.
+		MovementFlags flags;
+		flags.Clear();
+		for (const DriveMovement *_ecv_null dm = activeDMs; dm != nullptr; dm = dm->nextDM)
+		{
+			if (dm->state > DMState::starting)
+			{
+				flags |= dm->segmentFlags;
+			}
+		}
+#if SUPPORT_PHASE_STEPPING || SUPPORT_CLOSED_LOOP
+		for (const DriveMovement *_ecv_null dm = phaseStepDMs; dm != nullptr; dm = dm->nextDM)
+		{
+			if (dm->state > DMState::starting)
+			{
+				flags |= dm->segmentFlags;
+			}
+		}
+#endif
+
+		if (flags.checkEndstops)
+		{
+			wakeAsyncSender = CheckEndstops(true);
+		}
 	}
 	if (wakeAsyncSender) { CanInterface::WakeAsyncSender(); }
 }
