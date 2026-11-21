@@ -4,7 +4,7 @@
 #   make check        build the configurations with -g, then fail for each raw pointer that allowlist.txt does not name
 #   make scan         the same check on the ELF files that are already there, without building
 #   make update       build, then rewrite allowlist.txt with the pointers found (keeps the comments of existing entries)
-#   make selftest     check pointer-check.py against selftest/src/sample.cpp
+#   make selftest     check pointer-check.py against selftest/src/sample.cpp and selftest/src/no-pointers.cpp
 #
 # CONFIGS selects the configurations, default those of "make all" in the top-level Makefile.
 
@@ -34,16 +34,19 @@ scan:
 update: build
 	$(CHECK) --allowlist $(ALLOWLIST) --update $(ELFS)
 
-build/selftest/sample.o: selftest/src/sample.cpp Makefile
+build/selftest/%.o: selftest/src/%.cpp Makefile
 	@mkdir -p build/selftest
-	cd selftest && $(CROSS_COMPILE)g++ -std=c++20 -mcpu=cortex-m7 -mthumb -O2 -g -c src/sample.cpp -o $(abspath $@)
+	cd selftest && $(CROSS_COMPILE)g++ -std=c++20 -mcpu=cortex-m7 -mthumb -O2 -g -c src/$*.cpp -o $(abspath $@)
 
-selftest: build/selftest/sample.o
+selftest: build/selftest/sample.o build/selftest/no-pointers.o
 	$(CHECK) --root selftest --keys $< > build/selftest/keys.txt
 	diff -u selftest/expected.txt build/selftest/keys.txt
 	$(CHECK) --root selftest --allowlist selftest/expected.txt $<
 	! $(CHECK) --root selftest $< > build/selftest/without-allowlist.txt
 	grep -q 'error: new raw pointer that can be reseated: Sample::plain (int \*)' build/selftest/without-allowlist.txt
+	printf '# header\nSample::gone  # an entry of a pointer that no longer exists\n' > build/selftest/update.txt
+	$(CHECK) --root selftest --allowlist build/selftest/update.txt --update build/selftest/no-pointers.o
+	printf '# header\n' | diff -u - build/selftest/update.txt
 	@echo "selftest passed"
 
 clean:
