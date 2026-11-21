@@ -1,6 +1,6 @@
 # Census of the raw pointer allowlist
 
-Each of the 267 entries of `allowlist.txt` was checked: who writes the pointer, who reads it, from which task or ISR and at
+Each of the 272 entries of `allowlist.txt` was checked: who writes the pointer, who reads it, from which task or ISR and at
 which priority, under which lock, and whether the object it names can be freed while a reader still holds it. The bug class
 is the one of #50 and #51: one context frees an object while another context can still reach it. The result per entry is
 the comment in `allowlist.txt`; this file has the findings and the reasoning behind them.
@@ -8,7 +8,11 @@ the comment in `allowlist.txt`; this file has the findings and the reasoning beh
 - **Basis:** 3.7-dev at e5b7878a1 (2026-11-21). Line numbers refer to that commit unless a line names another one. They are
   the same at 9a585f644 except in `ExpansionManager.cpp`.
 - **Upstream:** Duet3D `3.7-dev` a507cb8f0 and `3.7-ch` eed7cf1fc. "Fixed upstream 43a6b4fa8" means that commit fixes the
-  case. It comes into the fork with #49.
+  case. It came into the fork with #49.
+- **Merge of 3.7-dev at 6793b3064:** #49 added five entries and renamed one: `DDARing::holdBarrier`, `lastHomingMoveDda`
+  (e7e30e13f), `returnMoveDda` (7e9556797), `BufferedStreamGCodeInput::directBuffers`, `directTail` (eed7cf1fc), and
+  `CanMotion::StopListState::stopList` (43a6b4fa8, was `CanMotion::stopList`). These were checked in that commit. The
+  entries whose finding is fixed there (#54, #57 and 43a6b4fa8) carry the verdict of the fixed code.
 - **How:** the entries were split by subsystem into six groups, each of which an agent read in the code. Each finding that got
   a fix, and K16 and K17, was then read again in the code, and each fix has a host test under `Tools/` that fails without it.
   The other findings (K14, K18 to K21, the lists without an SBC and the minor ones) come from that first reading.
@@ -61,28 +65,29 @@ Facts that several entries share:
 
 | Verdict | Entries | Meaning |
 |---|---|---|
-| SAFE-PERMANENT | 110 | set once at start-up and never freed |
+| SAFE-PERMANENT | 115 | set once at start-up and never freed |
 | SAFE-ONE-TASK | 59 | read and written in one task only |
-| SAFE-LOCKED | 38 | the other tasks hold the lock that the writer holds |
-| SAFE-ORDER | 13 | the conditions above hold |
+| SAFE-LOCKED | 46 | the other tasks hold the lock that the writer holds |
+| SAFE-ORDER | 16 | the conditions above hold |
 | SAFE-NO-DEREF | 1 | never dereferenced (`Heat::lastStandbyTools`) |
-| SUSPECT | 46 | a reader can reach memory that is no longer valid |
+| SUSPECT | 35 | a reader can reach memory that is no longer valid |
 
-`ExpansionBoardData::driverData` counts as SAFE-LOCKED, since #54 fixed it. The other SUSPECT entries name their finding.
+The pointers into the DDA ring and into the direct USB buffers count as SAFE-PERMANENT, because their targets are never
+freed. An entry whose finding is fixed in 3.7-dev names the fix in its comment. The SUSPECT entries name their finding.
 
 ## Findings that apply with an SBC
 
 These can happen on a Duet 3 with an SBC and expansion boards. Each fix is its own PR, with a host test that fails without
-the fix.
+the fix. "Fixed by" means the fix is in 3.7-dev; a PR number alone is a fix PR that is still open.
 
 | | Finding | Status |
 |---|---|---|
 | K1 | **Driver data freed under M569.** The CAN receiver (6) replaces `driverData` under the write lock of `boardsLock` when a board announces another firmware (`ExpansionManager.cpp:170`, `:221`). The M569 accessors in the main task read it without a lock (`:411-438`). | fixed by #54 |
 | K2 | **The SBC task deletes a stack level that the main task reads.** On `MacroCompleted` with an error, the SBC task (2) ran `CloseFile`, `PopState` and `Init` (`SbcInterface.cpp:624-631`). `PopState` deletes the level (`GCodeBuffer.cpp:1168-1169`). The main task walks the stack without that mutex in M122 (`GCodeBuffer.cpp:265-276`) and for `inputs[]` (`:58-78`). The writer outranks the reader, so the order does not help. | #58: the main task pops, the SBC task only records it |
 | K3 | **M558 and M502 delete a Z probe that is still in the active list.** Only a trigger takes a probe out of `activeEndstops` (`EndstopsManager.cpp:323`). A remote input change walks the list at any time (`CommandProcessor.cpp:209/251` → `Move.cpp:4038-4046`). M574 clears the list first (`:475`); M558 (`:757`) and M502 (`:628-635`) did not. | #56; its standstill wait is upstream's, from 43a6b4fa8 |
-| K4 | **A file write overflows the transmit buffer at exactly 8 free bytes.** `WriteFileData` (`DataTransfer.cpp:2219`): `freeSpace - 8 - 4` wraps. This is not a pointer entry; it turned up in the SBC group. | #55 |
-| K5 | **Variables keep pointers to object model objects.** `Variable::Assign` rejected a single object (`Variable.cpp:85-86`), but copied the elements of an object model array as raw `ObjectModel *` (`:57-83`). They dangle after M950, M308 or M563. | #57 |
-| K6 | **Variables keep pointers into the object model.** A string (CString) or a port was stored as a raw pointer (`Variable.cpp:91`), e.g. `state.messageBox.message` or `move.extruders[].filament`. On the CHX, `daemon.g` compared the filament with a variable that followed the current name. | #57 |
+| K4 | **A file write overflows the transmit buffer at exactly 8 free bytes.** `WriteFileData` (`DataTransfer.cpp:2219`): `freeSpace - 8 - 4` wraps. This is not a pointer entry; it turned up in the SBC group. | fixed by #55 |
+| K5 | **Variables keep pointers to object model objects.** `Variable::Assign` rejected a single object (`Variable.cpp:85-86`), but copied the elements of an object model array as raw `ObjectModel *` (`:57-83`). They dangle after M950, M308 or M563. | fixed by #57 |
+| K6 | **Variables keep pointers into the object model.** A string (CString) or a port was stored as a raw pointer (`Variable.cpp:91`), e.g. `state.messageBox.message` or `move.extruders[].filament`. On the CHX, `daemon.g` compared the filament with a variable that followed the current name. | fixed by #57 |
 | K7 | **Error messages point into a dead stack frame.** `GCodeException::message` must be a literal (`GCodeException.h:24`), but `Heater.cpp:644` and `SwitchEndstop.cpp:155` threw with a local buffer. | #61 |
 | K8 | **Message box expressions read before the lock.** The expression path calls the lambda before it takes the table lock (`ObjectModel.cpp:1302` vs `:1304`). | fixed upstream 43a6b4fa8 |
 | K9 | **A single global is read without its lock.** `M409 K"global.x"` takes no read lock (`GlobalVariables.cpp:46-63`) while the SBC task's `SetVariable` rewrites globals (`SbcInterface.cpp:1068`, `:1156`). | fixed upstream 43a6b4fa8 |
@@ -161,6 +166,6 @@ The findings fall under three rules:
 - **R2.** Publish an object only when it is fully built.
 - **R3.** Share a pointer without a lock only when the writer has a lower priority than every reader.
 
-Most SUSPECT entries break R1 or R3; K5 and K6 store a published pointer where no rule can follow it. The pointer class will
+Most SUSPECT entries break R1 or R3; K5 and K6 stored a published pointer where no rule can follow it. The pointer class will
 build on upstream's `DeleteObject` and `ReplaceObject` (`RepRapFirmware.h:574-595`), which clear the pointer before they
 delete, and add the checks of R1 and R3.

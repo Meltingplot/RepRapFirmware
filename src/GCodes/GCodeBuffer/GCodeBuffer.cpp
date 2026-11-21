@@ -796,7 +796,22 @@ void GCodeBuffer::GetDriverIdArray(DriverId arr[], size_t& length) THROWS(GCodeE
 	PARSER_OPERATION(GetDriverIdArray(arr, length));
 }
 
-// If the specified parameter character is found, fetch 'value' and set 'seen'. Otherwise leave val and seen alone.
+#if SUPPORT_CAN_EXPANSION
+
+// Get a CAN address.
+CanAddress GCodeBuffer::GetCanAddress(char c, bool allowOwnAddress, bool allowFirmareUpdateAdress) THROWS(GCodeException)
+{
+	const uint32_t addr = GetLimitedUIValue(c, (allowFirmareUpdateAdress) ? CanId::MaxCanAddress + 1 : CanId::Exp3HCFirmwareUpdateAddress);
+	if (!allowOwnAddress && addr == CanInterface::GetCanAddress())
+	{
+		throw GCodeException(this, -1, "parameter '%c' may not be own CAN address", (uint32_t)c);
+	}
+	return (CanAddress)addr;;
+}
+
+#endif
+
+	// If the specified parameter character is found, fetch 'value' and set 'seen'. Otherwise leave val and seen alone.
 bool GCodeBuffer::TryGetFValue(char c, float& val, bool& seen) THROWS(GCodeException)
 {
 	const bool ret = Seen(c);
@@ -1460,6 +1475,10 @@ bool GCodeBuffer::OpenFileToWrite(const char *_ecv_array directory, const char *
 	if (NOT_BINARY_AND(stringParser.OpenFileToWrite(directory, fileName, size, binaryWrite, fileCRC32)))
 	{
 		normalInput->SetWritingFile(true);
+		if (binaryWrite)
+		{
+			normalInput->NoteBinaryUpload(directory, fileName);
+		}
 		return true;
 	}
 	return false;
@@ -1486,7 +1505,37 @@ bool GCodeBuffer::IsWritingBinary() const noexcept
 
 bool GCodeBuffer::WriteBinaryToFile(char b) noexcept
 {
-	return IS_BINARY_OR(stringParser.WriteBinaryToFile(b));
+	const bool finished = IS_BINARY_OR(stringParser.WriteBinaryToFile(b));
+	if (finished)
+	{
+		normalInput->SetWritingFile(false);						// re-enable urgent command scanning on this input
+	}
+	return finished;
+}
+
+size_t GCodeBuffer::WriteBinaryBlock(const char *_ecv_array buf, size_t len) noexcept
+{
+	if (!NOT_BINARY_AND(true))
+	{
+		return len;
+	}
+	const size_t used = stringParser.WriteBinaryBlock(buf, len);
+	if (!stringParser.IsWritingBinary())
+	{
+		normalInput->SetWritingFile(false);						// re-enable urgent command scanning on this input
+	}
+	return used;
+}
+
+FilePosition GCodeBuffer::GetBinaryBytesRemaining() const noexcept
+{
+	return NOT_BINARY_AND(true) ? stringParser.GetBinaryBytesRemaining() : 0;
+}
+
+void GCodeBuffer::AbortBinaryUpload() noexcept
+{
+	IF_NOT_BINARY(stringParser.AbortBinaryUpload());
+	normalInput->SetWritingFile(false);							// re-enable urgent command scanning on this input
 }
 
 void GCodeBuffer::FinishWritingBinary() noexcept
