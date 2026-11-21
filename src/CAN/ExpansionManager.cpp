@@ -408,8 +408,11 @@ void ExpansionManager::ProcessDriveStatusReport(const CanMessageBuffer *buf) noe
 	}
 }
 
+// The driver data accessors run in other tasks than ProcessAnnouncement, which replaces driverData under a write lock on boardsLock.
+// So they hold a read lock on it while they use the array.
 void ExpansionManager::StoreDriverDirection(DriverId did, bool direction) noexcept
 {
+	ReadLocker lock(boardsLock);
 	ExpansionBoardData& board = boards[did.boardAddress];
 	if (board.HasDrivers())
 	{
@@ -419,6 +422,7 @@ void ExpansionManager::StoreDriverDirection(DriverId did, bool direction) noexce
 
 void ExpansionManager::StoreDriverMode(DriverId did, uint32_t mode) noexcept
 {
+	ReadLocker lock(boardsLock);
 	ExpansionBoardData& board = boards[did.boardAddress];
 	if (board.HasDrivers())
 	{
@@ -428,12 +432,14 @@ void ExpansionManager::StoreDriverMode(DriverId did, uint32_t mode) noexcept
 
 bool ExpansionManager::GetDriverDirection(DriverId did) const noexcept
 {
+	ReadLocker lock(boardsLock);
 	const ExpansionBoardData& board = boards[did.boardAddress];
 	return !board.HasDrivers() || board.driverData[did.localDriver].GetDirection();
 }
 
 DriverMode ExpansionManager::GetDriverMode(DriverId did) const noexcept
 {
+	ReadLocker lock(boardsLock);
 	const ExpansionBoardData& board = boards[did.boardAddress];
 	return (!board.HasDrivers()) ? DriverMode::unknown : board.driverData[did.localDriver].GetMode();
 }
