@@ -77,5 +77,41 @@
 				<arguments>1.0-name-matches-false-false-sbc-harness</arguments>
 			</matcher>
 		</filter>
+		<filter>
+			<id>0</id>
+			<name>Tools</name>
+			<type>10</type>
+			<matcher>
+				<id>org.eclipse.ui.ide.multiFilter</id>
+				<arguments>1.0-name-matches-false-false-heap-test</arguments>
+			</matcher>
+		</filter>
+		<filter>
+			<id>0</id>
+			<name>Tools</name>
+			<type>10</type>
+			<matcher>
+				<id>org.eclipse.ui.ide.multiFilter</id>
+				<arguments>1.0-name-matches-false-false-kinematics-test</arguments>
+			</matcher>
+		</filter>
+		<filter>
+			<id>0</id>
+			<name>Tools</name>
+			<type>10</type>
+			<matcher>
+				<id>org.eclipse.ui.ide.multiFilter</id>
+				<arguments>1.0-name-matches-false-false-pointer-check</arguments>
+			</matcher>
+		</filter>
+		<filter>
+			<id>0</id>
+			<name>Tools</name>
+			<type>10</type>
+			<matcher>
+				<id>org.eclipse.ui.ide.multiFilter</id>
+				<arguments>1.0-name-matches-false-false-driver-data-test</arguments>
+			</matcher>
+		</filter>
 	</filteredResources>
 </projectDescription>
