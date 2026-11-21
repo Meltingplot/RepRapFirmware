@@ -92,7 +92,7 @@ GCodeBuffer::buffer                                                   # char *; 
 GCodeBuffer::fileInput                                                # FileGCodeInput *; SAFE-PERMANENT: set in the constructor at startup, never changed or freed
 GCodeBuffer::machineState                                             # GCodeMachineState *; SUSPECT: OM reads it unlocked; safe only for readers above the deleting task (SBC vs MAIN) (K2, fixed by RRF #58; standalone inputs[] reader in census.md)
 GCodeBuffer::normalInput                                              # GCodeInput *; SAFE-PERMANENT: set in the constructor at startup, never changed or freed
-GCodeException::message                                               # char const *; SUSPECT: must be a literal; Heater.cpp:644 and SwitchEndstop.cpp:155 pass a stack buffer (K7, fixed by RRF #61; RRF #67 makes a message that is not a constant a compile error)
+GCodeException::message                                               # char const *; SAFE-PERMANENT: points to a constant string in flash or is null; it is set only from a GCodeExceptionMessage, whose consteval constructor makes any other message a compile error (K7, fixed by RRF #61 and #67)
 GCodeMachineState::BlockState::prev                                   # BlockState *; SAFE-LOCKED: owner GB only, under gb.mutex; not in the object model
 GCodeMachineState::currentBlockState                                  # BlockState *; SAFE-LOCKED: owner GB only, under gb.mutex; reseated before the old block is deleted
 GCodeMachineState::previous                                           # GCodeMachineState *; SUSPECT: OM walks this chain unlocked while MAIN or the SBC task pops and deletes states (K2, fixed by RRF #58)

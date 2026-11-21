@@ -65,12 +65,12 @@ Facts that several entries share:
 
 | Verdict | Entries | Meaning |
 |---|---|---|
-| SAFE-PERMANENT | 115 | set once at start-up and never freed |
+| SAFE-PERMANENT | 116 | set once at start-up and never freed |
 | SAFE-ONE-TASK | 59 | read and written in one task only |
 | SAFE-LOCKED | 48 | the other tasks hold the lock that the writer holds |
 | SAFE-ORDER | 18 | the conditions above hold |
 | SAFE-NO-DEREF | 1 | never dereferenced (`Heat::lastStandbyTools`) |
-| SUSPECT | 31 | a reader can reach memory that is no longer valid |
+| SUSPECT | 30 | a reader can reach memory that is no longer valid |
 
 The pointers into the DDA ring and into the direct USB buffers count as SAFE-PERMANENT, because their targets are never
 freed. An entry whose finding is fixed in 3.7-dev names the fix in its comment. The SUSPECT entries name their finding.
@@ -88,7 +88,7 @@ the fix. "Fixed by" means the fix is in 3.7-dev; a PR number alone is a fix PR t
 | K4 | **A file write overflows the transmit buffer at exactly 8 free bytes.** `WriteFileData` (`DataTransfer.cpp:2219`): `freeSpace - 8 - 4` wraps. This is not a pointer entry; it turned up in the SBC group. | fixed by #55 |
 | K5 | **Variables keep pointers to object model objects.** `Variable::Assign` rejected a single object (`Variable.cpp:85-86`), but copied the elements of an object model array as raw `ObjectModel *` (`:57-83`). They dangle after M950, M308 or M563. | fixed by #57 |
 | K6 | **Variables keep pointers into the object model.** A string (CString) or a port was stored as a raw pointer (`Variable.cpp:91`), e.g. `state.messageBox.message` or `move.extruders[].filament`. On the CHX, `daemon.g` compared the filament with a variable that followed the current name. | fixed by #57 |
-| K7 | **Error messages point into a dead stack frame.** `GCodeException::message` must be a literal (`GCodeException.h:24`), but `Heater.cpp:644` and `SwitchEndstop.cpp:155` threw with a local buffer. | #61; #67 makes a message that is not a constant a compile error |
+| K7 | **Error messages point into a dead stack frame.** `GCodeException::message` must be a literal (`GCodeException.h:24`), but `Heater.cpp:644` and `SwitchEndstop.cpp:155` threw with a local buffer. | fixed by #61; since #67 a message that is not a constant is a compile error |
 | K8 | **Message box expressions read before the lock.** The expression path calls the lambda before it takes the table lock (`ObjectModel.cpp:1302` vs `:1304`). | fixed upstream 43a6b4fa8 |
 | K9 | **A single global is read without its lock.** `M409 K"global.x"` takes no read lock (`GlobalVariables.cpp:46-63`) while the SBC task's `SetVariable` rewrites globals (`SbcInterface.cpp:1068`, `:1156`). | fixed upstream 43a6b4fa8 |
 | K10 | **A file request that the end of the connection woke returned the result before.** `InvalidateResources` gave the semaphore without failing the request (`SbcInterface.cpp:1891-1903`). `ReadFile` returned the old offset as a byte count (`:2487`), and `ReadLine` wrote past its buffer. | fixed by #60 |
