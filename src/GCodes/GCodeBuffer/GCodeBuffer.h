@@ -67,6 +67,8 @@ public:
 	bool Put(char c) noexcept SPEED_CRITICAL;										// Add a character to the end
 #if HAS_SBC_INTERFACE
 	void PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noexcept;		// Add an entire binary G-Code of the given channel epoch to the latest level, overwriting any existing content
+	bool HasBuffer() const noexcept { return buffer != nullptr; }					// Return true if the buffer for the code has been allocated
+	void PrimeBinaryBuffer() noexcept { binaryParser.AllocateBuffer(); }			// Make sure the buffer exists so that the next PutBinary cannot reach the memory allocator. Don't call this with the scheduler suspended
 #endif
 	void PutAndDecode(const char *_ecv_array data, size_t len) noexcept;			// Add an entire G-Code, overwriting any existing content
 	void PutAndDecode(const char *_ecv_array str) noexcept;							// Add a null-terminated string, overwriting any existing content
