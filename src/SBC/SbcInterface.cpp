@@ -2238,6 +2238,7 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 	}
 
 	bool gotCommand = false;
+	bool bufferNeeded = false;
 	{
 		// The whole walk must be atomic: readPointer is a cursor into variable-length records, so a concurrent defragment would invalidate it.
 		// The codes of a channel whose abort or failed macro is recorded wait until the main task has applied it. This is checked here, because
@@ -2261,6 +2262,14 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 				{
 					if (gb.GetChannel().RawValue() == codeHeader->channel)
 					{
+						if (!gb.HasBuffer())
+						{
+							// This is the first code for this GB. Its buffer must not be allocated while the scheduler is suspended, so leave the code where it is
+							// and prime the buffer below
+							bufferNeeded = true;
+							break;
+						}
+
 #ifdef TRACK_FILE_CODES
 						if (gb.IsFileChannel() && gb.GetCommandLetter() != 'Q')
 						{
@@ -2333,7 +2342,11 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 		}
 	}
 
-	if (gotCommand)
+	if (bufferNeeded)
+	{
+		gb.PrimeBinaryBuffer();						// now that the scheduler is running again. The code stays pending and is read on the next call
+	}
+	else if (gotCommand)
 	{
 		gb.DecodeCommand();
 		return true;

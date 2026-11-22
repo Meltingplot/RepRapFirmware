@@ -26,6 +26,7 @@ public:
 	explicit BinaryParser(GCodeBuffer& gcodeBuffer) noexcept;
 	void Init() noexcept; 														// Set it up to parse another G-code
 	void Put(const uint32_t *data, size_t len) noexcept;						// Add an entire binary code, overwriting any existing content
+	void AllocateBuffer() noexcept;												// Allocate the buffer of the GCodeBuffer if it has none
 	void DecodeCommand() noexcept;												// Print the buffer content in debug mode and prepare for execution
 	bool Seen(char c) noexcept SPEED_CRITICAL;									// Is a character present?
 	ParameterLettersBitmap AllParameters() const noexcept { return parametersPresent; }	// Return the bitmap of all parameters seen
