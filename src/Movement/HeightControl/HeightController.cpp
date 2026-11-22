@@ -67,13 +67,22 @@ GCodeResult HeightController::Configure(GCodeBuffer& gb, const StringRef& reply)
 	{
 		CalcDerivedValues();
 
-		TaskCriticalSectionLocker lock;			// make sure we don't create the task more than once
-
 		if (heightControllerTask == nullptr && sensorNumber >= 0)
 		{
-			state = PidState::stopped;
-			heightControllerTask = new Task<HeightControllerTaskStackWords>;
-			heightControllerTask->Create(HeightControllerTaskStart, "HEIGHT", (void*)this, TaskPriority::HeightFollowingPriority);
+			// Allocate the task before we suspend the scheduler, because malloc doesn't take the malloc mutex while the scheduler is suspended
+			Task<HeightControllerTaskStackWords> *_ecv_null newTask = new Task<HeightControllerTaskStackWords>;
+			{
+				TaskCriticalSectionLocker lock;			// make sure we don't create the task more than once
+
+				if (heightControllerTask == nullptr)
+				{
+					state = PidState::stopped;
+					heightControllerTask = newTask;
+					newTask->Create(HeightControllerTaskStart, "HEIGHT", (void*)this, TaskPriority::HeightFollowingPriority);
+					newTask = nullptr;
+				}
+			}
+			delete newTask;								// if the task was created by another task meanwhile, free the one we allocated now that the scheduler is running again
 		}
 	}
 	else if (sensorNumber < 0)
