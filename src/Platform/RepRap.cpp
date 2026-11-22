@@ -2372,6 +2372,7 @@ void RepRap::ReportInternalError(c_string file, c_string func, int line) const n
 // Returns the message box sequence number
 uint32_t RepRap::SendAlert(MessageType mt, c_string msg, c_string title, int sParam, float tParam, AxesBitmap controls, MessageBoxLimits *_ecv_null limits) noexcept
 {
+	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);				// MessageBox::Create may time out and delete older message boxes
 	WriteLocker lock(MessageBox::mboxLock);
 
 	const uint32_t seq = MessageBox::Create(msg, title, sParam, tParam, controls, limits);

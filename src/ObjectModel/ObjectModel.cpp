@@ -507,6 +507,8 @@ void ObjectExplorationContext::ProvideIndex(int32_t index) THROWS(GCodeException
 	++numIndicesProvided;
 }
 
+ReadWriteLock ObjectModel::lifetimeLock;
+
 // Constructor
 ObjectModel::ObjectModel() noexcept
 {

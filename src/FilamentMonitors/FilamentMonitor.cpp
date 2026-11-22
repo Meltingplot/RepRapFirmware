@@ -212,6 +212,7 @@ bool FilamentMonitor::IsMotionDetected() const noexcept
 	uint32_t newSensorType;
 	gb.TryGetUIValue('P', newSensorType, seen);
 
+	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);				// we may be about to delete an object model object
 	WriteLocker lock(filamentMonitorsLock);
 	FilamentMonitor *_ecv_from _ecv_null sensor = filamentSensors[extruder];
 
@@ -608,6 +609,7 @@ static uint32_t checkCalls = 0, clearCalls = 0;		//TEMP DEBUG
 /*static*/ bool FilamentMonitor::CheckDriveAssignments(const StringRef &reply) noexcept
 {
 	bool warn = false;
+	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);				// we may be about to delete an object model object
 	WriteLocker lock(filamentMonitorsLock);
 
 	for (size_t extruder = 0; extruder < ARRAY_SIZE(filamentSensors); ++extruder)

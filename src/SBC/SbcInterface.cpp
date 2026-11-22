@@ -789,6 +789,7 @@ void SbcInterface::ExchangeData() noexcept
 					MutexLocker lock(gb->mutex, SbcYieldTimeout);
 					if (lock.IsAcquired())
 					{
+						ReadLocker lifetimeLocker(ObjectModel::lifetimeLock);		// the result may point into an object model object, so Main must not delete one until we have sent it
 						ExpressionParser parser(gb, expression.c_str());
 						const ExpressionValue val = parser.Parse();
 						parser.CheckForExtraCharacters();
@@ -1057,6 +1058,10 @@ void SbcInterface::ExchangeData() noexcept
 				packetAcknowledged = false;
 				break;
 			}
+
+			// The value and the index expressions may point into an object model object, so Main must not delete one until we have stored and sent the value.
+			// Take this lock before the lock on the global variables, because Main may read a global variable while it holds this lock for writing.
+			ReadLocker lifetimeLocker(ObjectModel::lifetimeLock);
 
 			// Get the variable set
 			const uint16_t answerTag = ChannelEpochTag(ChannelEpochOf(packet->resendPacketId));		// the tag of the request without the marker

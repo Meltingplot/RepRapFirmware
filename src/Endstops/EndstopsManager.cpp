@@ -497,6 +497,7 @@ GCodeResult EndstopsManager::HandleM574(GCodeBuffer& gb, const StringRef& reply,
 			return GCodeResult::error;
 		}
 
+		WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);		// we are about to delete an object model object
 		WriteLocker lock(endstopsLock);
 
 		DeleteObject(axisEndstops[lastAxisSeen]);		// this clears the pointer before it deletes the endstop, which the CAN receive task relies on
@@ -520,6 +521,7 @@ GCodeResult EndstopsManager::HandleM574(GCodeBuffer& gb, const StringRef& reply,
 		if (gb.Seen(c))
 		{
 			const EndStopPosition pos = (EndStopPosition)gb.GetUIValue();		// we range-checked this earlier
+			WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);			// we may be about to delete an object model object
 			WriteLocker lock(endstopsLock);
 
 			if (pos == EndStopPosition::noEndStop)
@@ -626,6 +628,7 @@ const char *_ecv_array EndstopsManager::TranslateEndStopResult(bool hit, bool at
 
 void EndstopsManager::SetZProbeDefaults() noexcept
 {
+	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);				// we are about to delete object model objects
 	activeEndstops = nullptr;			// we are about to remove the Z probes, so make sure they are not in the active list
 	if (zProbes[0] != nullptr)
 	{
@@ -743,6 +746,7 @@ GCodeResult EndstopsManager::HandleM558(GCodeBuffer& gb, const StringRef &reply)
 		return GCodeResult::notFinished;
 	}
 
+	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);				// we may be about to delete an object model object
 	WriteLocker lock(zProbesLock);
 
 	ZProbe *_ecv_from _ecv_null const existingProbe = zProbes[probeNumber];

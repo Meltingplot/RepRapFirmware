@@ -552,6 +552,7 @@ GCodeResult Heat::ConfigureHeater(GCodeBuffer& gb, const StringRef& reply) THROW
 		if (StringEqualsIgnoreCase(pinName.c_str(), NoPinName))
 		{
 			// Setting the pin name to "nil" deletes the heater
+			WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);		// we are about to delete an object model object
 			WriteLocker lock(heatersLock);
 			DeleteObject(heaters[heater]);
 			reprap.HeatUpdated();
@@ -567,6 +568,7 @@ GCodeResult Heat::ConfigureHeater(GCodeBuffer& gb, const StringRef& reply) THROW
 			(void)gb.TryGetIValue('B', ambientSensorNumber, dummy);
 		}
 
+		WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);			// we are about to delete an object model object
 		WriteLocker lock(heatersLock);
 		DeleteObject(heaters[heater]);
 
@@ -1074,6 +1076,7 @@ GCodeResult Heat::ConfigureSensor(GCodeBuffer& gb, const StringRef& reply) THROW
 #endif
 		if (portName.EqualsIgnoreCase(NoPinName))					// if deleting this sensor
 		{
+			WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);	// we are about to delete an object model object
 			WriteLocker lock(sensorsLock);
 			DeleteSensor(sensorNum);
 			return GCodeResult::ok;
@@ -1083,6 +1086,7 @@ GCodeResult Heat::ConfigureSensor(GCodeBuffer& gb, const StringRef& reply) THROW
 	if (gb.Seen('Y'))
 	{
 		// Creating a new sensor
+		WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);		// we may be about to delete an object model object
 		WriteLocker lock(sensorsLock);
 
 		DeleteSensor(sensorNum);
@@ -1227,7 +1231,7 @@ void Heat::SuspendHeaters(bool sus) noexcept
 	}
 }
 
-// Delete a sensor, if there is one. Must write-lock the sensors lock before calling this.
+// Delete a sensor, if there is one. Must write-lock the sensors lock before calling this, and when called by Main also ObjectModel::lifetimeLock before that.
 void Heat::DeleteSensor(unsigned int sn) noexcept
 {
 	TemperatureSensor *currentSensor = sensorsRoot;

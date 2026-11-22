@@ -60,6 +60,7 @@ GCodeResult LedStripManager::CreateStrip(GCodeBuffer &gb, const StringRef &reply
 	String<StringLength50> pinName;
 	gb.GetReducedString(pinName.GetRef());
 
+	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);				// we are about to delete an object model object
 	WriteLocker lock(ledLock);
 	DeleteObject(slot);
 

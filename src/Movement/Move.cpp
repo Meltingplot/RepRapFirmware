@@ -954,6 +954,8 @@ bool Move::SetKinematics(const char *_ecv_array _ecv_null name, int legacyType) 
 
 	// Point to the new kinematics before deleting the old one. Another task may read this pointer at any time, e.g. the object model
 	// reading move.kinematics, and it must find either the old kinematics intact or the new one.
+	// A task that evaluates an expression may still use the old kinematics after it has read the pointer, so wait until it has finished.
+	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);
 	Kinematics *_ecv_from const oldKinematics = kinematics;
 	kinematics = _ecv_not_null(nk);
 	delete oldKinematics;

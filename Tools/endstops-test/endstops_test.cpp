@@ -158,6 +158,15 @@ public:
 	explicit WriteLocker(ReadWriteLock&) noexcept { }
 };
 
+// src/ObjectModel/ObjectModel.h: the lifetime lock that SetZProbeDefaults and HandleM558 take, compile-only like the other locks
+class ObjectModel
+{
+public:
+	static ReadWriteLock lifetimeLock;
+};
+
+ReadWriteLock ObjectModel::lifetimeLock;
+
 typedef uint8_t CanAddress;
 
 namespace CanInterface

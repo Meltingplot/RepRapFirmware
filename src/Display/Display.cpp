@@ -222,14 +222,18 @@ GCodeResult Display::Configure(GCodeBuffer& gb, const StringRef& reply) THROWS(G
 	if (gb.Seen('P'))
 	{
 		// Delete any existing LCD, menu and encoder
-		DeleteObject(lcd);
-		DeleteObject(menu);
+		{
+			// The LCD and the encoder are object model objects. Don't keep this lock while we create the new ones, because loading the menu may need the SBC task.
+			WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);
+			DeleteObject(lcd);
+			DeleteObject(menu);
 #if SUPPORT_ROTARY_ENCODER
-		DeleteObject(encoder);
+			DeleteObject(encoder);
 #endif
 #if SUPPORT_RESISTIVE_TOUCH
-		DeleteObject(touchController);
+			DeleteObject(touchController);
 #endif
+		}
 		seen = true;
 		switch (gb.GetLimitedUIValue('P', (uint32_t)DisplayControllerType::numTypes))
 		{

@@ -39,6 +39,23 @@ struct RepRap
 	void MoveUpdated() noexcept;
 };
 
+// The lifetime lock that SetKinematics takes, compile-only: this test runs one task. Tools/object-lifetime-test runs it with the real lock.
+class ReadWriteLock { };
+
+class WriteLocker
+{
+public:
+	explicit WriteLocker(ReadWriteLock&) noexcept { }
+};
+
+class ObjectModel
+{
+public:
+	static ReadWriteLock lifetimeLock;
+};
+
+ReadWriteLock ObjectModel::lifetimeLock;
+
 static Move move;
 static RepRap reprap;
 

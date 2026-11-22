@@ -111,6 +111,7 @@ GCodeResult FansManager::ConfigureFanPort(GCodeBuffer& gb, const StringRef& repl
 		String<StringLength50> pinName;
 		gb.GetReducedString(pinName.GetRef());
 
+		WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);			// we are about to delete an object model object
 		WriteLocker lock(fansLock);
 		DeleteObject(fans[fanNum]);
 

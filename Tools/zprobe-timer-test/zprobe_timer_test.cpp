@@ -112,7 +112,7 @@ private:
 	std::string& str;
 };
 
-// RRFLibraries RTOSIface.h: ReadWriteLock and ReadLocker, compile-only; the test runs one task
+// RRFLibraries RTOSIface.h: ReadWriteLock, ReadLocker and WriteLocker, compile-only; the test runs one task
 class ReadWriteLock
 {
 };
@@ -122,6 +122,21 @@ class ReadLocker
 public:
 	explicit ReadLocker(ReadWriteLock&) noexcept { }
 };
+
+class WriteLocker
+{
+public:
+	explicit WriteLocker(ReadWriteLock&) noexcept { }
+};
+
+// src/ObjectModel/ObjectModel.h: the lifetime lock that SetZProbeDefaults takes
+class ObjectModel
+{
+public:
+	static ReadWriteLock lifetimeLock;
+};
+
+ReadWriteLock ObjectModel::lifetimeLock;
 
 // src/GCodes/GCodeBuffer/GCodeBuffer.h, as far as ProgramZProbe uses it: M672 K<k> S<byte>:<byte>...
 class GCodeBuffer

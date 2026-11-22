@@ -306,6 +306,12 @@ public:
 	ObjectModel() noexcept;
 	virtual ~ObjectModel() { }
 
+	// Lock on the lifetime of object model objects. The table locks are held only while a value is fetched, so the result of an expression may still
+	// point into an object model object, e.g. an object model array or a string, when the caller uses it. A task other than Main that evaluates an expression
+	// holds this lock for reading until it has finished with the result. Main holds it for writing while it deletes an object model object, and it takes it
+	// before the lock of the list or array that holds the object.
+	static ReadWriteLock lifetimeLock;
+
 	// Forwarding function so that we can make GetObjectModelArrayEntry() protected
 	const ObjectModelArrayTableEntry *_ecv_null FindObjectModelArrayEntry(unsigned int index) const noexcept { return GetObjectModelArrayEntry(index); }
 
