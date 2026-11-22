@@ -1,0 +1,131 @@
+# Paths from inside a protected region to the heap, or to a call through a register, that RepRapFirmware may keep, see
+# README.md. alloc-check.py fails for every other one. One key per line, then a comment:
+#   Function [kind] -> target           kind: suspended, critical, basepri, primask or isr; target: the heap function first
+#                                       reached (operator new, operator delete, Tasks::AllocPermanent, malloc, ...) or
+#                                       "indirect call"
+#   path/below/src.cpp: Function [...]  static functions and functions in anonymous namespaces
+#
+# The list is the state of 3.7-dev at de1bfe598 (RRFLibraries 3.7-dev 696a015) in Duet3_MB6HC, Duet3_MB6XD and
+# Duet3Mini5plus. Each comment gives the verdict of the census in census.md and the reason:
+#   SUSPECT          the heap is reached with the scheduler suspended or interrupts masked; the fix branch is in brackets. An
+#                    entry stays SUSPECT until its fix is merged, then the key goes away (or, where the check cannot see the
+#                    guard of the fix, the verdict becomes FIXED with the commit)
+#   SAFE-PRIMED      the allocation inside the region is always served by a free list that is filled before the region
+#   SAFE-NO-HEAP     a call through a register: every target the firmware sets was read and none reaches the heap
+#   SAFE-NO-TARGET   a call through a register whose pointer the firmware never sets, so it never runs
+# A new entry needs the reason why the heap is not reached there. Better: allocate before the region and free after it.
+# "make update" rewrites the list from the firmware and keeps the comments of the entries that stay.
+AES_Handler [isr] -> indirect call                                       # SAFE-NO-TARGET: the ASF AES callback table is never set (no aes_set_callback call in RRF or CoreN2G; AesEcb.cpp polls DATRDY)
+AFEC0_Handler [isr] -> indirect call                                     # SAFE-NO-TARGET: the ASF AFEC callback table is never set (no afec_set_callback call; AnalogIn disables the AFEC interrupts)
+AFEC1_Handler [isr] -> indirect call                                     # SAFE-NO-TARGET: the ASF AFEC callback table is never set (no afec_set_callback call; AnalogIn disables the AFEC interrupts)
+CAN0_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: CanDevice::Interrupt: rxCallback is StepTimer::CanTimingMessageReceived (SAME5x only), txCallback is null and its interrupt off
+CAN1_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: CanDevice::Interrupt: rxCallback is StepTimer::CanTimingMessageReceived (SAME5x only), txCallback is null and its interrupt off
+CanDevice::Interrupt [primask] -> indirect call                          # SAFE-NO-HEAP: rxCallback is StepTimer::CanTimingMessageReceived on SAME5x (3 stores), nullptr and compiled out on SAME70
+CanInterface::SwitchToExpansionMode [suspended] -> operator new          # SUSPECT [fix/expansion-mode-alloc]: M954/CAN test mode: FilamentMonitor::DeleteAll takes a write lock (lock record) and frees monitors with the scheduler suspended
+DDA::Prepare [basepri] -> indirect call                                  # SAFE-NO-HEAP: Move::CheckEndstops: endstop/Z probe CheckTriggered/Acknowledge/Stopped read pins, ADC or cached states
+DDARing::AddHoldJog [suspended] -> indirect call                         # SAFE-NO-HEAP: Kinematics CartesianToMotorSteps/GetTiltCorrection/LimitSpeedAndAcceleration are math only; debugPrintf with PrintTransforms (census B1)
+DDARing::ConfigureMovementQueue [suspended] -> Tasks::AllocPermanent     # SUSPECT [fix/movement-queue-alloc]: M595 P allocates each new DDA with the scheduler suspended (main task)
+DDARing::Hold [suspended] -> indirect call                               # SAFE-NO-HEAP: debugPrintf in DDA::PlanMoves (Lookahead debug); BASEPRI is raised there, so ring buffer or dropped
+DDARing::LowPowerOrStallPause [suspended] -> indirect call               # SAFE-NO-HEAP: Kinematics::MotorStepsToCartesian overrides are stack math only (emergency pause path)
+DDARing::PauseMoves [suspended] -> indirect call                         # SAFE-NO-HEAP: debugPrintf in DDA::PlanMoves (Lookahead debug); BASEPRI is raised there, so ring buffer or dropped
+DDARing::ReleaseHold [suspended] -> indirect call                        # SAFE-NO-HEAP: debugPrintf in DDA::RecalculateMove (Lookahead debug); no heap, but DebugMessage takes a mutex with the scheduler suspended (census B1)
+DDARing::StopMoves [suspended] -> indirect call                          # SAFE-NO-HEAP: IterateDrivers lambdas set flags or call CanMotion::StopDriverWhen* (list walks, field writes)
+DMAC_0_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: DMA callbacks (HSMCI, TMC51xx/TMC22xx, I2C, SPI): registers, StepTimer reschedule, GiveFromISR
+DMAC_1_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: DMA callbacks (HSMCI, TMC51xx/TMC22xx, I2C, SPI): registers, StepTimer reschedule, GiveFromISR
+DMAC_2_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: DMA callbacks (HSMCI, TMC51xx/TMC22xx, I2C, SPI): registers, StepTimer reschedule, GiveFromISR
+DMAC_3_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: DMA callbacks (HSMCI, TMC51xx/TMC22xx, I2C, SPI): registers, StepTimer reschedule, GiveFromISR
+DMAC_4_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: DMA callbacks (HSMCI, TMC51xx/TMC22xx, I2C, SPI): registers, StepTimer reschedule, GiveFromISR
+EIC_0_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_10_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_11_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_12_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_13_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_14_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_15_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_1_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_2_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_3_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_4_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_5_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_6_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_7_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_8_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EIC_9_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+EndstopsManager::HandleRemoteEndstopChange [suspended] -> indirect call  # SAFE-NO-HEAP: Endstop::HandleRemoteInputChange is the base no-op or SwitchEndstop field stores (CAN receiver task)
+Event::AddEventV [suspended] -> indirect call                            # SAFE-NO-HEAP: the Event constructor formats the text with StringRef::vprintf into the event (SafeVsnprintf); goes away with [fix/event-alloc]
+Event::AddEventV [suspended] -> operator new                             # SUSPECT [fix/event-alloc]: the new Event comes from the heap when its freelist is empty (heat, main, CAN receiver task)
+GCodes::DiscardQueuedMotion [suspended] -> indirect call                 # SAFE-NO-HEAP: Kinematics::MotorStepsToCartesian overrides are stack math only
+GCodes::DoAsynchronousPause [suspended] -> indirect call                 # SAFE-NO-HEAP: Kinematics::MotorStepsToCartesian overrides are stack math only
+GCodes::DoEmergencyPause [suspended] -> indirect call                    # SAFE-NO-HEAP: IterateDrivers lambdas set flags or call CanMotion::StopDriverWhen* (list walks, field writes)
+HeightController::Configure [suspended] -> operator new                  # SUSPECT [fix/height-controller-alloc]: M951 allocates the height controller task with the scheduler suspended (main task)
+MCAN0_INT0_Handler [isr] -> indirect call                                # SAFE-NO-HEAP: CanDevice::Interrupt: rxCallback is StepTimer::CanTimingMessageReceived (SAME5x only), txCallback is null and its interrupt off
+MCAN1_INT0_Handler [isr] -> indirect call                                # SAFE-NO-HEAP: CanDevice::Interrupt: rxCallback is StepTimer::CanTimingMessageReceived (SAME5x only), txCallback is null and its interrupt off
+Move::AddLinearSegments [basepri] -> Tasks::AllocPermanent               # SAFE-PRIMED: one Split per region, MoveSegment::PrimeFreeList just before the booster (upstream cdcd49333); only the Move task (or CAN receiver in expansion mode) allocates segments
+Move::AddLinearSegments [basepri] -> indirect call                       # SAFE-NO-HEAP: debugPrintf in NewSegment (PrintBadMoves, MB6HC); with BASEPRI raised it writes to the debug ring buffer or drops
+Move::CreateLaserTask [suspended] -> operator new                        # SUSPECT [fix/laser-task-alloc]: M452/M670/M571/scanning probe/feedforward allocate the laser task with the scheduler suspended (main task)
+Move::OnEndstopOrZProbeStatesChanged [basepri] -> indirect call          # SAFE-NO-HEAP: Move::CheckEndstops: endstop/Z probe CheckTriggered/Acknowledge/Stopped read pins, ADC or cached states
+Move::PhaseStepControlLoop [basepri] -> indirect call                    # SAFE-NO-HEAP: debugPrintf in NewSegment (PrintBadMoves, MB6HC); with BASEPRI raised it writes to the debug ring buffer or drops
+Move::PushBabyStepping [suspended] -> indirect call                      # SAFE-NO-HEAP: debugPrintf in DDA::RecalculateMove (Lookahead debug); no heap, but DebugMessage takes a mutex with the scheduler suspended (census B1)
+Move::UpdateCurrentMotion [primask] -> indirect call                     # SAFE-NO-HEAP: debugPrintf in NewSegment (PrintBadMoves, MB6HC); no heap, but DebugMessage takes a mutex with PRIMASK set (census B2)
+NVMCTRL_0_Handler [isr] -> indirect call                                 # SAFE-NO-TARGET: the NVMCTRL HAL callbacks are never registered (no flash_register_callback call), INTEN is never set
+NVMCTRL_1_Handler [isr] -> indirect call                                 # SAFE-NO-TARGET: the NVMCTRL HAL callbacks are never registered (no flash_register_callback call), INTEN is never set
+PIOA_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+PIOB_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+PIOC_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+PIOD_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+PIOE_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
+ReadWriteLock::LockForReading [suspended] -> operator new                # SUSPECT [RRFLibraries fix/alloc-outside-critical-section, test fix/lock-record-alloc]: K23, lock record from the heap with the scheduler suspended
+ReadWriteLock::LockForWriting [suspended] -> operator new                # SUSPECT [RRFLibraries fix/alloc-outside-critical-section, test fix/lock-record-alloc]: K23, lock record from the heap with the scheduler suspended
+RepRap::StartIap [primask] -> indirect call                              # SAFE-NO-HEAP: CombineName calls MessageF only on overflow, which the OpenFile check with the same CombineName excludes (RepRap.cpp:2059); firmware update path
+SERCOM0_0_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM0_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM0_2_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM0_3_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM1_0_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM1_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM1_2_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM1_3_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM2_0_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM2_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM2_2_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM2_3_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM3_0_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM3_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM3_2_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM3_3_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM4_0_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM4_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM4_2_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM4_3_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM5_0_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM5_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM5_2_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM5_3_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM6_0_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM6_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM6_2_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM6_3_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM7_0_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM7_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM7_2_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SERCOM7_3_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+SbcInterface::FillBuffer [suspended] -> Tasks::AllocPermanent            # SUSPECT [fix/sbc-code-buffer-alloc]: the first code of a GB allocates its buffer in BinaryParser::Put inside the locker; the key stays after the fix (guard not visible)
+SoftwareReset [primask] -> indirect call                                 # SAFE-NO-HEAP: AsyncSerial::canWrite is ring buffer SpaceLeft; reset path
+SysTick_Handler [isr] -> indirect call                                   # SAFE-NO-HEAP: stuck-task path of RepRap::Tick: IsLocal() filters RemoteHeater, LocalHeater::SwitchOff sets PWM 0; M111 Heat MessageF would block (census B3)
+TC0_Handler [isr] -> indirect call                                       # SAFE-NO-HEAP: StepTimer callbacks (Move step ISR, Z probe modulation, scanning probe, TMC timer); segments go to the freelist, Allocate is task-only
+TC2_Handler [isr] -> indirect call                                       # SAFE-NO-HEAP: StepTimer callbacks (Move step ISR, Z probe modulation, scanning probe, TMC timer); segments go to the freelist, Allocate is task-only
+TaskLoop [suspended] -> indirect call                                    # SAFE-NO-HEAP: AIN callbacks are AveragingFilter::ProcessReading (math) or InputMonitor::AnalogInterrupt (task notify) (Mini5plus)
+UART0_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+UART1_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+UART2_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+UART3_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+UART4_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+USART0_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+USART1_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+USART2_Handler [isr] -> indirect call                                    # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
+USBHS_Handler [isr] -> indirect call                                     # SAFE-NO-TARGET: TinyUSB class sof/xfer_isr are NULL for the only driver, CDC (usbd.c:166), no app drivers; events go to xQueueSendToBackFromISR
+USB_0_Handler [isr] -> indirect call                                     # SAFE-NO-TARGET: TinyUSB class sof/xfer_isr are NULL for the only driver, CDC (usbd.c:166), no app drivers; events go to xQueueSendToBackFromISR
+USB_1_Handler [isr] -> indirect call                                     # SAFE-NO-TARGET: TinyUSB class sof/xfer_isr are NULL for the only driver, CDC (usbd.c:166), no app drivers; events go to xQueueSendToBackFromISR
+USB_2_Handler [isr] -> indirect call                                     # SAFE-NO-TARGET: TinyUSB class sof/xfer_isr are NULL for the only driver, CDC (usbd.c:166), no app drivers; events go to xQueueSendToBackFromISR
+USB_3_Handler [isr] -> indirect call                                     # SAFE-NO-TARGET: TinyUSB class sof/xfer_isr are NULL for the only driver, CDC (usbd.c:166), no app drivers; events go to xQueueSendToBackFromISR
+XDMAC_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: DMA callbacks (HSMCI, TMC51xx/TMC22xx, I2C, SPI): registers, StepTimer reschedule, GiveFromISR
