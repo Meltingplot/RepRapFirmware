@@ -67,10 +67,10 @@ Facts that several entries share:
 |---|---|---|
 | SAFE-PERMANENT | 116 | set once at start-up and never freed |
 | SAFE-ONE-TASK | 59 | read and written in one task only |
-| SAFE-LOCKED | 48 | the other tasks hold the lock that the writer holds |
+| SAFE-LOCKED | 50 | the other tasks hold the lock that the writer holds |
 | SAFE-ORDER | 18 | the conditions above hold |
 | SAFE-NO-DEREF | 1 | never dereferenced (`Heat::lastStandbyTools`) |
-| SUSPECT | 30 | a reader can reach memory that is no longer valid |
+| SUSPECT | 27 | a reader can reach memory that is no longer valid |
 
 The pointers into the DDA ring and into the direct USB buffers count as SAFE-PERMANENT, because their targets are never
 freed. An entry whose finding is fixed in 3.7-dev names the fix in its comment. The SUSPECT entries name their finding.
@@ -118,11 +118,16 @@ here with no fork fix.
 - **Kinematics.** `rr_model` walks `move.kinematics` (`HttpResponder.cpp:528-533`, `Move.cpp:185`). A tick switches to the main
   task, whose M669 with another type deletes the old object (`Move.cpp:951-953`). The network task resumes with virtual calls
   on freed memory. The order fix of #51 does not cover this.
+  Fixed by `PublishedPtr` (`src/Platform/PublishedPtr.h`): `Move::GetObjectLock` returns its lock for table 0, so `Replace`
+  waits for the object model.
 - **Handle copies** (`StringHandle::slotPtr`, `ArrayHandle::slotPtr`). The network task copies `inputs[].currentFile` or a global
   array and is switched out between reading `slotPtr` and the increment. The main task pops the level or reassigns the global,
   and the slot is freed (see the facts above). The symptom is the reset of #50. The lambdas that call `IncreaseRefCount` and then
   copy (`ObjectTracker.cpp:57`, `RepRap.cpp:417/419`) read `slotPtr` twice.
 - **G-code stack** (`GCodeBuffer::machineState`). The network task walks `inputs[]` while the main task pops a level.
+  Fixed by `PublishedPtr`: `GCodeBuffer::GetObjectLock` returns the stack lock, and the `GCodes` functions that the object model
+  calls for `state.status`, `state.macroRestarted` and `job.filePosition` take it. The copy of `inputs[].currentFile` now
+  happens under that lock, before the level can be deleted; the global arrays of the item above are not covered.
 - **Power fail script** (`GCodes::powerFailScript`). The network task copies the old script (`RepRap.cpp:364`) while M911 replaces
   it (`GCodes2.cpp:4618-4621`).
 - **Display** (`Display::lcd`, `Display::encoder`, Mini 5+). The network task reports `boards` with virtual calls (`Lcd.cpp:20-23`)
