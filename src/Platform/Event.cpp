@@ -36,27 +36,44 @@ inline Event::Event(Event *_ecv_null p_next, EventType et, uint16_t p_param, Can
 // The event list is held in priority order, lowest numbered (highest priority) events first.
 /*static*/ bool Event::AddEventV(EventType et, uint16_t p_param, CanAddress p_ba, uint8_t devNum, const char *_ecv_array format, va_list vargs) noexcept
 {
-	// Search for similar events already pending or being processed.
-	// An event is 'similar' if it has the same type, device number, CAN address and parameter even if the text is different.
-	TaskCriticalSectionLocker lock;
+	// Create the new event before we suspend the scheduler, because malloc doesn't take the malloc mutex while the scheduler is suspended
+	Event *const newEvent = new Event(nullptr, et, p_param, p_ba, devNum, format, vargs);
+	bool similarEventFound = false;
 
-	Event*_ecv_null * pe = &eventsPending;
-	while (*pe != nullptr && (et >= (*pe)->type || (*pe)->isBeingProcessed))		// while the next event in the list has same or higher priority than the new one
 	{
-		if (et == (*pe)->type && devNum == (*pe)->deviceNumber &&(*pe)->param == p_param
-#if SUPPORT_CAN_EXPANSION
-			 && p_ba == (*pe)->boardAddress
-#endif
-		   )
+		// Search for similar events already pending or being processed.
+		// An event is 'similar' if it has the same type, device number, CAN address and parameter even if the text is different.
+		TaskCriticalSectionLocker lock;
+
+		Event*_ecv_null * pe = &eventsPending;
+		while (*pe != nullptr && (et >= (*pe)->type || (*pe)->isBeingProcessed))		// while the next event in the list has same or higher priority than the new one
 		{
-			return false;						// there is a similar event already in the queue
+			if (et == (*pe)->type && devNum == (*pe)->deviceNumber &&(*pe)->param == p_param
+#if SUPPORT_CAN_EXPANSION
+				 && p_ba == (*pe)->boardAddress
+#endif
+			   )
+			{
+				similarEventFound = true;			// there is a similar event already in the queue
+				break;
+			}
+			pe = &((*pe)->next);
 		}
-		pe = &((*pe)->next);
+
+		if (!similarEventFound)
+		{
+			// We didn't find a similar event, so add the new one
+			newEvent->next = *pe;
+			*pe = newEvent;
+			++eventsQueued;
+		}
 	}
 
-	// We didn't find a similar event, so add the new one
-	*pe = new Event(*pe, et, p_param, p_ba, devNum, format, vargs);
-	++eventsQueued;
+	if (similarEventFound)
+	{
+		delete newEvent;							// release the new event now that the scheduler is running again
+		return false;
+	}
 	return true;
 }
 
