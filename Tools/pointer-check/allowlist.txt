@@ -90,12 +90,11 @@ FtpResponder::dataBuf                                                 # OutputBu
 FtpResponder::dataSocket                                              # Socket *; SAFE-ONE-TASK: NETWORK only; points to a permanent socket object
 GCodeBuffer::buffer                                                   # char *; SAFE-PERMANENT: allocated once with AllocPermanent, never freed; OM only tests it for null
 GCodeBuffer::fileInput                                                # FileGCodeInput *; SAFE-PERMANENT: set in the constructor at startup, never changed or freed
-GCodeBuffer::machineState                                             # GCodeMachineState *; SUSPECT: OM reads it unlocked; safe only for readers above the deleting task (SBC vs MAIN) (K2, fixed by RRF #58; standalone inputs[] reader in census.md)
 GCodeBuffer::normalInput                                              # GCodeInput *; SAFE-PERMANENT: set in the constructor at startup, never changed or freed
 GCodeException::message                                               # char const *; SAFE-PERMANENT: points to a constant string in flash or is null; it is set only from a GCodeExceptionMessage, whose consteval constructor makes any other message a compile error (K7, fixed by RRF #61 and #67)
 GCodeMachineState::BlockState::prev                                   # BlockState *; SAFE-LOCKED: owner GB only, under gb.mutex; not in the object model
 GCodeMachineState::currentBlockState                                  # BlockState *; SAFE-LOCKED: owner GB only, under gb.mutex; reseated before the old block is deleted
-GCodeMachineState::previous                                           # GCodeMachineState *; SUSPECT: OM walks this chain unlocked while MAIN or the SBC task pops and deletes states (K2, fixed by RRF #58)
+GCodeMachineState::previous                                           # GCodeMachineState *; SAFE-LOCKED: the levels below GCodeBuffer::machineState, a PublishedPtr: tasks at the main task's priority walk them under its lock, which push and pop hold for writing; the SBC task outranks the main task, which reseats the top before it deletes a level (was K2, fixed by RRF #58)
 GCodeQueue::freeItems                                                 # QueuedCode *; SAFE-ONE-TASK: MAIN only; nodes are allocated once and never freed
 GCodeQueue::queuedItems                                               # QueuedCode *; SAFE-ONE-TASK: MAIN only; nodes are allocated once and never freed
 GCodes::deferredPauseCommandPending                                   # char const *; SAFE-PERMANENT: points only to string literals; MAIN only
@@ -159,7 +158,6 @@ MonoLcd::image                                                        # uint8_t 
 Move::DriverEnablePins                                                # Pin const *; SAFE-PERMANENT: set once in Init to a constexpr table (MB6XD only)
 Move::activeDMs                                                       # DriveMovement *; SAFE-PERMANENT: head of a list of Move::dms[] members, never freed; changed at step priority
 Move::heightController                                                # HeightController *; SAFE-PERMANENT: created once by M951, never freed (MB6HC/MB6XD)
-Move::kinematics                                                      # Kinematics *; SUSPECT: reseat-then-delete protects SBC/ISR readers, not NETWORK (same priority as MAIN) (standalone, see census.md)
 Move::laserTask                                                       # Task *; SAFE-ORDER: DeleteObject clears it before the delete (K12, fixed by RRF #62); the Move task and ISRs read it, above MAIN and SBC; a second emergency stop is K20 in census.md
 Move::phaseStepDMs                                                    # DriveMovement *; SAFE-PERMANENT: list of Move::dms[] members, never freed
 MoveSegment::freeList                                                 # MoveSegment *; SAFE-LOCKED: pool head, changed only with interrupts disabled
@@ -230,6 +228,7 @@ Platform::logger                                                      # Logger *
 Platform::mainSharedSpiDevice                                         # SharedSpiDevice *; SAFE-PERMANENT: set once in Platform::Init, never freed
 Platform::moveWarningBuffer                                           # String *; SAFE-PERMANENT: allocated once by M111 before its flag gates open, never freed
 Platform::panelDueUpdater                                             # PanelDueUpdater *; SAFE-PERMANENT: created once by M997 S4 in MAIN, never freed
+PublishedPtr::object                                                  # T * volatile; SAFE-LOCKED: Move::kinematics and GCodeBuffer::machineState; only the writer (main) task reseats it, under the write lock, before it deletes the old object; Get aborts for a reader at or below the writer's priority that does not hold the lock (Platform/PublishedPtr.h)
 QueuedCode::next                                                      # QueuedCode *; SAFE-ONE-TASK: MAIN only; nodes are allocated once and never freed
 RawMove::movementTool                                                 # Tool const *; SAFE-ORDER: Move reads it only while segmentsLeft>0; M563 frees tools only at standstill
 RepRap::DebugLogRecord::msg                                           # c_string; SAFE-PERMANENT: points to string literals only; written by NETWORK, read and cleared by M122

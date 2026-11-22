@@ -13,7 +13,8 @@
 
 // Create a default initialised GCodeMachineState
 GCodeMachineState::GCodeMachineState() noexcept
-	: feedRate(DefaultFeedRate),
+	: stateParameter(0),
+	  feedRate(DefaultFeedRate),
 #if HAS_SBC_INTERFACE
 	  fileId(NoFileId),
 #endif
@@ -25,7 +26,6 @@ GCodeMachineState::GCodeMachineState() noexcept
 #if HAS_SBC_INTERFACE
 	  lastCodeFromSbc(false), macroStartedByCode(false), fileFinished(false), codeEpochValid(false), codeEpoch(0), codeOfEndedConnection(false),
 #endif
-	  stateParameter(0),
 	  compatibility(Compatibility::RepRapFirmware),
 	  previous(nullptr), currentBlockState(new BlockState(nullptr)),
 	  blockNesting(0), state(GCodeState::normal), stateMachineResult(GCodeResult::ok)

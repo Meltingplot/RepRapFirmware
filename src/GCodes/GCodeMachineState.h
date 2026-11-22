@@ -13,6 +13,7 @@
 #include <General/FreelistManager.h>
 #include <General/NamedEnum.h>
 #include <ObjectModel/Variable.h>
+#include <Platform/PublishedPtr.h>
 
 // Enumeration to list all the possible states that the Gcode processing machine may be in
 enum class GCodeState : uint8_t
@@ -167,8 +168,8 @@ typedef uint8_t FileId;
 constexpr FileId NoFileId = 0;
 #endif
 
-// Class to hold the state of gcode execution for some input source
-class GCodeMachineState final
+// Class to hold the state of gcode execution for some input source. Publishable because GCodeBuffer::machineState is a PublishedPtr.
+class GCodeMachineState final : public Publishable
 {
 public:
 	typedef Bitmap<uint32_t> ResourceBitmap;
@@ -229,6 +230,7 @@ public:
 	void SetMacroRestartable(bool b) noexcept { macroRestartable = b; }
 	bool CanRestartMacro() const noexcept;
 
+	uint16_t stateParameter;										// a parameter, the meaning of which depends on what state we are in. First, so that it uses the padding after Publishable.
 	VariableSet variables;											// local variables and parameters
 	float feedRate;
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
@@ -284,7 +286,6 @@ public:
 #endif
 		;
 
-	uint16_t stateParameter;					// a parameter, the meaning of which depends on what state we are in
 	Compatibility compatibility;				// which firmware we are emulating
 
 #if SUPPORT_ASYNC_MOVES

@@ -527,6 +527,7 @@ protected:
 	DECLARE_OBJECT_MODEL_WITH_ARRAYS
 
 	size_t GetMaxElementsToReturn(const ObjectModelArrayTableEntry *entry, const ObjectExplorationContext& context) const noexcept override;
+	ReadWriteLock *_ecv_null GetObjectLock(unsigned int tableNumber) const noexcept override;
 
 private:
 	enum class MoveState : uint8_t
@@ -719,7 +720,7 @@ private:
 	Deviation initialCalibrationDeviation;
 	Deviation latestMeshDeviation;
 
-	Kinematics *_ecv_from kinematics;					// What kinematics we are using
+	PublishedPtr<Kinematics> kinematics;				// What kinematics we are using. The main task replaces it, the Move task, ISRs and the object model read it.
 
 	float minExtrusionPending = 0.0, maxExtrusionPending = 0.0;
 

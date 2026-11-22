@@ -27,7 +27,10 @@ real lines (the build fails if one is missing):
 `macro_error_test.cpp` gives them minimal `GCodeBuffer`, `GCodeMachineState`, `SbcInterface`, `GCodes`, `reprap`, mutex and string
 classes. A level that is deleted keeps its memory until the end and is remembered, so that every later use of it is reported. The SBC
 task is played by switching the current task around a call of the real case; in the first case it runs inside the main task's M122
-walk, when the walk reads the state of the macro's level.
+walk, when the walk reads the state of the macro's level. `GCodeBuffer::machineState` is the real `PublishedPtr` of
+`src/Platform/PublishedPtr.h` with the main task as its writer (`shim/` stands in for the RTOS interface it uses), so a push or pop by
+the SBC task and the deletion of a level that is still on top of the stack fail its `RRF_ASSERT`s, which the test reports.
+`Tools/published-ptr-test` tests `PublishedPtr` itself.
 
 Cases:
 1. M122 walks the stack while the SBC task processes the error: the walk never reaches a deleted level.

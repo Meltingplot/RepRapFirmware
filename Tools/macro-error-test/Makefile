@@ -12,6 +12,8 @@ SRC := $(RRF)/src
 CXX ?= g++
 CXXFLAGS ?= -O1 -g
 BASEFLAGS := -std=gnu++17 -fno-rtti -Wall -Wextra
+INC := -Ishim -Igen -I$(SRC)
+HEADERS := $(wildcard shim/*.h shim/*/*.h) $(SRC)/Platform/PublishedPtr.h Makefile
 ASANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
 GEN := gen/MacroCompletedCase.inc gen/SbcInterface.inc gen/GCodeBuffer.inc gen/GCodeMachineState.inc
@@ -36,13 +38,13 @@ gen/GCodeMachineState.inc: $(SRC)/GCodes/GCodeMachineState.cpp extract.awk
 	@mkdir -p gen
 	awk -v f="$(abspath $<)" -v names="GCodeMachineState::CloseFile GCodeMachineState::Pop" -f extract.awk $< > $@.tmp && mv $@.tmp $@
 
-build/macro-error-test: macro_error_test.cpp $(GEN) Makefile
+build/macro-error-test: macro_error_test.cpp $(GEN) $(HEADERS)
 	@mkdir -p build
-	$(CXX) $(BASEFLAGS) $(CXXFLAGS) -Igen macro_error_test.cpp -o $@
+	$(CXX) $(BASEFLAGS) $(CXXFLAGS) $(INC) macro_error_test.cpp -o $@
 
-build/asan-macro-error-test: macro_error_test.cpp $(GEN) Makefile
+build/asan-macro-error-test: macro_error_test.cpp $(GEN) $(HEADERS)
 	@mkdir -p build
-	$(CXX) $(BASEFLAGS) $(CXXFLAGS) $(ASANFLAGS) -Igen macro_error_test.cpp -o $@
+	$(CXX) $(BASEFLAGS) $(CXXFLAGS) $(ASANFLAGS) $(INC) macro_error_test.cpp -o $@
 
 check: all asan
 	build/macro-error-test

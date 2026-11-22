@@ -10,6 +10,7 @@
 
 #include <RepRapFirmware.h>
 #include <ObjectModel/ObjectModel.h>
+#include <Platform/PublishedPtr.h>
 #include <Movement/HomingMode.h>
 #include <Movement/MovementError.h>
 
@@ -60,7 +61,7 @@ struct SegmentationType
 	}
 };
 
-class Kinematics INHERIT_OBJECT_MODEL
+class Kinematics INHERIT_OBJECT_MODEL, public Publishable		// Publishable because Move::kinematics is a PublishedPtr
 {
 public:
 	// Machinery for automatically linking new kinematics into the kinematics classes list

@@ -188,6 +188,7 @@ public:
 	GCodeMachineState::BlockState& GetBlockState() const noexcept { return CurrentFileMachineState().CurrentBlockState(); }
 	uint16_t GetBlockIndent() const noexcept { return GetBlockState().GetIndent(); }
 	bool AllStatesNormal() const noexcept;						// Return true if all GCode states on the stack are 'normal'
+	ReadWriteLock& GetStackLock() const noexcept { return machineState.GetLock(); }	// Tasks that don't outrank the main task must hold this while they use the stack
 
 	void UseInches(bool inchesNotMm) noexcept { machineState->usingInches = inchesNotMm; }
 	bool UsingInches() const noexcept { return machineState->usingInches; }
@@ -366,6 +367,8 @@ public:
 protected:
 	DECLARE_OBJECT_MODEL
 
+	ReadWriteLock *_ecv_null GetObjectLock(unsigned int tableNumber) const noexcept override;
+
 private:
 	const char *_ecv_array GetStateText() const noexcept;
 
@@ -390,7 +393,7 @@ private:
 
 	StringParser stringParser;
 
-	GCodeMachineState *machineState;					// Machine state for this gcode source
+	PublishedPtr<GCodeMachineState> machineState;		// Machine state for this gcode source. The main task pushes and pops it, the object model reads it.
 	ExpressionValue m291Result;							// the value entered or choice selected in response to a M291 command
 
 	// When a macro returns, the command that invoked it is restored here so that error messages emitted by the resumed state machine (e.g. probing)

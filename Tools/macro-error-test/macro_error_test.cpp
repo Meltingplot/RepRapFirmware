@@ -10,6 +10,9 @@
 // (TaskPriority::SbcPriority) has the higher priority, so it can run at any instruction of that walk. Whatever it deletes there, the walk
 // may still hold. The test plays the SBC task in the middle of the walk, and checks what each task does to the stack. Deleted levels keep
 // their memory until the end, so a level that is reached after its deletion is reported instead of being undefined behaviour.
+//
+// GCodeBuffer::machineState is the real PublishedPtr of src/Platform/PublishedPtr.h, with the main task as its writer, so its RRF_ASSERTs
+// report a level that is deleted while it is on top of the stack, and a push or pop by the SBC task.
 
 #include <cstdarg>
 #include <cstdint>
@@ -35,6 +38,14 @@
 enum class Task { main, sbc };
 static Task currentTask = Task::main;
 static const char *TaskName(Task t) noexcept { return (t == Task::main) ? "main" : "SBC"; }
+
+#include <RTOSIface/RTOSIface.h>									// the stand-in in shim/
+static TaskBase mainTask, sbcTask;
+
+TaskHandle RTOSIface::GetCurrentTask() noexcept
+{
+	return (currentTask == Task::main) ? &mainTask : &sbcTask;
+}
 
 static std::vector<std::string> failures;
 static void Check(bool ok, const std::string& what) noexcept
@@ -126,7 +137,14 @@ static uint32_t millis() noexcept { return 1000; }
 enum class Module { SbcInterface };
 static void debugPrintf(const char *, ...) noexcept { }
 #define REPORT_INTERNAL_ERROR		Check(false, "internal error reported at line " + std::to_string(__LINE__))
-#define RRF_ASSERT(_expr)			Check(_expr, "RRF_ASSERT(" #_expr ") failed")
+#define RRF_ASSERT(_expr)			Check(_expr, std::string("the ") + TaskName(currentTask) + " task fails RRF_ASSERT(" #_expr ")")
+
+#include <Platform/PublishedPtr.h>
+
+// The check of R3 in PublishedPtr.cpp lets both tasks read without the lock: the main task is the writer and the SBC task outranks it
+void PublishedPtrBase::CheckReader() const noexcept
+{
+}
 
 // Channels: the names and numbers of GCodeChannel.h that the test uses
 class GCodeChannel
@@ -241,7 +259,7 @@ static std::vector<void *> memoryToFree;
 // The SBC task as it preempts the main task the next time the main task reads the state of a level
 static void (*preemption)() noexcept = nullptr;
 
-class GCodeMachineState
+class GCodeMachineState : public Publishable						// as in GCodeMachineState.h
 {
 public:
 	GCodeMachineState(const char *lbl, GCodeMachineState *_ecv_null prev) noexcept : previous(prev), label(lbl) { }
@@ -329,7 +347,7 @@ public:
 class GCodeBuffer
 {
 public:
-	explicit GCodeBuffer(GCodeChannel::RawType c) noexcept : machineState(new GCodeMachineState("base", nullptr)), codeChannel(c) { }
+	explicit GCodeBuffer(GCodeChannel::RawType c) noexcept : machineState(new GCodeMachineState("base", nullptr), &mainTask), codeChannel(c) { }
 
 	// Real text from GCodeBuffer.cpp
 	bool PopState(bool withinSameFile) noexcept;
@@ -393,17 +411,17 @@ public:
 	void SetFileFinished() noexcept
 	{
 		Log("SetFileFinished");
-		Check(!OnStack(machineState, mustBeGone), "SetFileFinished runs while the failed macro is still on the stack");
+		Check(!OnStack(machineState.Get(), mustBeGone), "SetFileFinished runs while the failed macro is still on the stack");
 	}
 	void PutBinary(const uint32_t *, size_t, uint8_t) noexcept
 	{
 		Log("PutBinary");
-		Check(!OnStack(machineState, mustBeGone), "a code of the SBC is put on the level of the failed macro");
+		Check(!OnStack(machineState.Get(), mustBeGone), "a code of the SBC is put on the level of the failed macro");
 	}
 	void DecodeCommand() noexcept { }
 
 	Mutex mutex;
-	GCodeMachineState *machineState;
+	PublishedPtr<GCodeMachineState> machineState;
 	StringParser stringParser;
 	const GCodeChannel codeChannel;
 	GCodeBufferState bufferState = GCodeBufferState::parseNotStarted;
@@ -484,7 +502,7 @@ private:
 	void InvalidateChannel(GCodeBuffer& gb) noexcept
 	{
 		Log("InvalidateChannel");
-		Check(!OnStack(gb.machineState, mustBeGone), "the channel abort is applied while the failed macro is still on the stack");
+		Check(!OnStack(gb.machineState.Get(), mustBeGone), "the channel abort is applied while the failed macro is still on the stack");
 	}
 };
 
@@ -529,7 +547,7 @@ static void Discard(GCodeBuffer *_ecv_null gb) noexcept
 {
 	if (gb != nullptr)
 	{
-		for (GCodeMachineState *_ecv_null ms = gb->machineState; ms != nullptr && deletedLevels.count(ms) == 0; ms = ms->previous)
+		for (GCodeMachineState *_ecv_null ms = gb->machineState.Get(); ms != nullptr && deletedLevels.count(ms) == 0; ms = ms->previous)
 		{
 			memoryToFree.push_back(ms);
 		}
@@ -541,6 +559,7 @@ static void Discard(GCodeBuffer *_ecv_null gb) noexcept
 // with the file. DSF answers with MacroCompleted and an error when the file cannot be opened. Without the push, the GB waits for the macro
 static void Setup(bool pushed) noexcept
 {
+	currentTask = Task::main;
 	Discard(daemonGb);
 	Discard(httpGb);
 	daemonGb = new GCodeBuffer(GCodeChannel::Daemon);
@@ -554,11 +573,11 @@ static void Setup(bool pushed) noexcept
 
 	if (pushed)
 	{
-		failedMacro = new GCodeMachineState("daemon.g", daemonGb->machineState);
+		failedMacro = new GCodeMachineState("daemon.g", daemonGb->machineState.Get());
 		failedMacro->fileId = 1;
 		failedMacro->fname.Assign("daemon.g");
 		failedMacro->doingFileMacro = true;
-		daemonGb->machineState = failedMacro;
+		(void)daemonGb->machineState.Publish(failedMacro);		// as GCodeBuffer::PushState
 	}
 	else
 	{
@@ -568,7 +587,6 @@ static void Setup(bool pushed) noexcept
 
 	sbc.rxPointer = sbc.txPointer = sbc.txEnd = 0;
 	reprap.GetGCodes().channelAbortRequested = false;
-	currentTask = Task::main;
 	preemption = nullptr;
 	mustBeGone = nullptr;
 	failures.clear();
@@ -602,7 +620,8 @@ static void MainTaskSpinStarts() noexcept
 
 static bool OnlyBase(const GCodeBuffer& gb) noexcept
 {
-	return deletedLevels.count(gb.machineState) == 0 && gb.machineState->previous == nullptr && strcmp(gb.machineState->label, "base") == 0;
+	const GCodeMachineState *const ms = gb.machineState.Get();
+	return deletedLevels.count(ms) == 0 && ms->previous == nullptr && strcmp(ms->label, "base") == 0;
 }
 
 static unsigned int failed = 0;
@@ -646,7 +665,7 @@ int main()
 		Check(Count(Task::sbc, "delete the level daemon.g") == 0, "the SBC task deletes the level of the failed macro");
 		Check(Count(Task::sbc, "release the name daemon.g") == 0, "the SBC task releases the file name of the failed macro");
 		Check(Count(Task::sbc, "Init") == 0, "the SBC task initialises the parsers of the GB");
-		Check(daemonGb->machineState == failedMacro, "the SBC task changes the stack");
+		Check(daemonGb->machineState.Get() == failedMacro, "the SBC task changes the stack");
 		Check(daemonGb->IsMacroErrorRecorded(), "the failed macro is not recorded on the GB");
 		Check(reprap.GetGCodes().channelAbortRequested, "the main task is not asked to apply the record");
 	}
@@ -742,7 +761,7 @@ int main()
 		events.clear();
 		const bool acknowledged = SbcSendsMacroCompleted(true);
 		Check(!acknowledged, "the packet is not requested again");
-		Check(daemonGb->machineState == failedMacro && !daemonGb->IsMacroErrorRecorded(), "the SBC task acts on the GB");
+		Check(daemonGb->machineState.Get() == failedMacro && !daemonGb->IsMacroErrorRecorded(), "the SBC task acts on the GB");
 		Check(Count(Task::sbc, "delete the level daemon.g") == 0, "the SBC task deletes a level");
 	}
 	Report("a MacroCompleted while an abort of the channel is recorded is requested again");
@@ -754,7 +773,7 @@ int main()
 		const bool acknowledged = SbcSendsMacroCompleted(true);
 		daemonGb->mutex.busyInMainTask = false;
 		Check(!acknowledged, "the packet is not requested again");
-		Check(daemonGb->machineState == failedMacro, "the stack changes");
+		Check(daemonGb->machineState.Get() == failedMacro, "the stack changes");
 		Check(!daemonGb->IsMacroErrorRecorded() && !reprap.GetGCodes().channelAbortRequested, "the failed macro is recorded");
 		Check(events.empty(), "something happens: " + EventsText());
 	}
@@ -776,7 +795,7 @@ int main()
 		const bool acknowledged = SbcSendsMacroCompleted(false);
 		Check(acknowledged, "the packet is requested again");
 		Check(Count(Task::sbc, "SetFileFinished") == 1, "the macro is not marked as finished");
-		Check(daemonGb->machineState == failedMacro && !daemonGb->IsRecordPending(), "the stack changes or a record is made");
+		Check(daemonGb->machineState.Get() == failedMacro && !daemonGb->IsRecordPending(), "the stack changes or a record is made");
 	}
 	Report("a MacroCompleted without an error marks the macro as finished and records nothing");
 
