@@ -386,6 +386,21 @@ static void SamePriorityWithoutLock() noexcept
 	p.Delete();
 }
 
+// A reader at the writer's base priority that has inherited a higher priority from a mutex falls back to its base priority when it releases the mutex,
+// and the main task can then run in a time slice, so it must still hold the lock
+static void InheritedPriorityWithoutLock() noexcept
+{
+	PublishedPtr<TestObject> p(new TestObject("a", nullptr), &mainTask);
+	networkTask.uxPriority = TaskPriority::SbcPriority;
+	{
+		AsTask as(networkTask);
+		(void)p.Get();
+	}
+	networkTask.uxPriority = networkTask.uxBasePriority;
+	Check(AssertsIn("RTOSIface/RTOSIface.cpp") == 1 && asserts.size() == 1, "the read is not caught (assertions: " + AssertsText() + ")");
+	p.Delete();
+}
+
 static void BelowWriterPriorityWithoutLock() noexcept
 {
 	PublishedPtr<TestObject> p(new TestObject("a", nullptr), &mainTask);
@@ -570,6 +585,7 @@ int main()
 	Run("R3: the SBC and Move tasks read without the lock", false, HigherPriorityReads);
 	Run("R3: the SBC task reads without the lock while the main task has inherited a higher priority", false, WriterWithInheritedPriority);
 	Run("R3: the network task reading without the lock is caught", true, SamePriorityWithoutLock);
+	Run("R3: the network task with an inherited higher priority reading without the lock is caught", true, InheritedPriorityWithoutLock);
 	Run("R3: a task below the writer's priority reading without the lock is caught", true, BelowWriterPriorityWithoutLock);
 	Run("R3: the network task reads with the read lock", false, SamePriorityWithLock);
 	Run("R3: a read lock held by another task does not count", true, LockOfAnotherTask);

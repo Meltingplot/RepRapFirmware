@@ -30,7 +30,8 @@ Cases:
 4. R3: the writer, an ISR, a task while the scheduler is suspended (urgent M24 and M25.1 under `TaskCriticalSectionLocker`) or while
    interrupts are masked, the SBC task and the Move task read without the lock. The writer, ISR, suspended and masked cases query no
    priority, and the masked case leaves BASEPRI set. The SBC task also passes while the main task has inherited a higher priority.
-5. R3: the network task, or a task below the main task's priority, reading without the lock fails `CheckHasReadOrWriteLock`. Without
+5. R3: the network task, also while it has inherited a higher priority, or a task below the main task's priority, reading without
+   the lock fails `CheckHasReadOrWriteLock`. Without
    the check the main task then deletes the object that the network task holds. With its own read lock the network task passes;
    a read lock that another task holds does not count.
 6. A machine state stack: two pushes with `Publish`, two pops with `Replace`, a fork that publishes a new chain and deletes the old
@@ -38,8 +39,8 @@ Cases:
 7. Two threads: the main task's `Replace` waits while the network task holds the read lock. Meanwhile the old object is intact and
    still published; the network task finds its object intact until it releases the lock, and then the old object is deleted once.
 
-`make nochecks` builds the test with `PUBLISHED_PTR_TEST_NO_CHECKS`, which takes out `RRF_ASSERT` and `RTOS_ASSERT`. Then the five cases
-that depend on them (R1, the writer check, and the three R3 reads without the lock) must fail and all others must pass; that build
+`make nochecks` builds the test with `PUBLISHED_PTR_TEST_NO_CHECKS`, which takes out `RRF_ASSERT` and `RTOS_ASSERT`. Then the six cases
+that depend on them (R1, the writer check, and the four R3 reads without the lock) must fail and all others must pass; that build
 exits 0 only then.
 
 What the test does not show: the real scheduler (preemption and time slicing are played by the order of the calls, and by two threads
@@ -55,4 +56,4 @@ The Makefile reads the sources from this repository, `../..` (override with `RRF
     make check        # the plain build, AddressSanitizer + UBSan, and both without the checks, then run all four
 
 Each case prints `PASS` or `FAIL` with the reason. The exit code is 1 if any case fails, or, without the checks, if any case other
-than the five that depend on them fails or one of those passes.
+than the six that depend on them fails or one of those passes.

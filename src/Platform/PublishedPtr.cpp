@@ -23,8 +23,9 @@ void PublishedPtrBase::CheckReader() const noexcept
 		return;
 	}
 
-	// Compare with the base priority of the writer, so that readers which outrank it don't fail while it has inherited a higher priority from a mutex
-	if (TaskBase::GetCurrentTaskPriority() <= uxTaskBasePriorityGet(writer->GetFreeRTOSHandle()))
+	// Compare base priorities, because an inherited priority lasts only while a mutex is held. A reader that has inherited a higher priority must still
+	// hold the lock, and readers that outrank the writer don't fail while it has inherited a higher priority from a mutex.
+	if (uxTaskBasePriorityGet(nullptr) <= uxTaskBasePriorityGet(writer->GetFreeRTOSHandle()))
 	{
 		lock.CheckHasReadOrWriteLock();
 	}
