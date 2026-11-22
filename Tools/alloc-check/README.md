@@ -169,8 +169,8 @@ opener itself for a nested clear, or `indirect call`. A call that reaches both g
 
 **What it does not see**, in addition to the list above:
 - **A restore by a test.** ASF's `cpu_irq_restore` runs `cpsie i` only if the saved state had the interrupts enabled (CoreN2G
-  `src/SAM4S_4E_E70/asf/common/utils/interrupt/interrupt_sam_nvic.h:163-167`). The check counts that as a clear; `efc_perform_command` is
-  such a case.
+  `src/SAM4S_4E_E70/asf/common/utils/interrupt/interrupt_sam_nvic.h:163-167`). The check counts that as a clear;
+  `efc_perform_command` is such a case.
 - **A critical section that a caller holds.** A FreeRTOS call then leaves the mask in place, but the check reports it.
 - **When the mask is lifted.** A call that lifts it as the last thing in the region is found like one at its start.
   `unmask-census.md` tells them apart (SAFE-LAST), and such an entry has to be read again when its region changes.
@@ -193,11 +193,13 @@ The firmware build container of DuetSoftwareFramework has both. The ELF files ar
 
 One run takes a few seconds per ELF file. `selftest/src/sample.cpp` has positive and negative cases: inline and out-of-line
 regions, a callee that allocates, `cpsid i`, `BASEPRI_MAX`, a call through a function pointer, a static function, a jump table,
-an exception handler. `selftest/expected.txt` has their keys. The unmask cases (a task notification, a `TaskCriticalSectionLocker`, a critical section
-and a call through a register with BASEPRI raised; a notification, a `FromISR` function and a nested `cpsie i` with PRIMASK set;
-and the patterns that must not be found) have theirs in `selftest/expected-unmask.txt`. The runtime stand-ins model the Cortex-M7
-r0p1 port. `no-alloc.cpp` has none of either: `make selftest` runs `--update` on it for both, which must write an allowlist with
-the header and no entries.
+an exception handler. `selftest/expected.txt` has their keys. The unmask cases have theirs in `selftest/expected-unmask.txt`:
+- with BASEPRI raised, a task notification, a `TaskCriticalSectionLocker`, a critical section and a call through a register;
+- with PRIMASK set, a notification, a `FromISR` function and a nested `cpsie i`;
+- and the patterns that must not be found.
+
+The runtime stand-ins model the Cortex-M7 r0p1 port. `no-alloc.cpp` has none of either: `make selftest` runs `--update` on it
+for both, which must write an allowlist with the header and no entries.
 
 ## A new finding
 

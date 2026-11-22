@@ -31,7 +31,8 @@ The verdict per entry is its comment in `unmask-allowlist.txt`; this file has th
 
 - **Priorities** on these boards (3 priority bits, `src/RepRapFirmware.h:738-769`):
   - 0 watchdog, 1 Aux UART receive, 2 WiFi UART receive;
-  - the FreeRTOS system call limit is 3 (`configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`, FreeRTOS `src/include/FreeRTOSConfig.h:323`);
+  - the FreeRTOS system call limit is 3 (`configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`, FreeRTOS
+    `src/include/FreeRTOSConfig.h:323`);
   - 4 CAN, pins, ADC, driver diagnostics;
   - 5 step and DMA;
   - 6 USB and HSMCI, 7 SPI and Ethernet.
