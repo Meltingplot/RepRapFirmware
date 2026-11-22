@@ -1,3 +1,4 @@
+BoostedCallback [basepri] -> indirect call
 BoostedMalloc [basepri] -> malloc
 CallsHelperInCritical [critical] -> malloc
 LockerMalloc [suspended] -> malloc

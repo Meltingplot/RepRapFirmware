@@ -1,0 +1,38 @@
+# Places where a region that masks interrupts can lift its mask before it ends, that RepRapFirmware may keep, see README.md
+# ("Interrupts unmasked inside a region"). alloc-check.py --unmask fails for every other one. One key per line, then a comment:
+#   Function [kind] -> target           kind: basepri, primask, or critical (a critical section of the function); target: the
+#                                       function that holds the instruction that lifts the mask, the function itself for a
+#                                       nested clear, or "indirect call"
+#   path/below/src.cpp: Function [...]  static functions and functions in anonymous namespaces
+#
+# The list is the state of 3.7-dev at b857e3530 (RRFLibraries 3.7-dev 888b479) in Duet3_MB6HC, Duet3_MB6XD and
+# Duet3Mini5plus. Each comment gives the verdict of the census in unmask-census.md and the reason:
+#   SUSPECT          the mask can be lifted while code that the region protects still runs; the fix branch is in brackets,
+#                    or "open"
+#   SAFE-LAST        the mask is lifted by the last call of the region, and nothing that the region protects runs after it.
+#                    Read the entry again when its region changes
+#   SAFE-GUARDED     the path to the instruction runs only under a run-time condition that the check does not evaluate, and the
+#                    condition excludes it inside the region
+#   SAFE-RESTORE     the instruction that the check counts as a clear restores the state that its function saved
+#   SAFE-NO-UNMASK   a call through a register: every target the firmware sets was read and none lifts the mask
+# A new entry needs the reason why the mask stays in place. Better: make the call after the region.
+# "make update" rewrites the list from the firmware and keeps the comments of the entries that stay.
+CanDevice::Interrupt [primask] -> indirect call                      # SAFE-NO-UNMASK: rxCallback is StepTimer::CanTimingMessageReceived, which stores three values and reads the timer registers (StepTimer.cpp:289-294); only boards without an external timestamp counter (Mini5plus)
+DDA::Prepare [basepri] -> vPortExitCritical                          # SAFE-GUARDED: CheckEndstops(false) wakes the Move task only if executingMove (Move.cpp:3041, :3060)
+DDARing::Hold [basepri] -> vPortExitCritical                         # SUSPECT [open]: CancelHomingMoveInFlight -> GetCurrentDDA: its TaskCriticalSectionLocker ends with BASEPRI 0, the rest of the booster runs with the step interrupt (feed hold, 3.7-ch); debugPrintf sites guarded
+DDARing::LowPowerOrStallPause [primask] -> indirect call             # SAFE-NO-UNMASK: IterateDrivers runs the lambdas of CancelStepping (Move.cpp:1137-1138) and StopAxisOrExtruder (:3378-3389), which set a flag or edit the CAN stop lists
+DDARing::LowPowerOrStallPause [primask] -> vPortEnterCritical        # SUSPECT [open]: IrqDisable then GetCurrentDDA, whose TaskCriticalSectionLocker enables the interrupts on the r0p1; the emergency pause runs unmasked (MB6HC, MB6XD)
+DDARing::PauseMoves [basepri] -> vPortExitCritical                   # SAFE-GUARDED: FindStopPoint reaches only debugPrintf, which takes no mutex with BASEPRI raised (RepRapFirmware.cpp:219)
+DDARing::StopMoves [basepri] -> vPortExitCritical                    # SUSPECT [open]: CancelHomingMoveInFlight -> GetCurrentDDA as the first call of the booster; FindStopPoint and the freeing of the queue run with the step interrupt (feed hold, 3.7-ch)
+EraseAndReset [primask] -> efc_perform_command                       # SAFE-RESTORE: cpu_irq_restore runs cpsie i only if the saved state was enabled (interrupt_sam_nvic.h:163-167); erase before a reset
+Flash::WriteUserSignature [primask] -> efc_perform_command           # SAFE-RESTORE: cpu_irq_restore runs cpsie i only if the saved state was enabled (interrupt_sam_nvic.h:163-167)
+Move::AddLinearSegments [basepri] -> indirect call                   # SAFE-NO-UNMASK: printf and catf reach putc of SafeVsnprintf, which writes to the buffer (SafeVsnprintf.cpp:812-821); IterateDrivers runs the SetDriversDirection lambda, a pin write (Move2.cpp:474)
+Move::AddLinearSegments [basepri] -> vPortExitCritical               # SAFE-LAST: Interrupt() wakes the Move task only as it ends, and is the last call of the booster; Split is primed (SAFE-PRIMED in census.md), NewSegment prints guarded
+Move::OnEndstopOrZProbeStatesChanged [basepri] -> vPortExitCritical  # SAFE-LAST: CheckEndstops(true) is the last call of the booster and wakes the Move task only when it returns or no endstop is left active
+Move::PhaseStepControlLoop [basepri] -> vPortExitCritical            # SAFE-LAST: Interrupt() (TMC task) is the last call of its booster and wakes the Move task only as it ends; UpdateCurrentMotion prints guarded
+Move::UpdateCurrentMotion [primask] -> vPortEnterCritical            # SUSPECT [open] (census.md B2): NewSegment debugPrintf with DEBUG_DISCONTINUITIES and M111 PrintBadMoves takes the mutex with PRIMASK set; debug only (MB6HC)
+RepRap::StartIap [primask] -> FileStore::Close                       # SAFE-GUARDED: CombineName calls MessageF only on overflow, which the OpenFile check with the same CombineName excludes (RepRap.cpp:2059)
+RxDmaCompleteCallback [primask] -> vTaskGenericNotifyGiveFromISR     # SAFE-LAST: GiveFromISR is the last statement of the locker; in the DMA interrupt (5) the step interrupt (5) stays out (MB6HC)
+SoftwareReset [primask] -> efc_perform_command                       # SAFE-RESTORE: cpu_irq_restore runs cpsie i only if the saved state was enabled (interrupt_sam_nvic.h:163-167); reset path
+SoftwareReset [primask] -> indirect call                             # SAFE-NO-UNMASK: GetAsyncPort(n)->canWrite() is AsyncSerial::canWrite, which returns RingBuffer::SpaceLeft (CoreN2G AsyncSerial.cpp)
+TmcLoop [primask] -> vPortEnterCritical                              # SUSPECT [open]: ClearCurrentTaskNotifyCount inside lock2 enables the interrupts on the r0p1; the SPI and DMA start after it runs unmasked (MB6HC)
