@@ -377,34 +377,46 @@ GCodeBuffer *_ecv_null GCodes::GetSerialGCodeBuffer(size_t serialPortNumber) con
 }
 
 // Return true if any channel other than the daemon and the trigger channel is executing a file macro
+// The network task calls this through the object model (state.status), so we lock the stack of each channel while we read it
 bool GCodes::DoingFileMacro() const noexcept
 {
 	for (const GCodeBuffer *_ecv_null gbp : gcodeSources)
 	{
-		if (gbp != nullptr && gbp != DaemonGCode() && gbp != TriggerGCode() && gbp->IsDoingFileMacro())
+		if (gbp != nullptr && gbp != DaemonGCode() && gbp != TriggerGCode())
 		{
-			return true;
+			ReadLocker lock(gbp->GetStackLock());
+			if (gbp->IsDoingFileMacro())
+			{
+				return true;
+			}
 		}
 	}
 	return false;
 }
 
 // Return true if any channel is waiting for a message acknowledgement
+// The network task calls this through the object model (state.status), so we lock the stack of each channel while we read it
 bool GCodes::WaitingForAcknowledgement() const noexcept
 {
 	for (const GCodeBuffer *_ecv_null gbp : gcodeSources)
 	{
-		if (gbp != nullptr && gbp->LatestMachineState().waitingForAcknowledgement)
+		if (gbp != nullptr)
 		{
-			return true;
+			ReadLocker lock(gbp->GetStackLock());
+			if (gbp->LatestMachineState().waitingForAcknowledgement)
+			{
+				return true;
+			}
 		}
 	}
 	return false;
 }
 
+// The network task calls this through the object model (job.filePosition), so we lock the stack of the file channel while we read it
 FilePosition GCodes::GetPrintingFilePosition() const noexcept
 {
 #if HAS_SBC_INTERFACE || HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
+	ReadLocker lock(FileGCode()->GetStackLock());
 	return FileGCode()->GetPrintingFilePosition(false);
 #else
 	return 0;
@@ -3843,8 +3855,10 @@ bool GCodes::DoFileMacro(GCodeBuffer& gb, const char *_ecv_array fileName, bool 
 }
 
 // Return true if the macro being executed by fileGCode was restarted
+// The network task calls this through the object model (state.macroRestarted), so we lock the stack of the file channel while we read it
 bool GCodes::GetMacroRestarted() const noexcept
 {
+	ReadLocker lock(FileGCode()->GetStackLock());
 	const GCodeMachineState& ms = FileGCode()->LatestMachineState();
 	return ms.doingFileMacro && ms.GetPrevious() != nullptr && ms.GetPrevious()->firstCommandAfterRestart;
 }
@@ -5837,6 +5851,8 @@ const MovementState& GCodes::GetCurrentMovementState(const ObjectExplorationCont
 	{
 # if HAS_NETWORKING
 		gb = HttpGCode();				// assume the request came from the network
+		ReadLocker lock(gb->GetStackLock());		// the network task has the same priority as the main task, so lock the stack while we read it
+		return GetConstMovementState(*gb);
 # else
 		return moveStates[0];
 # endif

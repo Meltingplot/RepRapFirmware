@@ -1246,7 +1246,7 @@ void StringParser::SetFinished() noexcept
 FilePosition StringParser::GetFilePosition() const noexcept
 {
 #if HAS_MASS_STORAGE || HAS_EMBEDDED_FILES
-	const GCodeMachineState *ms = gb.machineState;
+	const GCodeMachineState *ms = gb.machineState.Get();
 	while (ms->waitingForAcknowledgement && ms->GetPrevious() != nullptr)
 	{
 		ms = _ecv_not_null(ms->GetPrevious());

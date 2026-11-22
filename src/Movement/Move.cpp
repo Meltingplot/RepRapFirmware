@@ -159,6 +159,13 @@ size_t Move::GetMaxElementsToReturn(const ObjectModelArrayTableEntry *entry, con
 					: 0;
 }
 
+// Return the lock that the object model must hold while it reports or queries table 0, which holds move.kinematics. The network task reads it there
+// and has the same priority as the main task, which replaces the kinematics, see PublishedPtr.h.
+ReadWriteLock *_ecv_null Move::GetObjectLock(unsigned int tableNumber) const noexcept /*override*/
+{
+	return (tableNumber == 0) ? &kinematics.GetLock() : nullptr;
+}
+
 static inline const char *_ecv_array GetFilamentName(size_t extruder) noexcept
 {
 	const Filament *_ecv_null fil = Filament::GetFilamentByExtruder(extruder);
@@ -182,7 +189,7 @@ constexpr ObjectModelTableEntry Move::objectModelTable[] =
 #if SUPPORT_KEEPOUT_ZONES
 	{ "keepout",				OBJECT_MODEL_FUNC_ARRAY(7),																		ObjectModelEntryFlags::notPanelDue },
 #endif
-	{ "kinematics",				OBJECT_MODEL_FUNC(self->kinematics),															ObjectModelEntryFlags::none },
+	{ "kinematics",				OBJECT_MODEL_FUNC(self->kinematics.Get()),														ObjectModelEntryFlags::none },
 	{ "limitAxes",				OBJECT_MODEL_FUNC_NOSELF(reprap.GetGCodes().LimitAxes()),										ObjectModelEntryFlags::none },
 	{ "minSpeed",				OBJECT_MODEL_FUNC(InverseConvertSpeedToMm(self->MinMovementSpeed(), false), 2),					ObjectModelEntryFlags::none },
 	{ "motionSystems",			OBJECT_MODEL_FUNC_ARRAY(5),																		ObjectModelEntryFlags::liveNotPanelDue },
@@ -396,14 +403,13 @@ Move::Move() noexcept
 	  heightController(nullptr),
 #endif
 	  jerkPolicy(0),
+	  kinematics(Kinematics::Create(nullptr, KinematicsType::cartesian), Tasks::GetMainTask()),	// default to Cartesian. Kinematics must be set up here because GCodes::Init asks the kinematics for the assumed initial position
 	  numCalibratedFactors(0)
 {
 #if VARIABLE_NUM_DRIVERS
 	numActualDirectDrivers = NumDirectDrivers;						// assume they are all available until we know otherwise
 #endif
 
-	// Kinematics must be set up here because GCodes::Init asks the kinematics for the assumed initial position
-	kinematics = Kinematics::Create(nullptr, KinematicsType::cartesian);	// default to Cartesian
 	for (DDARing& ring : rings)
 	{
 		ring.Init(InitialDdaRingLength);
@@ -953,10 +959,8 @@ bool Move::SetKinematics(const char *_ecv_array _ecv_null name, int legacyType) 
 	}
 
 	// Point to the new kinematics before deleting the old one. Another task may read this pointer at any time, e.g. the object model
-	// reading move.kinematics, and it must find either the old kinematics intact or the new one.
-	Kinematics *_ecv_from const oldKinematics = kinematics;
-	kinematics = _ecv_not_null(nk);
-	delete oldKinematics;
+	// reading move.kinematics, and it must find either the old kinematics intact or the new one. Replace does it in that order.
+	kinematics.Replace(nk);
 	reprap.MoveUpdated();
 	return true;
 }

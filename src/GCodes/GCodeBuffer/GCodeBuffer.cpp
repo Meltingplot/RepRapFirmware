@@ -19,6 +19,7 @@
 #include <GCodes/GCodeException.h>
 #include <Platform/RepRap.h>
 #include <Platform/Platform.h>
+#include <Platform/Tasks.h>
 #include <Movement/StepTimer.h>
 
 // Macros to reduce the amount of explicit conditional compilation in this file
@@ -82,6 +83,13 @@ constexpr uint8_t GCodeBuffer::objectModelTableDescriptor[] = { 1, 17 };
 
 DEFINE_GET_OBJECT_MODEL_TABLE(GCodeBuffer)
 
+// Return the lock that the object model must hold while it reports or queries our table, whose entries read the machine state stack. The network task
+// reads it there and has the same priority as the main task, which pushes and pops the stack, see PublishedPtr.h.
+ReadWriteLock *_ecv_null GCodeBuffer::GetObjectLock(unsigned int tableNumber) const noexcept /*override*/
+{
+	return (tableNumber == 0) ? &machineState.GetLock() : nullptr;
+}
+
 const char *_ecv_array GCodeBuffer::GetStateText() const noexcept
 {
 	if (machineState->waitingForAcknowledgement)
@@ -111,7 +119,7 @@ GCodeBuffer::GCodeBuffer(GCodeChannel::RawType channel, GCodeInput *_ecv_from no
 	  binaryParser(*this),
 #endif
 	  stringParser(*this),
-	  machineState(new GCodeMachineState()), whenReportDueTimerStarted(millis()), lastStatusReportType(StatusReportType::none),
+	  machineState(new GCodeMachineState(), Tasks::GetMainTask()), whenReportDueTimerStarted(millis()), lastStatusReportType(StatusReportType::none),
 	  codeChannel(channel), lastResult(GCodeResult::ok),
 	  disabled(false), timerRunning(false), motionCommanded(false), hadExplicitLineNumber(false), buffer(nullptr), bufferLength(0)
 
@@ -269,7 +277,7 @@ void GCodeBuffer::Diagnostics(const StringRef& reply) noexcept
 	)
 	{
 		reply.cat(" in state(s)");
-		const GCodeMachineState *_ecv_null ms = machineState;
+		const GCodeMachineState *_ecv_null ms = machineState.Get();
 		do
 		{
 			reply.catf(" %d", (int)ms->GetState());
@@ -342,7 +350,7 @@ void GCodeBuffer::ResetChannelEpoch(bool known) noexcept
 // it. The caller holds the GB mutex
 void GCodeBuffer::EndConnectionOfCodes() noexcept
 {
-	for (GCodeMachineState *_ecv_null ms = machineState; ms != nullptr; ms = ms->GetPrevious())
+	for (GCodeMachineState *_ecv_null ms = machineState.Get(); ms != nullptr; ms = ms->GetPrevious())
 	{
 		ms->codeEpochValid = false;
 		ms->codeOfEndedConnection = true;
@@ -452,8 +460,7 @@ int8_t GCodeBuffer::GetCommandFraction() const noexcept
 // Copy the entire file state from the other GCode buffer to ourselves. Called to copy the state of the File stream to File2.
 void GCodeBuffer::ForkFrom(const GCodeBuffer& other) noexcept
 {
-	GCodeMachineState *ms = other.machineState->ForkChain();
-	std::swap(ms, machineState);
+	GCodeMachineState *ms = machineState.Publish(other.machineState->ForkChain());
 
 	// We should have a single old MachineState object, but to avoid memory leaks allow for the possibility of having a chain
 	while (ms != nullptr)
@@ -487,8 +494,8 @@ bool GCodeBuffer::IsLaterThan(const GCodeBuffer& other) const noexcept
 	}
 
 	unsigned int otherDepth = other.GetStackDepth();
-	const GCodeMachineState *ourState = machineState;
-	const GCodeMachineState *otherState = other.machineState;
+	const GCodeMachineState *ourState = machineState.Get();
+	const GCodeMachineState *otherState = other.machineState.Get();
 	while (ourDepth > otherDepth)
 	{
 		ourState = ourState->GetPrevious();
@@ -1057,7 +1064,7 @@ void GCodeBuffer::Enable(uint32_t arg) noexcept
 // Get the original machine state before we pushed anything
 GCodeMachineState& GCodeBuffer::OriginalMachineState() const noexcept
 {
-	GCodeMachineState *ms = machineState;
+	GCodeMachineState *ms = machineState.Get();
 	while (ms->GetPrevious() != nullptr)
 	{
 		ms = _ecv_not_null(ms->GetPrevious());
@@ -1067,7 +1074,7 @@ GCodeMachineState& GCodeBuffer::OriginalMachineState() const noexcept
 
 GCodeMachineState& GCodeBuffer::CurrentFileMachineState() const noexcept
 {
-	GCodeMachineState *ms = machineState;
+	GCodeMachineState *ms = machineState.Get();
 	while (ms->localPush && ms->GetPrevious() != nullptr)
 	{
 		ms = _ecv_not_null(ms->GetPrevious());
@@ -1078,7 +1085,7 @@ GCodeMachineState& GCodeBuffer::CurrentFileMachineState() const noexcept
 // Return true if all GCodes machine states on the stack are 'normal'
 bool GCodeBuffer::AllStatesNormal() const noexcept
 {
-	for (const GCodeMachineState *_ecv_null ms = machineState; ms != nullptr; ms = ms->GetPrevious())
+	for (const GCodeMachineState *_ecv_null ms = machineState.Get(); ms != nullptr; ms = ms->GetPrevious())
 	{
 		if (ms->GetState() != GCodeState::normal)
 		{
@@ -1115,7 +1122,7 @@ const char *_ecv_array GCodeBuffer::GetDistanceUnits() const noexcept
 unsigned int GCodeBuffer::GetStackDepth() const noexcept
 {
 	unsigned int depth = 0;
-	for (const GCodeMachineState *_ecv_null m1 = machineState; m1->GetPrevious() != nullptr; m1 = m1->GetPrevious())
+	for (const GCodeMachineState *_ecv_null m1 = machineState.Get(); m1->GetPrevious() != nullptr; m1 = m1->GetPrevious())
 	{
 		++depth;
 	}
@@ -1131,7 +1138,7 @@ bool GCodeBuffer::PushState(bool withinSameFile) noexcept
 		return false;
 	}
 
-	machineState = new GCodeMachineState(*machineState, withinSameFile);
+	machineState.Publish(new GCodeMachineState(*machineState, withinSameFile));		// the new state links to the old one, which therefore stays
 	if (!withinSameFile)
 	{
 		SaveInvokingCommand();
@@ -1167,7 +1174,7 @@ bool GCodeBuffer::PopState(bool withinSameFile) noexcept
 	bool poppedFileState;
 	do
 	{
-		GCodeMachineState * const ms = machineState;
+		GCodeMachineState * const ms = machineState.Get();
 		if (ms->GetPrevious() == nullptr)
 		{
 			ms->messageAcknowledged = false;			// avoid getting stuck in a loop trying to pop
@@ -1180,8 +1187,7 @@ bool GCodeBuffer::PopState(bool withinSameFile) noexcept
 		{
 			RestoreInvokingCommand(*ms);
 		}
-		machineState = ms->Pop();						// get the previous state and copy down any error message
-		delete ms;
+		machineState.Replace(ms->Pop());				// get the previous state and copy down any error message, then delete this one
 	} while (!withinSameFile && !poppedFileState);
 	IF_NOT_BINARY(stringParser.ResetIndentationAfterPop());
 
@@ -1232,7 +1238,7 @@ void GCodeBuffer::ClosePrintFile() noexcept
 		FileId printFileId = OriginalMachineState().fileId;
 		if (printFileId != NoFileId)
 		{
-			for (GCodeMachineState *ms = machineState; ms != nullptr; ms = ms->GetPrevious())
+			for (GCodeMachineState *ms = machineState.Get(); ms != nullptr; ms = ms->GetPrevious())
 			{
 				if (ms->fileId == printFileId)
 				{
@@ -1250,7 +1256,7 @@ void GCodeBuffer::ClosePrintFile() noexcept
 		if (fileBeingPrinted.IsLive())
 		{
 			GetFileInput()->Reset(fileBeingPrinted);
-			for (GCodeMachineState *ms = machineState; ms != nullptr; ms = ms->GetPrevious())
+			for (GCodeMachineState *ms = machineState.Get(); ms != nullptr; ms = ms->GetPrevious())
 			{
 				if (ms->fileState == fileBeingPrinted)
 				{
@@ -1268,7 +1274,7 @@ void GCodeBuffer::ClosePrintFile() noexcept
 void GCodeBuffer::SetFileFinished() noexcept
 {
 	FileId macroFileId = NoFileId, printFileId = OriginalMachineState().fileId;
-	for (GCodeMachineState *ms = machineState; ms != nullptr; ms = ms->GetPrevious())
+	for (GCodeMachineState *ms = machineState.Get(); ms != nullptr; ms = ms->GetPrevious())
 	{
 		if (macroFileId == NoFileId && ms->fileId != NoFileId && ms->fileId != printFileId && !ms->fileFinished)
 		{
@@ -1301,7 +1307,7 @@ void GCodeBuffer::SetPrintFinished() noexcept
 	FileId printFileId = OriginalMachineState().fileId;
 	if (printFileId != NoFileId)
 	{
-		for (GCodeMachineState *ms = machineState; ms != nullptr; ms = ms->GetPrevious())
+		for (GCodeMachineState *ms = machineState.Get(); ms != nullptr; ms = ms->GetPrevious())
 		{
 			if (ms->fileId == printFileId)
 			{
@@ -1386,7 +1392,7 @@ void GCodeBuffer::MacroFileClosed() noexcept
 // Allow for the possibility that the source may have started running a macro since it started waiting
 void GCodeBuffer::MessageAcknowledged(bool cancelled, bool shouldAbort, uint32_t seq, ExpressionValue rslt) noexcept
 {
-	for (GCodeMachineState *_ecv_null ms = machineState; ms != nullptr; ms = ms->GetPrevious())
+	for (GCodeMachineState *_ecv_null ms = machineState.Get(); ms != nullptr; ms = ms->GetPrevious())
 	{
 		if (ms->waitingForAcknowledgement && (seq == ms->msgBoxSeq || seq == 0 || ms->msgBoxSeq == 0))
 		{
@@ -1598,7 +1604,7 @@ void GCodeBuffer::AddParameters(VariableSet& vars, int codeRunning) THROWS(GCode
 
 VariableSet& GCodeBuffer::GetVariables() const noexcept
 {
-	GCodeMachineState *mc = machineState;
+	GCodeMachineState *mc = machineState.Get();
 	while (mc->localPush && mc->GetPrevious() != nullptr)
 	{
 		mc = _ecv_not_null(mc->GetPrevious());

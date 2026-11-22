@@ -1,36 +1,42 @@
-// Host test of Move::SetKinematics (src/Movement/Move.cpp), compiled from the real function text that the Makefile extracts.
+// Host test of Move::SetKinematics (src/Movement/Move.cpp), compiled from the real function text that the Makefile extracts, with
+// the real pointer class PublishedPtr (src/Platform/PublishedPtr.h) that Move::kinematics is.
 //
-// The object model reads the kinematics pointer from another task: move.kinematics is OBJECT_MODEL_FUNC(self->kinematics) in
-// Move.cpp, and the SBC task (TaskPriority::SbcPriority), or a network task without an SBC, serves object model requests while
-// the main task (TaskPriority::SpinPriority) runs M665 or M669, which call SetKinematics when the type changes. That task can
-// preempt the main task at any instruction, so at every moment of the change move.kinematics must name an intact object: the
-// old one until its deletion starts, then the new one. The test plays that task while the old kinematics is destroyed, before
-// its memory is freed and after.
+// The object model reads the kinematics pointer from another task: move.kinematics is OBJECT_MODEL_FUNC(self->kinematics.Get())
+// in Move.cpp, and the SBC task (TaskPriority::SbcPriority) serves object model requests while the main task
+// (TaskPriority::SpinPriority) runs M665 or M669, which call SetKinematics when the type changes. That task can preempt the main
+// task at any instruction, so at every moment of the change move.kinematics must name an intact object: the old one until its
+// deletion starts, then the new one. The test plays that task while the old kinematics is destroyed, before its memory is freed
+// and after. (A network task without an SBC has the priority of the main task and holds the lock of Move's object model table 0,
+// which Replace waits for; Tools/published-ptr-test checks that.)
 
 #include <cstdio>
 #include <new>
 #include <string>
 #include <vector>
 
-#define _ecv_array
-#define _ecv_null
-#define _ecv_from
-#define _ecv_not_null(x) (x)
+#include <Platform/PublishedPtr.h>									// with the stand-ins in shim/
 
 // Just what SetKinematics uses
-class Kinematics
+class Kinematics : public Publishable								// as in Kinematics.h
 {
 public:
 	virtual ~Kinematics() noexcept = default;
 	static Kinematics *_ecv_null Create(const char *_ecv_array _ecv_null name, int legacyType) noexcept;
 };
 
+static TaskBase mainTask;
+
+TaskHandle RTOSIface::GetCurrentTask() noexcept
+{
+	return &mainTask;
+}
+
 class Move
 {
 public:
 	bool SetKinematics(const char *_ecv_array _ecv_null name, int legacyType) noexcept;
 
-	Kinematics *_ecv_from kinematics = nullptr;						// as in Move.h
+	PublishedPtr<Kinematics> kinematics{nullptr, &mainTask};		// as in Move.h, written by the main task
 };
 
 struct RepRap
@@ -44,6 +50,17 @@ static RepRap reprap;
 #include "SetKinematics.inc"
 
 static std::vector<std::string> failures;
+
+void AssertFailed(const char *file, int line) noexcept
+{
+	failures.push_back(std::string("RRF_ASSERT fails at ") + file + ":" + std::to_string(line));
+}
+
+// The check of R3 in PublishedPtr.cpp lets the SBC task read without the lock, because it has a higher priority than the main task
+void PublishedPtrBase::CheckReader() const noexcept
+{
+}
+
 static const void *beingDeleted = nullptr;							// the old kinematics, from the start of its destructor on
 static unsigned int deletions = 0;
 
@@ -51,7 +68,7 @@ static unsigned int deletions = 0;
 // freed memory itself
 static void ObjectModelReads(const char *moment) noexcept
 {
-	if (beingDeleted != nullptr && move.kinematics == beingDeleted)
+	if (beingDeleted != nullptr && move.kinematics.Get() == beingDeleted)
 	{
 		failures.push_back(std::string("the object model reaches the old kinematics ") + moment);
 	}
@@ -88,7 +105,7 @@ Kinematics *Kinematics::Create(const char *, int) noexcept
 void RepRap::MoveUpdated() noexcept
 {
 	// DSF queries move again when its sequence number changes, and then it must get the new kinematics
-	if (move.kinematics != created)
+	if (move.kinematics.Get() != created)
 	{
 		failures.push_back("MoveUpdated runs before move.kinematics names the new kinematics");
 	}
@@ -121,20 +138,20 @@ int main()
 	failures.clear();
 	deletions = 0;
 	createFails = false;
-	move.kinematics = new TestKinematics;
+	move.kinematics.Publish(new TestKinematics);
 	bool ok = move.SetKinematics("coreXYU", 5);
 	Report("type change: the object model never reaches the old kinematics once its deletion has started",
-			ok && move.kinematics == created && deletions == 1);
+			ok && move.kinematics.Get() == created && deletions == 1);
 
 	// An unknown type leaves the kinematics alone
 	failures.clear();
 	deletions = 0;
 	createFails = true;
-	Kinematics *_ecv_from const before = move.kinematics;
+	Kinematics *_ecv_from const before = move.kinematics.Get();
 	ok = move.SetKinematics("unknown", 99);
-	Report("unknown type: the kinematics stays and nothing is deleted", !ok && move.kinematics == before && deletions == 0);
+	Report("unknown type: the kinematics stays and nothing is deleted", !ok && move.kinematics.Get() == before && deletions == 0);
 
-	delete move.kinematics;
+	move.kinematics.Delete();
 	std::printf("%u of 2 failed\n", failed);
 	return (failed == 0) ? 0 : 1;
 }

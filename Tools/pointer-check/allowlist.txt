@@ -81,7 +81,6 @@ FtpResponder::dataBuf                                                 # OutputBu
 FtpResponder::dataSocket                                              # Socket *
 GCodeBuffer::buffer                                                   # char *
 GCodeBuffer::fileInput                                                # FileGCodeInput *
-GCodeBuffer::machineState                                             # GCodeMachineState *
 GCodeBuffer::normalInput                                              # GCodeInput *
 GCodeException::message                                               # char const *
 GCodeMachineState::BlockState::prev                                   # BlockState *
@@ -150,7 +149,6 @@ MonoLcd::image                                                        # uint8_t 
 Move::DriverEnablePins                                                # Pin const *
 Move::activeDMs                                                       # DriveMovement *
 Move::heightController                                                # HeightController *
-Move::kinematics                                                      # Kinematics *
 Move::laserTask                                                       # Task *
 Move::phaseStepDMs                                                    # DriveMovement *
 MoveSegment::freeList                                                 # MoveSegment *
@@ -221,6 +219,7 @@ Platform::logger                                                      # Logger *
 Platform::mainSharedSpiDevice                                         # SharedSpiDevice *
 Platform::moveWarningBuffer                                           # String *
 Platform::panelDueUpdater                                             # PanelDueUpdater *
+PublishedPtr::object                                                  # T * volatile, of Move::kinematics and GCodeBuffer::machineState: only the writer task reseats it, under the write lock, and Get checks the readers (Platform/PublishedPtr.h)
 QueuedCode::next                                                      # QueuedCode *
 RawMove::movementTool                                                 # Tool const *
 RepRap::DebugLogRecord::msg                                           # c_string
