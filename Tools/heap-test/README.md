@@ -7,8 +7,10 @@ one. The test checks what happens when another task copies a string or array han
 That happens with the file name of a machine state:
 - The main task deletes the name when a file ends (`GCodeMachineState::CloseFile` runs `fname.Assign(nullptr)`) and when a new
   file starts (`GCodeBuffer::StartNewFile`).
-- The SBC task, or a network task without an SBC, serialises the same handle as `inputs[].currentFile`
-  (`OBJECT_MODEL_FUNC(self->machineState->fname)` in `GCodeBuffer.cpp`) in every live object model response.
+- The SBC task serialises the same handle as `inputs[].currentFile` (`OBJECT_MODEL_FUNC(self->machineState->fname)` in
+  `GCodeBuffer.cpp`) in every live object model response. It has a higher priority than the main task.
+- Without an SBC the network task makes the same copy, but at the main task's priority with time slicing. The order that this
+  test checks does not protect that reader, see `Tools/pointer-check/census.md`.
 - `ExpressionValue(AutoStringHandle)` copies the handle without a lock.
 
 The test plays that other task at two moments: when the main task calls `Heap::DeleteSlot` for the handle, and when the call

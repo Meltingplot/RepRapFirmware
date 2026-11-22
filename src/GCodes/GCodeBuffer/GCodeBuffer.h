@@ -345,9 +345,9 @@ public:
 	void AddParameters(VariableSet& vars, int codeRunning) THROWS(GCodeException);
 	VariableSet& GetVariables() const noexcept;
 
-	[[noreturn]] void ThrowGCodeException(const char *_ecv_array msg) const THROWS(GCodeException);
-	[[noreturn]] void ThrowGCodeException(const char *_ecv_array msg, uint32_t param) const THROWS(GCodeException);
-	[[noreturn]] void ThrowGCodeException(const char *_ecv_array msg, const char *_ecv_array param) const THROWS(GCodeException);
+	[[noreturn]] void ThrowGCodeException(GCodeExceptionMessage msg) const THROWS(GCodeException);
+	[[noreturn]] void ThrowGCodeException(GCodeExceptionMessage msg, uint32_t param) const THROWS(GCodeException);
+	[[noreturn]] void ThrowGCodeException(GCodeExceptionMessage msg, const char *_ecv_array param) const THROWS(GCodeException);
 
 #if SUPPORT_COORDINATE_ROTATION
 	bool DoingCoordinateRotation() const noexcept;

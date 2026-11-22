@@ -12,7 +12,7 @@
 #include <Platform/RepRap.h>
 #include <Platform/Tasks.h>
 
-GCodeException::GCodeException(const GCodeBuffer *_ecv_null gb, int col, const char *_ecv_array msg) noexcept : line(-1), column(col), message(msg)
+GCodeException::GCodeException(const GCodeBuffer *_ecv_null gb, int col, GCodeExceptionMessage msg) noexcept : line(-1), column(col), message(msg.GetText())
 {
 	if (   gb != nullptr
 		&& (gb->IsDoingFileMacro() || gb->IsDoingFile())
@@ -26,12 +26,12 @@ GCodeException::GCodeException(const GCodeBuffer *_ecv_null gb, int col, const c
 	}
 }
 
-GCodeException::GCodeException(const GCodeBuffer *_ecv_null gb, int col, const char *_ecv_array msg, uint32_t uparam) noexcept : GCodeException(gb, col, msg)
+GCodeException::GCodeException(const GCodeBuffer *_ecv_null gb, int col, GCodeExceptionMessage msg, uint32_t uparam) noexcept : GCodeException(gb, col, msg)
 {
 	param.u = uparam;
 }
 
-GCodeException::GCodeException(const GCodeBuffer *_ecv_null gb, int col, const char *_ecv_array msg, const char *_ecv_array sparam) noexcept : GCodeException(gb, col, msg)
+GCodeException::GCodeException(const GCodeBuffer *_ecv_null gb, int col, GCodeExceptionMessage msg, const char *_ecv_array sparam) noexcept : GCodeException(gb, col, msg)
 {
 	stringParam.copy(sparam);
 }
@@ -136,12 +136,12 @@ void GCodeException::DebugPrint() const noexcept
 	debugPrintf("\n");
 }
 
-[[noreturn]] void ThrowGCodeException(const char *_ecv_array errMsg) THROWS(GCodeException)
+[[noreturn]] void ThrowGCodeException(GCodeExceptionMessage errMsg) THROWS(GCodeException)
 {
 	throw GCodeException(-1, -1, errMsg);
 }
 
-[[noreturn]] void ThrowGCodeException(const char *_ecv_array errMsg, uint32_t param) THROWS(GCodeException)
+[[noreturn]] void ThrowGCodeException(GCodeExceptionMessage errMsg, uint32_t param) THROWS(GCodeException)
 {
 	throw GCodeException(-1, -1, errMsg, param);
 }

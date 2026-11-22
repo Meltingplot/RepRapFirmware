@@ -580,7 +580,7 @@ public:
 	void SetStallDetectThreshold(int sgThreshold) noexcept;
 	void SetStallMinimumStepsPerSecond(unsigned int stepsPerSecond) noexcept;
 	void AppendStallConfig(const StringRef& reply) const noexcept;
-	const char *_ecv_array _ecv_null CheckStallDetectionEnabled(float speed) noexcept;
+	GCodeExceptionMessage CheckStallDetectionEnabled(float speed) noexcept;
 #endif
 	void AppendDriverStatus(const StringRef& reply) noexcept;
 	StandardDriverStatus GetStatus(bool accumulated, bool clearAccumulated) noexcept;
@@ -1263,7 +1263,7 @@ void TmcDriverState::AppendStallConfig(const StringRef& reply) const noexcept
 }
 
 // Check that stall detection can occur at the specified speed
-const char *_ecv_array _ecv_null TmcDriverState::CheckStallDetectionEnabled(float speed) noexcept
+GCodeExceptionMessage TmcDriverState::CheckStallDetectionEnabled(float speed) noexcept
 {
 	if (!IsStealthChop())
 	{
@@ -2753,8 +2753,8 @@ extern "C" void EVSYS_3_Handler() noexcept __attribute__ ((alias("StallEventInte
 
 # endif		//Duet 3 Mini
 
-// Check whether stall detection is viable. If yes, return nullptr. If no, return a message string in flash memory containing a single %u placeholder for the driver number.
-const char *_ecv_array _ecv_null SmartDrivers::CheckStallDetectionEnabled(size_t driver, float speed) noexcept
+// Check whether stall detection is viable. If yes, return a message whose text is null. If no, return a message containing a single %u placeholder for the driver number.
+GCodeExceptionMessage SmartDrivers::CheckStallDetectionEnabled(size_t driver, float speed) noexcept
 {
 	return (driver < GetNumTmcDrivers() && driverStates[driver].DriverAssumedPresent())
 			? driverStates[driver].CheckStallDetectionEnabled(speed)
@@ -2769,14 +2769,14 @@ GCodeResult SmartDrivers::SetStallEndstopReporting(uint16_t driverNumber, float 
 {
 	if (driverNumber < GetNumTmcDrivers() && driverStates[driverNumber].DriverAssumedPresent())
 	{
-		const char *_ecv_array _ecv_null const msg = driverStates[driverNumber].CheckStallDetectionEnabled(speed);
-		if (msg == nullptr)
+		const GCodeExceptionMessage msg = driverStates[driverNumber].CheckStallDetectionEnabled(speed);
+		if (msg.IsNull())
 		{
 			stallEndstopsEnabled.SetBit(driverNumber);
 			EnableOneStallInterrupt(driverNumber);
 			return GCodeResult::ok;
 		}
-		reply.printf(msg, driverNumber);
+		reply.printf(msg.GetText(), driverNumber);
 		return GCodeResult::error;
 	}
 	else

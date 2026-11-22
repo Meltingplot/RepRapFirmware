@@ -1645,7 +1645,14 @@ void GCodes::RunStateMachine(GCodeBuffer& gb, const StringRef& reply) noexcept
 					reprap.GetHeat().SuspendHeaters(false);
 					if (straightProbeSettings.SignalError())
 					{
-						gb.LatestMachineState().SetError((probingAway) ? "probe not triggered at start of probing move" : "probe already triggered before probing move started");
+						if (probingAway)
+						{
+							gb.LatestMachineState().SetError("probe not triggered at start of probing move");
+						}
+						else
+						{
+							gb.LatestMachineState().SetError("probe already triggered before probing move started");
+						}
 					}
 					gb.SetState(GCodeState::checkError);								// no point in doing anything else
 					RetractZProbe(gb);
@@ -1688,7 +1695,14 @@ void GCodes::RunStateMachine(GCodeBuffer& gb, const StringRef& reply) noexcept
 				zp->SetProbing(false);
 				if (!zProbeTriggered && straightProbeSettings.SignalError())
 				{
-					gb.LatestMachineState().SetError((probingAway) ? "Probe did not lose contact during probing move" : "Probe was not triggered during probing move");
+					if (probingAway)
+					{
+						gb.LatestMachineState().SetError("Probe did not lose contact during probing move");
+					}
+					else
+					{
+						gb.LatestMachineState().SetError("Probe was not triggered during probing move");
+					}
 				}
 			}
 

@@ -9,6 +9,7 @@
 #define SRC_MOVEMENT_STEPPERDRIVERS_TMC51XX_H_
 
 #include <RepRapFirmware.h>
+#include <GCodes/GCodeException.h>
 
 #if SUPPORT_TMC51xx || SUPPORT_TMC2240_SPI
 
@@ -68,7 +69,7 @@ namespace SmartDrivers
 	uint32_t GetDriverNominalClockFrequency() noexcept;
 	uint32_t GetDriverMaxClockFrequency() noexcept;
 
-	const char *_ecv_array _ecv_null CheckStallDetectionEnabled(size_t driver, float speed) noexcept;
+	GCodeExceptionMessage CheckStallDetectionEnabled(size_t driver, float speed) noexcept;
 
 #if SUPPORT_TMC2240_SPI
 	float GetDriverTemperature(size_t driver) noexcept;

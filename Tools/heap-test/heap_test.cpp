@@ -2,12 +2,14 @@
 // unchanged (ExpressionValue is the stand-in in shim/ObjectModel/ObjectModel.h).
 //
 // The main task deletes the string handles of the machine states, e.g. GCodeMachineState::CloseFile runs
-// fname.Assign(nullptr) when a macro file ends. Another task can copy such a handle at the same time: the SBC task (and the
-// network tasks without an SBC) serialises inputs[].currentFile, OBJECT_MODEL_FUNC(self->machineState->fname) in
-// GCodeBuffer.cpp, into every live object model response, and ExpressionValue(AutoStringHandle) copies the handle with
-// neither a lock nor a wait between reading the handle and increasing the reference count of its slot. All those tasks have a
-// higher priority than the main task, so the main task never runs inside that copy, but the copy can run at any instruction
-// of the main task. Array handles are copied the same way, by ExpressionValue(const ExpressionValue&).
+// fname.Assign(nullptr) when a macro file ends. Another task can copy such a handle at the same time: the SBC task serialises
+// inputs[].currentFile, OBJECT_MODEL_FUNC(self->machineState->fname) in GCodeBuffer.cpp, into every live object model response,
+// and ExpressionValue(AutoStringHandle) copies the handle with neither a lock nor a wait between reading the handle and
+// increasing the reference count of its slot. The SBC task has a higher priority than the main task, so the main task never
+// runs inside that copy, but the copy can run at any instruction of the main task. Without an SBC the network task makes the
+// same copy at the main task's priority with time slicing, so the main task can run inside it; the order checked here does not
+// protect that reader (Tools/pointer-check/census.md). Array handles are copied the same way, by
+// ExpressionValue(const ExpressionValue&).
 //
 // The test plays the other task at the moment the main task calls Heap::DeleteSlot and at the moment it returns from it (the
 // link wraps Heap::DeleteSlot). If the handle still names its slot once the release has started, the copy takes a reference to
