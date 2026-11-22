@@ -661,11 +661,11 @@ GCodeResult GCodes::DoDriveMapping(GCodeBuffer& gb, const StringRef& reply) THRO
 #if SUPPORT_REMOTE_COMMANDS
 
 // Switch the board into expansion mode. We map all drivers to individual axes.
+// Called by CanInterface::SwitchToExpansionMode with the scheduler suspended, after it has deleted the filament monitors.
 void GCodes::SwitchToExpansionMode() noexcept
 {
 	numExtruders = 0;
 	numVisibleAxes = numTotalAxes = NumDirectDrivers;
-	FilamentMonitor::DeleteAll();
 	memcpy(axisLetters, AllowedAxisLetters, sizeof(axisLetters));
 	for (size_t axis = 0; axis < NumDirectDrivers; ++axis)
 	{

@@ -26,6 +26,7 @@
 #include <GCodes/GCodes.h>
 #include <GCodes/GCodeException.h>
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
+#include <FilamentMonitors/FilamentMonitor.h>
 #include <ClosedLoop/ClosedLoop.h>
 #include <AppNotifyIndices.h>
 
@@ -417,6 +418,8 @@ static void ReInit() noexcept
 
 void CanInterface::SwitchToExpansionMode(CanAddress addr, bool useTestMode) noexcept
 {
+	FilamentMonitor::DeleteAll();					// do this before we suspend the scheduler, because it takes a write lock and frees memory
+
 	TaskCriticalSectionLocker lock;
 
 	myAddress = addr;
