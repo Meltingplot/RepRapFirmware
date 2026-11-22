@@ -905,6 +905,7 @@ void FileInfoParser::ProcessCustomInfo(const char *_ecv_array k, const char *_ec
 		if (*p == '=')
 		{
 			++p;
+			ReadLocker lifetimeLocker(ObjectModel::lifetimeLock);			// the value may point into an object model object, so Main must not delete one until we have stored it
 			ExpressionParser parser(nullptr, p, lineEnd);
 			try
 			{

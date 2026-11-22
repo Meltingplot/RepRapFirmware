@@ -288,6 +288,7 @@ uint16_t Tool::numToolsToReport = 0;
 // Delete a tool. Before calling this, ensure that the tool is not the current tool in any MovementState.
 /*static*/ void Tool::DeleteTool(int toolNumber) noexcept
 {
+	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);				// we are about to delete an object model object
 	WriteLocker lock(toolListLock);
 
 	// Purge any references to this tool

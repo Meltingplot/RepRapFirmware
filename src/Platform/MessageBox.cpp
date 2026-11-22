@@ -44,7 +44,7 @@ uint32_t MessageBox::startTime;
 unsigned int MessageBox::numMessages = 0;
 unsigned int MessageBox::numAutoCancelledMessages = 0;
 
-// Create a message box. Caller must have a write lock on the message box lock first.
+// Create a message box. Caller must have a write lock on ObjectModel::lifetimeLock and then on the message box lock first.
 /*static*/ uint32_t MessageBox::Create(const char *_ecv_array msg, const char *_ecv_array p_title, int p_mode, float p_timeout, AxesBitmap p_controls, MessageBoxLimits *_ecv_null p_limits) noexcept
 {
 	// Find the end of the message box list. On the way, if we already have the maximum allowed number of messages in the list, time out the oldest non-blocking one.
@@ -129,6 +129,7 @@ float MessageBox::GetTimeLeft() const noexcept
 {
 	if (mboxList != nullptr)
 	{
+		WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);			// we may be about to delete an object model object
 		WriteLocker lock(mboxLock);
 
 		MessageBox **mbp = &mboxList;
@@ -161,6 +162,7 @@ float MessageBox::GetTimeLeft() const noexcept
 {
 	if (mboxList != nullptr)
 	{
+		WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);			// we may be about to delete an object model object
 		WriteLocker locker(mboxLock);
 
 		MessageBox *mb = mboxList;
