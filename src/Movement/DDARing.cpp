@@ -129,8 +129,9 @@ GCodeResult DDARing::ConfigureMovementQueue(GCodeBuffer& gb, const StringRef& re
 			//TODO can we combine this with the code in Init1?
 			while (numDdasWanted > numDdasInRing)
 			{
+				DDA * const newDda = new DDA(nullptr);			// allocate it before we suspend the scheduler, because AllocPermanent doesn't take the malloc mutex while the scheduler is suspended
 				TaskCriticalSectionLocker lock;
-				DDA * const newDda = new DDA(addPointer->GetNext());
+				newDda->SetNext(addPointer->GetNext());
 				addPointer->GetNext()->SetPrevious(newDda);
 				addPointer->SetNext(newDda);
 				newDda->SetPrevious(addPointer);
