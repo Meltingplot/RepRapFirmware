@@ -5,11 +5,12 @@
 #                                       "indirect call"
 #   path/below/src.cpp: Function [...]  static functions and functions in anonymous namespaces
 #
-# The list is the state of 3.7-dev at de1bfe598 (RRFLibraries 3.7-dev 696a015) in Duet3_MB6HC, Duet3_MB6XD and
-# Duet3Mini5plus. Each comment gives the verdict of the census in census.md and the reason:
+# The list is the state of 3.7-dev at 75d4b34ad (RRFLibraries 3.7-dev 888b479) in Duet3_MB6HC, Duet3_MB6XD and
+# Duet3Mini5plus; the census in census.md was made at de1bfe598. Each comment gives the verdict of the census and the reason:
 #   SUSPECT          the heap is reached with the scheduler suspended or interrupts masked; the fix branch is in brackets. An
 #                    entry stays SUSPECT until its fix is merged, then the key goes away (or, where the check cannot see the
-#                    guard of the fix, the verdict becomes FIXED with the commit)
+#                    guard of the fix, the verdict becomes FIXED)
+#   FIXED            the fix is merged, but the check cannot see its guard; the fix PR is in brackets
 #   SAFE-PRIMED      the allocation inside the region is always served by a free list that is filled before the region
 #   SAFE-NO-HEAP     a call through a register: every target the firmware sets was read and none reaches the heap
 #   SAFE-NO-TARGET   a call through a register whose pointer the firmware never sets, so it never runs
@@ -21,10 +22,8 @@ AFEC1_Handler [isr] -> indirect call                                     # SAFE-
 CAN0_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: CanDevice::Interrupt: rxCallback is StepTimer::CanTimingMessageReceived (SAME5x only), txCallback is null and its interrupt off
 CAN1_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: CanDevice::Interrupt: rxCallback is StepTimer::CanTimingMessageReceived (SAME5x only), txCallback is null and its interrupt off
 CanDevice::Interrupt [primask] -> indirect call                          # SAFE-NO-HEAP: rxCallback is StepTimer::CanTimingMessageReceived on SAME5x (3 stores), nullptr and compiled out on SAME70
-CanInterface::SwitchToExpansionMode [suspended] -> operator new          # SUSPECT [fix/expansion-mode-alloc]: M954/CAN test mode: FilamentMonitor::DeleteAll takes a write lock (lock record) and frees monitors with the scheduler suspended
 DDA::Prepare [basepri] -> indirect call                                  # SAFE-NO-HEAP: Move::CheckEndstops: endstop/Z probe CheckTriggered/Acknowledge/Stopped read pins, ADC or cached states
 DDARing::AddHoldJog [suspended] -> indirect call                         # SAFE-NO-HEAP: Kinematics CartesianToMotorSteps/GetTiltCorrection/LimitSpeedAndAcceleration are math only; debugPrintf with PrintTransforms (census B1)
-DDARing::ConfigureMovementQueue [suspended] -> Tasks::AllocPermanent     # SUSPECT [fix/movement-queue-alloc]: M595 P allocates each new DDA with the scheduler suspended (main task)
 DDARing::Hold [suspended] -> indirect call                               # SAFE-NO-HEAP: debugPrintf in DDA::PlanMoves (Lookahead debug); BASEPRI is raised there, so ring buffer or dropped
 DDARing::LowPowerOrStallPause [suspended] -> indirect call               # SAFE-NO-HEAP: Kinematics::MotorStepsToCartesian overrides are stack math only (emergency pause path)
 DDARing::PauseMoves [suspended] -> indirect call                         # SAFE-NO-HEAP: debugPrintf in DDA::PlanMoves (Lookahead debug); BASEPRI is raised there, so ring buffer or dropped
@@ -52,17 +51,13 @@ EIC_7_Handler [isr] -> indirect call                                     # SAFE-
 EIC_8_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
 EIC_9_Handler [isr] -> indirect call                                     # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
 EndstopsManager::HandleRemoteEndstopChange [suspended] -> indirect call  # SAFE-NO-HEAP: Endstop::HandleRemoteInputChange is the base no-op or SwitchEndstop field stores (CAN receiver task)
-Event::AddEventV [suspended] -> indirect call                            # SAFE-NO-HEAP: the Event constructor formats the text with StringRef::vprintf into the event (SafeVsnprintf); goes away with [fix/event-alloc]
-Event::AddEventV [suspended] -> operator new                             # SUSPECT [fix/event-alloc]: the new Event comes from the heap when its freelist is empty (heat, main, CAN receiver task)
 GCodes::DiscardQueuedMotion [suspended] -> indirect call                 # SAFE-NO-HEAP: Kinematics::MotorStepsToCartesian overrides are stack math only
 GCodes::DoAsynchronousPause [suspended] -> indirect call                 # SAFE-NO-HEAP: Kinematics::MotorStepsToCartesian overrides are stack math only
 GCodes::DoEmergencyPause [suspended] -> indirect call                    # SAFE-NO-HEAP: IterateDrivers lambdas set flags or call CanMotion::StopDriverWhen* (list walks, field writes)
-HeightController::Configure [suspended] -> operator new                  # SUSPECT [fix/height-controller-alloc]: M951 allocates the height controller task with the scheduler suspended (main task)
 MCAN0_INT0_Handler [isr] -> indirect call                                # SAFE-NO-HEAP: CanDevice::Interrupt: rxCallback is StepTimer::CanTimingMessageReceived (SAME5x only), txCallback is null and its interrupt off
 MCAN1_INT0_Handler [isr] -> indirect call                                # SAFE-NO-HEAP: CanDevice::Interrupt: rxCallback is StepTimer::CanTimingMessageReceived (SAME5x only), txCallback is null and its interrupt off
 Move::AddLinearSegments [basepri] -> Tasks::AllocPermanent               # SAFE-PRIMED: one Split per region, MoveSegment::PrimeFreeList just before the booster (upstream cdcd49333); only the Move task (or CAN receiver in expansion mode) allocates segments
 Move::AddLinearSegments [basepri] -> indirect call                       # SAFE-NO-HEAP: debugPrintf in NewSegment (PrintBadMoves, MB6HC); with BASEPRI raised it writes to the debug ring buffer or drops
-Move::CreateLaserTask [suspended] -> operator new                        # SUSPECT [fix/laser-task-alloc]: M452/M670/M571/scanning probe/feedforward allocate the laser task with the scheduler suspended (main task)
 Move::OnEndstopOrZProbeStatesChanged [basepri] -> indirect call          # SAFE-NO-HEAP: Move::CheckEndstops: endstop/Z probe CheckTriggered/Acknowledge/Stopped read pins, ADC or cached states
 Move::PhaseStepControlLoop [basepri] -> indirect call                    # SAFE-NO-HEAP: debugPrintf in NewSegment (PrintBadMoves, MB6HC); with BASEPRI raised it writes to the debug ring buffer or drops
 Move::PushBabyStepping [suspended] -> indirect call                      # SAFE-NO-HEAP: debugPrintf in DDA::RecalculateMove (Lookahead debug); no heap, but DebugMessage takes a mutex with the scheduler suspended (census B1)
@@ -74,8 +69,6 @@ PIOB_Handler [isr] -> indirect call                                      # SAFE-
 PIOC_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
 PIOD_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
 PIOE_Handler [isr] -> indirect call                                      # SAFE-NO-HEAP: pin IRQ callbacks (WiFi, input monitor, fan tacho, filament monitors, LIS INT1, DHT): flags, counters, timer reads, GiveFromISR
-ReadWriteLock::LockForReading [suspended] -> operator new                # SUSPECT [RRFLibraries fix/alloc-outside-critical-section, test fix/lock-record-alloc]: K23, lock record from the heap with the scheduler suspended
-ReadWriteLock::LockForWriting [suspended] -> operator new                # SUSPECT [RRFLibraries fix/alloc-outside-critical-section, test fix/lock-record-alloc]: K23, lock record from the heap with the scheduler suspended
 RepRap::StartIap [primask] -> indirect call                              # SAFE-NO-HEAP: CombineName calls MessageF only on overflow, which the OpenFile check with the same CombineName excludes (RepRap.cpp:2059); firmware update path
 SERCOM0_0_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
 SERCOM0_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
@@ -109,7 +102,7 @@ SERCOM7_0_Handler [isr] -> indirect call                                 # SAFE-
 SERCOM7_1_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
 SERCOM7_2_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
 SERCOM7_3_Handler [isr] -> indirect call                                 # SAFE-NO-HEAP: serial IRQ table: AsyncSerial, SBC SPI, WiFi SPI, I2C ISRs and the E-stop/Modbus callbacks; ring buffers, GiveFromISR, registers
-SbcInterface::FillBuffer [suspended] -> Tasks::AllocPermanent            # SUSPECT [fix/sbc-code-buffer-alloc]: the first code of a GB allocates its buffer in BinaryParser::Put inside the locker; the key stays after the fix (guard not visible)
+SbcInterface::FillBuffer [suspended] -> Tasks::AllocPermanent            # FIXED [#77]: FillBuffer leaves the first code of a GB without a buffer in the ring and primes the buffer after the locker; the check cannot see the HasBuffer guard before PutBinary
 SoftwareReset [primask] -> indirect call                                 # SAFE-NO-HEAP: AsyncSerial::canWrite is ring buffer SpaceLeft; reset path
 SysTick_Handler [isr] -> indirect call                                   # SAFE-NO-HEAP: stuck-task path of RepRap::Tick: IsLocal() filters RemoteHeater, LocalHeater::SwitchOff sets PWM 0; M111 Heat MessageF would block (census B3)
 TC0_Handler [isr] -> indirect call                                       # SAFE-NO-HEAP: StepTimer callbacks (Move step ISR, Z probe modulation, scanning probe, TMC timer); segments go to the freelist, Allocate is task-only

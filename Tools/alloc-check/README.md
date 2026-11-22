@@ -42,8 +42,8 @@ In an exception handler the heap is never safe: the interrupted task may be insi
 - RRF cdcd49333 and D3E e847c690 (C. Hammacher, 2026-08-14, "Fixed step interrupt guard being lifted by memory allocation"):
   `Move::AddLinearSegments` could split a segment inside its `BasePriorityBooster`, and the split allocated. The fix calls
   `MoveSegment::PrimeFreeList` before the booster and adds the assertion to `GetMallocMutex`.
-- This fork (2026-11-22): K23, `ReadWriteLock` allocating its lock records with the scheduler suspended (RRFLibraries branch
-  `fix/alloc-outside-critical-section`), and the sites that `census.md` lists.
+- This fork (2026-11-22): K23, `ReadWriteLock` allocating its lock records with the scheduler suspended (RRFLibraries #2), and
+  the sites that `census.md` lists (RRF #72-#77).
 
 The search covered the commit messages of RRF, RRFLibraries, CoreN2G, CANlib, the FreeRTOS fork and Duet3Expansion for
 allocation with critical sections, suspension and interrupts. CoreN2G, CANlib and FreeRTOS have no fix of this class.
