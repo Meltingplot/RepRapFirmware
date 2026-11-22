@@ -72,7 +72,7 @@ inline void StringParser::AddToChecksum(char c) noexcept
 inline void StringParser::StoreAndAddToChecksum(char c) noexcept
 {
 	AddToChecksum(c);
-	if (gcodeLineEnd + 1 < gb.bufferLength)							// if there is space for this character and a trailing null
+	if (gcodeLineEnd + 1 < MaxGCodeStringLength)					// if there is space for this character and a trailing null
 	{
 		gb.buffer[gcodeLineEnd++] = c;
 	}
@@ -91,11 +91,11 @@ bool StringParser::Put(char c) noexcept
 		// Allocate more memory if we're in SBC mode, because binary codes have slightly more overhead.
 		// If USB/AUX channels request very long codes via macros, this will avoid bottlenecks from macros
 #if HAS_SBC_INTERFACE
-		gb.buffer = static_cast<char *>(Tasks::AllocPermanent(reprap.UsingSbcInterface() ? MaxGCodeBinaryLength : MaxGCodeStringLength, std::align_val_t(4)));
+		gb.bufferLength = reprap.UsingSbcInterface() ? MaxGCodeBinaryLength : MaxGCodeStringLength;
 #else
-		gb.buffer = static_cast<char *>(Tasks::AllocPermanent(MaxGCodeStringLength, std::align_val_t(4)));
-#endif
 		gb.bufferLength = MaxGCodeStringLength;
+#endif
+		gb.buffer = static_cast<char *>(Tasks::AllocPermanent(gb.bufferLength, std::align_val_t(4)));
 	}
 
 	if (c != 0)
@@ -388,7 +388,7 @@ bool StringParser::CheckMetaCommand(const StringRef& reply) THROWS(GCodeExceptio
 
 	if (gb.overflowed)
 	{
-		throw GCodeException(&gb, gb.bufferLength + commandIndent - 1, "GCode command too long");
+		throw GCodeException(&gb, MaxGCodeStringLength + commandIndent - 1, "GCode command too long");
 	}
 
 	if (commandIndent == MaxIndent)
