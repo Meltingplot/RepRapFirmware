@@ -43,7 +43,9 @@ update:
 	$(CHECK) --allowlist $(ALLOWLIST) --update $(ELFS)
 	$(CHECK) --unmask --allowlist $(UNMASK_ALLOWLIST) --update $(ELFS)
 
-SELFTEST_FLAGS := -std=gnu++20 -mcpu=cortex-m7 -mthumb -O2 -g -fno-exceptions -fno-rtti -nostdlib -nostartfiles -Wl,-e,Reset_Handler
+# .far at 0x20000000 is out of the range of bl, so that the linker calls the functions there through veneers
+SELFTEST_FLAGS := -std=gnu++20 -mcpu=cortex-m7 -mthumb -O2 -g -fno-exceptions -fno-rtti -nostdlib -nostartfiles -Wl,-e,Reset_Handler \
+	-Wl,--section-start=.far=0x20000000
 
 build/selftest/%.elf: selftest/src/%.cpp selftest/src/runtime.cpp selftest/src/runtime.h Makefile
 	@mkdir -p build/selftest

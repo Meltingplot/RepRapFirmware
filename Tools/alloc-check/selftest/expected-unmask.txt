@@ -4,4 +4,5 @@ BoostedLocker [basepri] -> vPortExitCritical
 BoostedNotify [basepri] -> vPortExitCritical
 MaskedGiveFromIsr [primask] -> vTaskGenericNotifyGiveFromISR
 MaskedNotify [primask] -> vPortEnterCritical
+MaskedVeneer [primask] -> FarEnable
 NestedEnable [primask] -> NestedEnable
