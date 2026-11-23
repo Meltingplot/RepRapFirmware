@@ -33,3 +33,5 @@ folder: make and CMake only read `src/`, and a resource filter in `.project` hid
     make check        # build/heap-test and build/asan-heap-test (AddressSanitizer + UBSan), then run both
 
 Each case prints `PASS` or `FAIL` with the reason. The exit code is 1 if any case fails.
+Built against handles without the orders of both `StringHandle::Delete` and `ArrayHandle::Delete` (e.g. upstream's), an array
+case reads an element string whose slot is already released, and the run ends with SIGSEGV (exit code 139).

@@ -103,8 +103,9 @@ static const char *SchedulerStateText() noexcept
 	}
 }
 
-// libsupc++ new_op.cc: operator new calls malloc, which on the board is RRF's nano-mallocr.c (MB6HC 3.7-dev ELF: _Znwj at 0x4ccdc0 calls
-// malloc at 0x400568). Only the LockRecord free list of FreelistManager.h:47 calls it in this test.
+// libsupc++ new_op.cc: operator new calls malloc, which on the board is RRF's nano-mallocr.c (in one MB6HC 3.7-dev build _Znwj at
+// 0x4ccdc0 calls malloc at 0x400568; the addresses change with every build). Only the LockRecord free list of FreelistManager.h:47
+// calls it in this test.
 void *operator new(std::size_t sz)
 {
 	StaticTask_t *const t = HostRtos::Current();
@@ -177,14 +178,15 @@ static void Preempt(Point here, const char *where) noexcept
 	}
 }
 
+// The target addresses are those of one MB6HC 3.7-dev build and change with every build
 extern "C" void TestPreemptionPointSplit()
 {
-	Preempt(Point::split, "nano-mallocr.c:326 (splitting the first free chunk; target: between ldr free_list at 0x400588 and str free_list at 0x400622)");
+	Preempt(Point::split, "nano-mallocr.c:326 (splitting the first free chunk; target: between ldr free_list and str free_list, 0x400588 and 0x400622 in one MB6HC build)");
 }
 
 extern "C" void TestPreemptionPointSbrk()
 {
-	Preempt(Point::sbrk, "_sbrk (between the load of heapTop and its store; target: 0x48db00 .. 0x48db0a), called from nano-mallocr.c:266 via :361");
+	Preempt(Point::sbrk, "_sbrk (between the load of heapTop and its store; target: 0x48db00 .. 0x48db0a in one MB6HC build), called from nano-mallocr.c:266 via :361");
 }
 
 extern "C" [[noreturn]] void TestOutOfMemory()
@@ -328,7 +330,7 @@ static void HeatTaskCode(void *) noexcept
 		}
 		HostRtos::Log("HEAT: polls a sensor and waits for the shared SPI bus (SpiTemperatureSensor.cpp:51, SharedSpiClient.cpp:29)");
 		TaskBase::TakeIndexed(HeatNotifyIndex);
-		HostRtos::Log("HEAT: releases the read lock (ReleaseReader, RTOSIface.cpp:323-386)");
+		HostRtos::Log("HEAT: releases the read lock (ReleaseReader, RTOSIface.cpp)");
 	}
 	HostRtos::Log("HEAT: released the read lock");
 }

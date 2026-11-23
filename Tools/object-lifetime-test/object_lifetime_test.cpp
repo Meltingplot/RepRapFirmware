@@ -431,7 +431,7 @@ static void Free(void *p, const char *point) noexcept
 }
 
 // RRFLibraries FreelistManager.h. A freelist hands out and takes back items in a task critical section, and calls malloc only when it is
-// empty, which inside the critical section of the lock code does not take the malloc mutex. The lock records never wait here.
+// empty. The stand-in calls malloc directly, without the malloc mutex, so the lock records never wait here (README, "Not covered").
 #define DECLARE_FREELIST_NEW_DELETE(_Type) \
 	void *operator new(size_t sz) noexcept { return std::malloc(sz); } \
 	void operator delete(void *p) noexcept { std::free(p); }

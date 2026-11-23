@@ -41,7 +41,7 @@ From `src/Platform/TaskPriorities.h:12-40`, with preemption and time slicing on 
 | 2 | SBC |
 | 3 | heat, USB |
 | 4 | Move, TMC, analog in, height controller |
-| 5 | laser, CAN sender, Ethernet |
+| 5 | laser, CAN sender, Ethernet, TMC while phase stepping (MB6HC, `TMC51xx.cpp:2257`) |
 | 6 | CAN receiver, accelerometer |
 | 7 | CAN clock |
 
@@ -69,11 +69,12 @@ CHX first: MB6HC in SBC mode, with TOOL1LC, EXP1HCL and SZP expansion boards on 
 | `Move::AddLinearSegments` [basepri] | Move, CAN receiver in expansion mode | SAFE-PRIMED | upstream cdcd49333 |
 
 Notes on the heap findings:
-- **K23, `ReadWriteLock`.** The four lock functions allocate their `LockRecord` after `RTOSIface::EnterTaskCriticalSection()`
-  (RRFLibraries `RTOSIface.cpp:235-470`). The record comes from the freelist, and from `::operator new` when that is empty
-  (`FreelistManager.h:34-48`). `Tools/lock-record-alloc-test` shows the corruption with the real `nano-mallocr.c`, malloc mutex
-  and `vTaskSuspendAll`. The fix gets the record before the scheduler is suspended and gives an unused one back after it is
-  resumed. `ConditionalLockForReading` and `ConditionalLockForWriting` are not linked into these three configurations and so have
+- **K23, `ReadWriteLock`.** K23 is the number of this finding in the K list of the raw pointer census and its follow-up
+  (`Tools/pointer-check/census.md`). The four lock functions allocate their `LockRecord` after
+  `RTOSIface::EnterTaskCriticalSection()` (RRFLibraries `RTOSIface.cpp:235-453`). The record comes from the freelist, and from
+  `::operator new` when that is empty (`FreelistManager.h:34-48`). `Tools/lock-record-alloc-test` shows the corruption with
+  the real `nano-mallocr.c`, malloc mutex and `vTaskSuspendAll`. The fix gets the record before the scheduler is suspended and
+  gives an unused one back after it is resumed. `ConditionalLockForReading` and `ConditionalLockForWriting` are not linked into these three configurations and so have
   no entry; the fix covers them too. After the fix the allocation takes the malloc mutex, which asserts if BASEPRI or PRIMASK is
   set (`Tasks.cpp:117`) and is skipped again if the caller has suspended the scheduler. Built against the fixed RRFLibraries
   (with `LIBRARIES_DIR`), the three configurations have exactly the same entries minus the two `ReadWriteLock` keys, so

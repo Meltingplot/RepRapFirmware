@@ -13,11 +13,11 @@ How that room works:
   evaluation result that does not fit, a channel whose abort is recorded, ...). The loop runs once per received packet, so there
   are at most as many resend requests as received packets, and they always fit into the room.
 - A resend request goes into the room once less than 8 bytes are left before it. That happens when an answer in the same loop,
-  for example an object model or an evaluation result, left 0 or 4 bytes. `FreeTxSpace` then has to report 0. Before the fix it
-  went below 0 and wrapped round to almost the largest `size_t` (2^32 on the board, 2^64 here), so every later write of the
-  transfer passed `CanWritePacket`: the next packets of the loop, the queued code replies (`WriteQueuedCodeReplies`), the code
-  buffer update, file requests and file data, and the channel requests at the end of `ExchangeData`. `WriteCodeReply` then
-  copied the whole reply past the end of the buffer.
+  for example an object model or an evaluation result, or an earlier resend request left 0 or 4 bytes. `FreeTxSpace` then has to
+  report 0. Before the fix it went below 0 and wrapped round to almost the largest `size_t` (2^32 on the board, 2^64 here), so
+  every later write of the transfer passed `CanWritePacket`: the next packets of the loop, the queued code replies
+  (`WriteQueuedCodeReplies`), the code buffer update, file requests and file data, and the channel requests at the end of
+  `ExchangeData`. `WriteCodeReply` then copied the whole reply past the end of the buffer.
 
 Only the SBC task writes into the transmit buffer: `SbcInterface::TaskLoop` calls `ExchangeData` and then `StartNextTransfer`,
 and every `transfer.Write...` and `ResendPacket` call in `SbcInterface.cpp` is made from `ExchangeData` or from

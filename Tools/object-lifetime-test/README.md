@@ -77,7 +77,8 @@ fetched `tools[0]`. The ASan build stops with a heap-use-after-free in the `SetV
 Not covered:
 - time slicing between two tasks that have the same priority because one has inherited it, e.g. the main task and the CAN receiver;
   the test switches between them only when one blocks or gives back an inherited priority;
-- `FreelistManager` allocates new lock records with `malloc` while the scheduler is suspended; the stand-in calls `malloc` directly.
+- the stand-in allocates lock records with `malloc` directly, not through `FreelistManager`; since RRFLibraries 1e34289 the real
+  lock allocates them before it suspends the scheduler, as the copied code does.
 
 The Makefile reads the sources from this repository, `../..` (override with `RRF=`), and RRFLibraries from next to it (`RRFLIBS=`).
 The firmware builds do not use this folder: make and CMake only read `src/`, and a resource filter in `.project` hides it from

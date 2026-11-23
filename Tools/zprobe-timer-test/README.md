@@ -15,9 +15,9 @@ The test checks whether the step ISR can call back a Z probe that the main task 
 - M672 (`ProgramZProbe` -> `SendProgram`) writes the first bit, schedules the probe's `StepTimer` and returns at once. The step
   ISR then calls `LocalZProbe::Interrupt` once per bit at 1000 bits per second (`bitsPerSecond`, `LocalZProbe.h:58`), 14 bit
   times per byte, so up to 112ms for the 8 bytes that M672 accepts. The timer stays in `StepTimer::pendingList` all that time.
-- M558 with `P` or `C` deletes the probe (`HandleM558`, `EndstopsManager.cpp:757`) and M502 deletes all probes
-  (`SetZProbeDefaults`), in the main task. The wait for standstill that M502 does first (`GCodes2.cpp:3490`) does not wait for the
-  program: sending it is not a move.
+- M558 with `P` deletes the probe (`HandleM558`) and M502 deletes all probes (`SetZProbeDefaults`), in the main task. The wait
+  for standstill that both do first (`HandleM558`, and M502 in `GCodes2.cpp`) does not wait for the program: sending it is not a
+  move.
 - `StepTimer` has no destructor. If `~LocalZProbe` leaves the timer in the pending list, the step ISR calls `TimerInterrupt` with
   the deleted probe. If M558 creates a new `LocalZProbe`, the free list hands it the memory of the old one (last in, first out per
   object size), and the `StepTimer` constructor sets `next` and `callback` to null while the timer is still in the pending list:
@@ -29,7 +29,7 @@ pending list. If a timer in it lies in memory on a free list or has no callback,
 the case, so the test never calls a deleted probe or a null callback; the free list keeps the memory of the deleted probes, as the
 firmware's does. Another client of the step timer stands for `Move::stepsTimer` and must be called back once. The cases:
 - M672 returns before the program is sent, and the step ISR sends the documented bit pattern in 14 bit times per byte.
-- M672 while a program is being sent starts the new one (`SendProgram` cancels the timer first, `LocalZProbe.cpp:154`).
+- M672 while a program is being sent starts the new one (`SendProgram` cancels the timer first, `LocalZProbe.cpp:155`).
 - M558 P5 C replaces the probe while M672 is sending (the new probe gets the same memory).
 - M558 P deletes the probe while M672 is sending (its memory stays on the free list).
 - M502 deletes two probes while M672 is sending to both.

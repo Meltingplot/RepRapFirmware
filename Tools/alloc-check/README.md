@@ -25,8 +25,11 @@ This gives two failures:
   the heap. Preemption and time slicing are on (FreeRTOS `FreeRTOSConfig.h:77`, `:84`). `malloc` blocks only at the mutex,
   before it touches the heap, so a region in a task of priority p collides only with a task of priority p or lower that was
   preempted inside `malloc`. `Tools/lock-record-alloc-test` plays this with the real code for `ReadWriteLock` (finding K23).
-- **The guard is lifted.** If the scheduler is running, taking the mutex can switch tasks, and a switch restores the BASEPRI
-  and PRIMASK of the next task. A BASEPRI guard such as `BasePriorityBooster` is then gone while the code still relies on it.
+- **The guard is lifted.** If the scheduler is running, taking the mutex runs a FreeRTOS critical section (FreeRTOS
+  `queue.c:1688`, `:1737`), also when the mutex is free; only a task that holds it already skips that (`queue.c:833-844`). Its
+  end writes BASEPRI 0 when the nesting count drops to 0 (`vPortExitCritical`, `port.c:480-489` on the Cortex-M7 r0p1,
+  `:492-499` on the Cortex-M4F), and on the r0p1 its start also runs `cpsie i` (`portmacro.h:210-224`). A guard such as
+  `BasePriorityBooster` is then gone while the code still relies on it.
   Upstream added `configASSERT(__get_BASEPRI() == 0 && __get_PRIMASK() == 0)` to `GetMallocMutex` for this (`Tasks.cpp:117`,
   cdcd49333). The assertion catches it at run time and resets the board; this check finds the path at build time.
 
@@ -143,8 +146,8 @@ masks in places that are easy to miss:
   them sets BASEPRI to 0.
 - The SAME70 boards build FreeRTOS with the Cortex-M7 r0p1 port (FreeRTOS `Makefiles/SAME70.mk:7`). Its `vPortRaiseBASEPRI`
   and `ulPortRaiseBASEPRI` wrap the write of BASEPRI in `cpsid i` and `cpsie i` (`portmacro.h:210-224`, `:228-247`), so every
-  critical section and every `FromISR` function clears PRIMASK. Inside an `AtomicCriticalSectionLocker` or after `IrqDisable`
-  each of them enables the interrupts.
+  critical section and every `FromISR` function that masks (`portSET_INTERRUPT_MASK_FROM_ISR`, `portmacro.h:117`) clears
+  PRIMASK. Inside an `AtomicCriticalSectionLocker` or after `IrqDisable` each of them enables the interrupts.
 - On the Cortex-M0+ (`Makefiles/SAMC21.mk:7`, Duet3Expansion) a critical section masks with PRIMASK, and its end runs `cpsie i`.
 - `IrqEnable` is an unconditional `cpsie i` (CoreN2G `src/Core.h:378-381`). A function that pairs `IrqDisable` with `IrqEnable`
   enables the interrupts for a caller that had disabled them.
@@ -177,7 +180,8 @@ opener itself for a nested clear, or `indirect call`. A call that reaches both g
   `unmask-census.md` tells them apart (SAFE-LAST), and such an entry has to be read again when its region changes.
 
 Better than an allowlist entry: make the FreeRTOS call after the region. Upstream does this in
-`Move::OnEndstopOrZProbeStatesChanged`, which leaves the wake-up of the CAN sender to its caller (`src/Movement/Move.cpp:4157`).
+`Move::OnEndstopOrZProbeStatesChanged`: `CheckEndstops` returns whether the CAN sender must be woken
+(`src/Movement/Move.cpp:3011`), and the wake-up runs after the booster (`:4157`).
 
 ## Use
 
@@ -194,9 +198,10 @@ The firmware build container of DuetSoftwareFramework has both. The ELF files ar
 
 One run takes a few seconds per ELF file. `selftest/src/sample.cpp` has positive and negative cases: inline and out-of-line
 regions, a callee that allocates, `cpsid i`, `BASEPRI_MAX`, a call through a function pointer, a static function, a jump table,
-an exception handler. `selftest/expected.txt` has their keys. The unmask cases have theirs in `selftest/expected-unmask.txt`:
+an exception handler, a call through a veneer of the linker (section `.far`). `selftest/expected.txt` has their keys. The unmask
+cases have theirs in `selftest/expected-unmask.txt`:
 - with BASEPRI raised, a task notification, a `TaskCriticalSectionLocker`, a critical section and a call through a register;
-- with PRIMASK set, a notification, a `FromISR` function and a nested `cpsie i`;
+- with PRIMASK set, a notification, a `FromISR` function, a nested `cpsie i` and a `cpsie i` behind a veneer;
 - and the patterns that must not be found.
 
 The runtime stand-ins model the Cortex-M7 r0p1 port. `no-alloc.cpp` has none of either: `make selftest` runs `--update` on it

@@ -22,8 +22,9 @@ constexpr const char *_ecv_array ArrayIndexOutOfRangeText = "array index out of 
 
 // The message of a GCodeException. The exception keeps only a pointer to the message and uses the message as a printf format,
 // so the message must be a constant string in flash memory, or null. The constructor is consteval, so a message that is not a
-// compile-time constant does not compile. Text that is built at run time, such as a reply buffer, must be passed as the string
-// parameter of a "%s" message instead, which the exception copies.
+// compile-time constant does not compile. The address of a static char array is also a compile-time constant and is not rejected,
+// so never pass one. Text that is built at run time, such as a reply buffer, must be passed as the string parameter of a "%s"
+// message instead, which the exception copies.
 class GCodeExceptionMessage
 {
 public:

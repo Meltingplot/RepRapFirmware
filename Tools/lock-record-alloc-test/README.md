@@ -17,7 +17,7 @@ mutex only while the scheduler is running (`Tasks.cpp:115`), so a `malloc` with 
 lower priority task was preempted inside `malloc`, both then work on the free list or on the heap top at once.
 
 `ReadWriteLock` keeps a lock record per task that holds or waits for the lock. The records come from a free list
-(`FreelistManager.h`), and when that is empty, from `::operator new`. In RRFLibraries up to 696a015 (3.7-dev),
+(`FreelistManager.h`), and when that is empty, from `::operator new`. In RRFLibraries up to 696a015 (3.7-dev before 888b479),
 `LockForReading`, `ConditionalLockForReading`, `LockForWriting` and `ConditionalLockForWriting` allocate the record after
 `RTOSIface::EnterTaskCriticalSection()`, which suspends the scheduler. The fix allocates it before and returns it to the free list
 after the scheduler is resumed when it is not needed.

@@ -6,7 +6,7 @@
 // It then lets Move::CheckEndstops act on the active endstop list of EndstopsManager. That list keeps the endstops and Z probes of
 // a homing or probing move that ended without a trigger, because only a trigger takes an entry out (EndstopsManager::CheckEndstops).
 // The step ISR checks the endstops only while a DM whose step is due executes a segment with the checkEndstops flag
-// (Move::StepDrivers), the phase stepping control loop only while a phase stepping DM in a motion state does
+// (Move::StepDrivers), the phase stepping control loop only while a phase stepping DM in a state after starting does
 // (Move::PhaseStepControlLoop). This test checks that an input change does not let a stale entry stop a move that does not check
 // endstops, and that it still stops a homing or probing move, including one executed entirely by remote drivers.
 
@@ -38,7 +38,7 @@ public:
 	DriveMovement() noexcept { segmentFlags.Init(); }				// as DriveMovement::Init
 };
 
-constexpr uint32_t NvicPriorityStep = 5;							// value for the SAME5x in src/RepRapFirmware.h; not used by the test
+constexpr uint32_t NvicPriorityStep = 5;							// value for 3 NVIC priority bits (SAME70, SAME5x) in src/RepRapFirmware.h; not used by the test
 
 static unsigned int boostDepth = 0;
 
