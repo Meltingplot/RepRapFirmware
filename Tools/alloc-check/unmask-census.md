@@ -11,7 +11,7 @@ The verdict per entry is its comment in `unmask-allowlist.txt`; this file has th
   they refer to the tree of that branch.
 - **Fixed:** `DDARing::LowPowerOrStallPause [primask] -> vPortEnterCritical` (SUSPECT, MB6HC and MB6XD) went away with
   fix/emergency-pause-interrupts: between `IrqDisable` and `IrqEnable` it calls `GetCurrentDDAAlreadyLocked`, which takes no lock.
-- **Counts:** 2 SUSPECT, 4 SAFE-LAST, 5 SAFE-GUARDED, 3 SAFE-RESTORE, 6 SAFE-NO-UNMASK.
+- **Counts:** 1 SUSPECT, 4 SAFE-LAST, 6 SAFE-GUARDED, 3 SAFE-RESTORE, 6 SAFE-NO-UNMASK.
 - **How:** `alloc-check.py --unmask` lists each site with the shortest chain, and `--unmask --query FUNCTION` lists every
   chain. For each site of an `indirect call` key, a script on the same ELF files listed every function with a call through a
   register that the site reaches, and every function on the way that passes it a target. An agent read those targets, with
@@ -57,7 +57,8 @@ The verdict per entry is its comment in `unmask-allowlist.txt`; this file has th
   - Otherwise it calls `Platform::DebugMessage`, which takes a mutex (`Platform.cpp:3362`), only
     `if (__get_BASEPRI() == 0 && !inInterrupt())` (`RepRapFirmware.cpp:219`).
 
-  So with BASEPRI raised it never takes the mutex. It does not test PRIMASK.
+  So with BASEPRI raised it never takes the mutex. Since fix/debugprintf-primask it also tests PRIMASK
+  (`__get_PRIMASK() == 0`, as `GetMallocMutex` does in `Tasks.cpp:117`), so with PRIMASK set it never takes the mutex either.
 - **`Move::Interrupt`** wakes the Move task with `WakeMoveTask` (`Move.cpp:1655-1671`; `Give` in task context) only right before
   it ends: `break` out of its loop when no DM is active or after a step error (`:2894-2895`), or `return` after the hiccup limit
   (`:2943-2944`). Nothing follows the loop (`:2974-2976`).
@@ -69,7 +70,7 @@ CHX first: MB6HC in SBC mode.
 | Entry | Boards | Verdict | Reason |
 |---|---|---|---|
 | `TmcLoop [primask] -> vPortEnterCritical` | MB6HC | **SUSPECT** [open] | `AtomicCriticalSectionLocker lock2` (`TMC51xx.cpp:1988`); `TaskBase::ClearCurrentTaskNotifyCount` (`:1994`, `RTOSIface.h:236`) enters a critical section, which enables the interrupts (r0p1). `EnableEndOfTransferInterrupt`, `ResetSpi`, `EnableDma` and `EnableSpi` (`:1995-1998`) then run unmasked; the scheduler stays suspended (`:1979`). D. Crocker added lock2 (3fe403dde, 2023); Duet3D 3.7-dev a507cb8f0 `TMC51xx.cpp:1982-1992` is the same. What an interrupt there can break is not shown |
-| `Move::UpdateCurrentMotion [primask] -> vPortEnterCritical` | MB6HC | **SUSPECT** [open] (census.md B2) | `DriveMovement::UpdateCurrentMotion` holds an `AtomicCriticalSectionLocker` (`DriveMovement.h:330`) and calls `NewSegment` (`:374`). `NewSegment` prints with `debugPrintf` under `DEBUG_DISCONTINUITIES` and M111 `PrintBadMoves` for an extruder (`DriveMovement.cpp:179-197`, `:206-222`). `PhaseStepControlLoop` calls it with BASEPRI 0 (`Move.cpp:2775`), so `debugPrintf` takes the mutex: the r0p1 enables the interrupts, and a wait would assert. Debug only |
+| `Move::UpdateCurrentMotion [primask] -> vPortEnterCritical` | MB6HC | SAFE-GUARDED (fixed in fix/debugprintf-primask; census.md B2) | `DriveMovement::UpdateCurrentMotion` holds an `AtomicCriticalSectionLocker` (`DriveMovement.h:330`) and calls `NewSegment` (`:374`). `NewSegment` prints with `debugPrintf` under `DEBUG_DISCONTINUITIES` and M111 `PrintBadMoves` for an extruder (`DriveMovement.cpp:179-197`, `:206-222`). `PhaseStepControlLoop` calls it with BASEPRI 0 (`Move.cpp:2775`). Before the fix `debugPrintf` took the USB mutex there (`Platform.cpp:3362`): the r0p1 enabled the interrupts inside the locker, and if another task held the mutex the TMC task waited there. Now it tests PRIMASK (`RepRapFirmware.cpp:219`): with an M111 F buffer it stores the text, otherwise it drops it. The check does not evaluate that test, so the key stays |
 | `Move::AddLinearSegments [basepri] -> vPortExitCritical` | all | SAFE-LAST | Sites:<br>- `Interrupt()` (`Move.cpp:2448`) is the last call of the second booster (`:2408-2453`);<br>- `MoveSegment::Split` (`:2209`) allocates only with an empty free list, and `MoveSegment::PrimeFreeList` (`:2178`) fills it (census.md, SAFE-PRIMED);<br>- `NewSegment` (`:2433`) prints with BASEPRI raised (guarded). |
 | `Move::PhaseStepControlLoop [basepri] -> vPortExitCritical` | MB6HC | SAFE-LAST | The TMC task calls it (`TMC51xx.cpp:1915`). `Interrupt()` (`Move.cpp:2851`) is the last call of its booster (`:2848-2853`). The `UpdateCurrentMotion` site (`:2797`) prints with BASEPRI raised (guarded) |
 | `Move::OnEndstopOrZProbeStatesChanged [basepri] -> vPortExitCritical` | all | SAFE-LAST | `CheckEndstops(true)` (`Move.cpp:4154`) is the last call of the booster (`:4128-4156`). It wakes the Move task only before it returns:<br>- at once for `stopAll` (`:3041-3049`);<br>- for `stopAxis`, only when no endstop is active any more (`:3060-3063`). The next `emgr.CheckEndstops()` then walks an empty list and returns no hit (`EndstopsManager.cpp:316-318`, `:368`), so `CheckEndstops` returns (`Move.cpp:3098-3103`).<br>The CAN sender is woken after the booster (`:4157`) |
