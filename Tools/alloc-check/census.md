@@ -156,7 +156,7 @@ Each group shares one reason in `allowlist.txt`.
 ## Findings outside this class
 
 The targets above reach no heap. Four of them block where they must not. These are not allocations, so the check does not report
-them, and none is fixed here:
+them. B2 is fixed in fix/debugprintf-primask, the others are not fixed:
 - **B1, `debugPrintf` with the scheduler suspended resets the board.** `debugPrintf` (`RepRapFirmware.cpp:211-223`) goes to
   `Platform::DebugMessage` when there is no M111 F buffer and BASEPRI is 0. It does not check the scheduler.
   `DebugMessage` takes a `MutexLocker` (`Platform.cpp:3362`). If another task holds the mutex, or nobody does,
@@ -167,8 +167,8 @@ them, and none is fixed here:
   - `DDARing.cpp:500-501` says this code "must make no FreeRTOS calls".
 - **B2, the same with PRIMASK set** (MB6HC, PrintBadMoves). `DriveMovement::UpdateCurrentMotion` takes an
   `AtomicCriticalSectionLocker` (`DriveMovement.h:329`), and `NewSegment` (`:374`) can print from inside it. `debugPrintf`'s
-  test does not see PRIMASK. `make scan-unmask` finds this one (`unmask-census.md`), because the mutex enables the interrupts on
-  the Cortex-M7 r0p1.
+  test did not see PRIMASK. `make scan-unmask` finds this one (`unmask-census.md`), because the mutex enables the interrupts on
+  the Cortex-M7 r0p1. Fixed in fix/debugprintf-primask: `debugPrintf` also tests PRIMASK (`RepRapFirmware.cpp:219`).
 - **B3, SysTick stuck-task path with M111 Heat.** `LocalHeater::SwitchOff` calls `MessageF` (`LocalHeater.cpp:258-261`), which
   takes mutexes in an ISR.
 - **B4, `RingBuffer::Init`** (RRFLibraries `RingBuffer.h:69-82`, M111 F) frees and reallocates the debug buffer while an ISR may
