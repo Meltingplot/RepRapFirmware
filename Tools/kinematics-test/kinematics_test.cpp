@@ -64,14 +64,17 @@ static RepRap reprap;
 static std::vector<std::string> failures;
 static const void *beingDeleted = nullptr;							// the old kinematics, from the start of its destructor on
 static unsigned int deletions = 0;
+static bool createFails = false;
+static Kinematics *_ecv_null created = nullptr;						// the new kinematics
 
 // The other task reading move.kinematics, as the object model does. It only compares the pointer, so it never dereferences
-// freed memory itself
+// freed memory itself. It must reach the new kinematics: the old one is going, and a null pointer would be a window too
 static void ObjectModelReads(const char *moment) noexcept
 {
-	if (beingDeleted != nullptr && move.kinematics == beingDeleted)
+	if (beingDeleted != nullptr && move.kinematics != created)
 	{
-		failures.push_back(std::string("the object model reaches the old kinematics ") + moment);
+		failures.push_back(std::string((move.kinematics == beingDeleted) ? "the object model reaches the old kinematics "
+														: "the object model does not reach the new kinematics ") + moment);
 	}
 }
 
@@ -94,8 +97,6 @@ public:
 	}
 };
 
-static bool createFails = false;
-static Kinematics *_ecv_null created = nullptr;
 
 Kinematics *Kinematics::Create(const char *, int) noexcept
 {
@@ -141,7 +142,7 @@ int main()
 	createFails = false;
 	move.kinematics = new TestKinematics;
 	bool ok = move.SetKinematics("coreXYU", 5);
-	Report("type change: the object model never reaches the old kinematics once its deletion has started",
+	Report("type change: the object model reaches the new kinematics once the deletion of the old one has started",
 			ok && move.kinematics == created && deletions == 1);
 
 	// An unknown type leaves the kinematics alone
