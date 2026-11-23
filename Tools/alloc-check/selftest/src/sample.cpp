@@ -1,6 +1,8 @@
 // Functions with a known answer for alloc-check.py, see ../../README.md. "make selftest" compiles and links this file with
 // runtime.cpp, with the firmware's compiler, -O2 and -g, and compares the findings with ../expected.txt (heap) and
-// ../expected-unmask.txt (--unmask). Each function says whether the check must find it.
+// ../expected-unmask.txt (--unmask). It builds them a second time with RESTORING_PORT, whose critical sections restore the mask
+// (runtime.cpp), and compares the findings of that build with the same ../expected.txt and with
+// ../expected-unmask-restoring.txt. Each function says whether the check must find it.
 
 #include "runtime.h"
 
@@ -175,7 +177,7 @@ void CallStatic() noexcept
 // its own name
 
 // Found: a FreeRTOS call with BASEPRI raised, whose critical section ends with BASEPRI 0, as Move::OnEndstopOrZProbeStatesChanged
-// wakes the Move task
+// wakes the Move task. Not found with RESTORING_PORT, whose critical section restores BASEPRI
 __attribute__((noinline)) void BoostedNotify() noexcept
 {
 	const uint32_t old = GetBasepri();
@@ -184,7 +186,7 @@ __attribute__((noinline)) void BoostedNotify() noexcept
 	SetBasepri(old);
 }
 
-// Found: a task critical section with BASEPRI raised; xTaskResumeAll ends with a critical section
+// Found: a task critical section with BASEPRI raised; xTaskResumeAll ends with a critical section. Not found with RESTORING_PORT
 __attribute__((noinline)) void BoostedLocker() noexcept
 {
 	const uint32_t old = GetBasepri();
@@ -196,7 +198,8 @@ __attribute__((noinline)) void BoostedLocker() noexcept
 	SetBasepri(old);
 }
 
-// Found: a critical section of the function itself with BASEPRI raised, whose end writes BASEPRI 0
+// Found: a critical section of the function itself with BASEPRI raised, whose end writes BASEPRI 0. Not found with
+// RESTORING_PORT
 __attribute__((noinline)) void BoostedCritical() noexcept
 {
 	const uint32_t old = GetBasepri();
@@ -216,7 +219,8 @@ __attribute__((noinline)) void BoostedCallback() noexcept
 	SetBasepri(old);
 }
 
-// Found: a task notification with PRIMASK set; vPortEnterCritical ends with cpsie i on the Cortex-M7 r0p1
+// Found: a task notification with PRIMASK set; vPortEnterCritical ends with cpsie i on the Cortex-M7 r0p1. Not found with
+// RESTORING_PORT, whose vPortEnterCritical restores PRIMASK
 __attribute__((noinline)) void MaskedNotify() noexcept
 {
 	const uint32_t flags = GetPrimask();
@@ -225,7 +229,8 @@ __attribute__((noinline)) void MaskedNotify() noexcept
 	SetPrimask(flags);
 }
 
-// Found: a FromISR function with PRIMASK set, which ends its raise of BASEPRI with cpsie i on the Cortex-M7 r0p1
+// Found: a FromISR function with PRIMASK set, which ends its raise of BASEPRI with cpsie i on the Cortex-M7 r0p1. Not found with
+// RESTORING_PORT
 __attribute__((noinline)) void MaskedGiveFromIsr() noexcept
 {
 	const uint32_t flags = GetPrimask();
@@ -293,6 +298,56 @@ __attribute__((noinline)) void MaskedSaveRestore() noexcept
 	SetPrimask(flags);
 }
 
+// The cases of a call that can block inside a region (target xPortTaskCanBlock), which only the RESTORING_PORT build has. Without
+// RESTORING_PORT, the critical section of the take lifts the mask instead, as for BoostedNotify and MaskedNotify
+
+// Found: a take with a timeout with BASEPRI raised (without RESTORING_PORT: -> vPortExitCritical)
+__attribute__((noinline)) void BoostedTake() noexcept
+{
+	const uint32_t old = GetBasepri();
+	SetBasepriMax(0xa0);
+	(void)xQueueSemaphoreTake(10);
+	SetBasepri(old);
+}
+
+// Found: a take with a timeout with PRIMASK set (without RESTORING_PORT: -> vPortEnterCritical)
+__attribute__((noinline)) void MaskedTake() noexcept
+{
+	const uint32_t flags = GetPrimask();
+	DisableIrq();
+	(void)xQueueSemaphoreTake(10);
+	SetPrimask(flags);
+}
+
+// Found with RESTORING_PORT: a take with a timeout inside a critical section of the function. Not found without it, as
+// NotifyInCritical
+__attribute__((noinline)) void TakeInCritical() noexcept
+{
+	vPortEnterCritical();
+	(void)xQueueSemaphoreTake(10);
+	vPortExitCritical();
+}
+
+// Found as well: a take with timeout 0 with BASEPRI raised, which cannot block. The check does not evaluate the argument, so such
+// a call needs an allowlist entry with the reason (without RESTORING_PORT: -> vPortExitCritical)
+__attribute__((noinline)) void BoostedPoll() noexcept
+{
+	const uint32_t old = GetBasepri();
+	SetBasepriMax(0xa0);
+	(void)xQueueSemaphoreTake(0);
+	SetBasepri(old);
+}
+
+// Not found: the take after the region
+__attribute__((noinline)) void TakeAfterBoost() noexcept
+{
+	const uint32_t old = GetBasepri();
+	SetBasepriMax(0xa0);
+	selector = 18;
+	SetBasepri(old);
+	(void)xQueueSemaphoreTake(10);
+}
+
 // Functions that the linker places far from the code (section .far, see SELFTEST_FLAGS in ../../Makefile), so that the calls
 // to them go through a veneer, as those of Duet3Expansion to its step functions in RAM. Their C++ names make the veneer names
 // the mangled ones (___Z9FarHelperj_veneer)
@@ -322,6 +377,7 @@ extern "C" void Reset_Handler() noexcept
 	AllocateAfterRestore(); SwitchOutsideRegion();
 	BoostedNotify(); BoostedLocker(); BoostedCritical(); BoostedCallback(); MaskedNotify(); MaskedGiveFromIsr(); NestedEnable();
 	NotifyAfterBoost(); NotifyInCritical(); BoostedGiveFromIsr(); MaskedSaveRestore();
+	BoostedTake(); MaskedTake(); TakeInCritical(); BoostedPoll(); TakeAfterBoost();
 	SuspendedVeneer(); MaskedVeneer();
 	for (;;) { }
 }

@@ -90,3 +90,45 @@ CHX first: MB6HC in SBC mode.
 | `DDARing::StopMoves [basepri] -> indirect call` | all | SAFE-NO-UNMASK (since fix/hold-step-interrupt) | As `DDARing::Hold [basepri] -> indirect call`, through `CancelHomingMoveInFlight` (`DDARing.cpp:1099`) |
 | `Move::AddLinearSegments [basepri] -> indirect call` | all | SAFE-NO-UNMASK | Sites:<br>- `printf` (`Move.cpp:2194`), `AppendDetails` (`:2196`, `MoveSegment.cpp:61-73`) and, on MB6XD and Mini5plus, `LogStepError` under `ScheduleFirstSegment` (`:2433`, `DriveMovement.cpp:469-487`) reach `FormattedPrinter` through `StringRef` and `SafeVsnprintf` only. Its `putcharFunc` there is the lambda of `SafeVsnprintf`, which writes to the buffer (RRFLibraries `SafeVsnprintf.cpp:812-821`);<br>- `SetDirection` (`Move.cpp:2441`) reaches `IterateDrivers` with the lambda of `SetDriversDirection`, a pin write (`Move2.cpp:474`, `Move.h:905-916`). |
 | `SoftwareReset [primask] -> indirect call` | all | SAFE-NO-UNMASK | `GetAsyncPort(n)->canWrite()` (`ExceptionHandlers.cpp:60`, `:62`). The ports are `AsyncSerial` objects (`Platform.cpp:369`, `:372`), and `AsyncSerial::canWrite` returns `RingBuffer::SpaceLeft` (CoreN2G `SAM4S_4E_E70/AsyncSerial.cpp:184-187`, `SAME5x_C21/AsyncSerial.cpp:101-104`; RRFLibraries `RingBuffer.h:109-112`) |
+
+## With the restoring ports (Meltingplot/FreeRTOS PR #1)
+
+From Meltingplot/FreeRTOS PR #1 on, the critical sections restore the mask that they found, and the trace hooks where a task
+blocks assert `xPortTaskCanBlock()` (see README.md). The check then finds no lift in a critical section any more, and reports the
+calls that can block inside a region instead (target `xPortTaskCanBlock`).
+
+- **Basis:** 3.7-dev at d68586f10 (2026-11-23) with RRFLibraries 3.7-dev 888b479, built once against FreeRTOS 3.7-dev 980af10
+  and once with PR #1 (783d4c5), configurations `Duet3_MB6HC`, `Duet3_MB6XD` and `Duet3Mini5plus`. Line numbers refer to
+  d68586f10.
+- **Gone with PR #1:** the 10 keys that end in `vPortExitCritical`, `vPortEnterCritical` or `vTaskGenericNotifyGiveFromISR`,
+  among them `TmcLoop [primask] -> vPortEnterCritical` (SUSPECT): `ClearCurrentTaskNotifyCount` no longer enables the interrupts
+  inside `lock2`.
+- **New with PR #1:** 12 keys. 5 calls through a register were there before, but a site reports a call through a register only
+  if it does not reach a lift (alloc-check.py, `unmask_findings`), and the lift of the critical section hid them. 7 keys are
+  calls that can block.
+- **How:** for each site of a `-> xPortTaskCanBlock` key, a script took the chains of `alloc-check.py`'s model again, but did
+  not let them pass through `debugPrintf`, `Tasks::AllocPermanent` and `Platform::MessageF`. No site reached `xPortTaskCanBlock`
+  then. So every block on these paths is behind one of those three functions, and the reasons below say why none runs inside the
+  region. The shortest chains end in a mutex give (`MutexLocker::Release`, `Mutex::Release`), which does not block
+  (`queueMUTEX_GIVE_BLOCK_TIME` is 0, FreeRTOS `src/queue.c:83`, `:790`); the takes are on the same paths.
+
+| Entry | Boards | Verdict | Reason |
+|---|---|---|---|
+| `DDARing::Hold [basepri] -> xPortTaskCanBlock` | all | SAFE-GUARDED | `CutHomingMove` (`DDARing.cpp:868`), `FindStopPoint` (`:872`) and `GetEndCoordinates` (`:874`) reach it only through `debugPrintf`, which calls `Platform::DebugMessage` (and its `MutexLocker`, `Platform.cpp:3362`) only with BASEPRI and PRIMASK 0 (`RepRapFirmware.cpp:219`) |
+| `DDARing::PauseMoves [basepri] -> xPortTaskCanBlock` | all | SAFE-GUARDED | `FindStopPoint` (`DDARing.cpp:700`), as for `DDARing::Hold` |
+| `DDARing::StopMoves [basepri] -> xPortTaskCanBlock` | all | SAFE-GUARDED | `FindStopPoint` (`DDARing.cpp:1101`), as for `DDARing::Hold` |
+| `Move::AddLinearSegments [basepri] -> xPortTaskCanBlock` | all | SAFE-PRIMED | `MoveSegment::Allocate` under `Split` (`Move.cpp:2209`) reaches `Tasks::AllocPermanent` only when the free list is empty (`MoveSegment.cpp:19-31`), and `MoveSegment::PrimeFreeList` (`Move.cpp:2178`) fills it before the booster (census.md, SAFE-PRIMED). `GetMallocMutex` asserts on that path in any case (`Tasks.cpp:117`). On MB6HC, `NewSegment` under `ScheduleFirstSegment` (`:2433`) and `Interrupt` (`:2448`) reaches it only through `debugPrintf`, as for `DDARing::Hold` |
+| `Move::PhaseStepControlLoop [basepri] -> xPortTaskCanBlock` | MB6HC | SAFE-GUARDED | `UpdateCurrentMotion` (`Move.cpp:2797`) and `Interrupt` (`:2851`) reach it only through `NewSegment` and `debugPrintf`, as for `DDARing::Hold` |
+| `Move::UpdateCurrentMotion [primask] -> xPortTaskCanBlock` | MB6HC | SAFE-GUARDED (census.md B2) | `NewSegment` (`Move.cpp:2561`) reaches it only through `debugPrintf`, which tests PRIMASK too (`RepRapFirmware.cpp:219`) |
+| `RepRap::StartIap [primask] -> xPortTaskCanBlock` | all | SAFE-GUARDED | `MassStorage::CombineName` (`RepRap.cpp:2280`) reaches it only through `MessageF`, which it calls only when the name overflows (`MassStorage.cpp:228-234`); the `OpenFile` check before excludes that (`RepRap.cpp:2059`), as for `RepRap::StartIap [primask] -> FileStore::Close` |
+| `DDA::Prepare [basepri] -> indirect call` | all | SAFE-NO-UNMASK | `CheckEndstops(false)` (`DDA.cpp:1492`). `Move::CheckEndstops` calls through a register the endstop and Z probe overrides of `CheckTriggered` and `Acknowledge` (through `EndstopsManager::CheckEndstops`, `EndstopsManager.cpp:320`, `:340`), `Kinematics::GetHomingMode`, whose overrides return a constant (`src/Movement/Kinematics/*.h`), and `IterateDrivers` with the lambdas of `StopAxisOrExtruder` (`Move.cpp:3378-3389`). The query of every override (`SwitchEndstop`, `GpInPortEndstop`, `StallDetectionEndstop`, `ZProbe`, `ZProbeEndstop`; `ZProbe::Stopped`, `GetReading`, `LocalZProbe::GetRawReading`, `RemoteZProbe::GetRawReading`, `RemoteZProbe::Stopped`, `GpInputPort::GetState`, `FilamentMonitor::GetVirtualInputState`) reaches nothing that lifts a mask or blocks |
+| `Move::OnEndstopOrZProbeStatesChanged [basepri] -> indirect call` | all | SAFE-NO-UNMASK | `CheckEndstops(true)` (`Move.cpp:4154`), as for `DDA::Prepare` |
+| `DDARing::PauseMoves [basepri] -> indirect call` | all | SAFE-NO-UNMASK | `FindStopPoint` (`DDARing.cpp:700`) reaches only `debugPrintf`, whose `putc` with a mask is `Platform::IsrDebugPutc` (`RepRapFirmware.cpp:217`), a ring buffer write (`Platform.cpp:385-394`) |
+| `Move::PhaseStepControlLoop [basepri] -> indirect call` | MB6HC | SAFE-NO-UNMASK | `UpdateCurrentMotion` (`Move.cpp:2797`) reaches `debugPrintf` in `NewSegment`, as for `DDARing::PauseMoves`; `Interrupt` (`:2851`) reaches `CheckEndstops`, as for `DDA::Prepare` |
+| `Move::UpdateCurrentMotion [primask] -> indirect call` | MB6HC | SAFE-NO-UNMASK | `NewSegment` (`Move.cpp:2561`) reaches `debugPrintf`, as for `DDARing::PauseMoves` |
+
+Two keys that were there before have new sites with PR #1, and their reasons in `unmask-allowlist.txt` cover them now:
+- `DDARing::Hold [basepri] -> indirect call`: `CutHomingMove`, `FindStopPoint` and `GetEndCoordinates` (`DDARing.cpp:868-874`)
+  reach the kinematics overrides, which the row `DDARing::Hold [basepri] -> vPortExitCritical` above lists, and `debugPrintf`.
+- `Move::AddLinearSegments [basepri] -> indirect call`: `Interrupt` (`Move.cpp:2448`) reaches `CheckEndstops`, as for
+  `DDA::Prepare`.
