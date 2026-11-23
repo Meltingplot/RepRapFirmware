@@ -155,8 +155,8 @@ Each group shares one reason in `allowlist.txt`.
 
 ## Findings outside this class
 
-The targets above reach no heap. Four of them block where they must not. These are not allocations, so the check does not report
-them. B2 is fixed in fix/debugprintf-primask, the others are not fixed:
+The targets above reach no heap, but three of them block where they must not (B1-B3), and M111 F frees a buffer that an ISR may
+write (B4). The check does not report these. B2 is fixed in fix/debugprintf-primask, the others are not fixed:
 - **B1, `debugPrintf` with the scheduler suspended resets the board.** `debugPrintf` (`RepRapFirmware.cpp:211-223`) goes to
   `Platform::DebugMessage` when there is no M111 F buffer and BASEPRI is 0. It does not check the scheduler.
   `DebugMessage` takes a `MutexLocker` (`Platform.cpp:3362`). If another task holds the mutex, or nobody does,
@@ -165,10 +165,12 @@ them. B2 is fixed in fix/debugprintf-primask, the others are not fixed:
     `DDARing::AddHoldJog` (`DDARing.cpp:1000`).
   - Needs the Lookahead flag plus a lookahead error, or PrintTransforms (`Move.cpp:1302`, every transform).
   - `DDARing.cpp:500-501` says this code "must make no FreeRTOS calls".
-- **B2, the same with PRIMASK set** (MB6HC, PrintBadMoves). `DriveMovement::UpdateCurrentMotion` takes an
-  `AtomicCriticalSectionLocker` (`DriveMovement.h:329`), and `NewSegment` (`:374`) can print from inside it. `debugPrintf`'s
+- **B2, the same mutex with PRIMASK set** (MB6HC, PrintBadMoves). `DriveMovement::UpdateCurrentMotion` takes an
+  `AtomicCriticalSectionLocker` (`DriveMovement.h:330`), and `NewSegment` (`:374`) can print from inside it. `debugPrintf`'s
   test did not see PRIMASK. `make scan-unmask` finds this one (`unmask-census.md`), because the mutex enables the interrupts on
-  the Cortex-M7 r0p1. Fixed in fix/debugprintf-primask: `debugPrintf` also tests PRIMASK (`RepRapFirmware.cpp:219`).
+  the Cortex-M7 r0p1. The TMC task calls `PhaseStepControlLoop` outside its `TaskCriticalSectionLocker` (`TMC51xx.cpp:1915`,
+  `:1979`), so there a wait for the mutex blocks instead of asserting. Fixed in fix/debugprintf-primask: `debugPrintf` also
+  tests PRIMASK (`RepRapFirmware.cpp:219`).
 - **B3, SysTick stuck-task path with M111 Heat.** `LocalHeater::SwitchOff` calls `MessageF` (`LocalHeater.cpp:258-261`), which
   takes mutexes in an ISR.
 - **B4, `RingBuffer::Init`** (RRFLibraries `RingBuffer.h:69-82`, M111 F) frees and reallocates the debug buffer while an ISR may
