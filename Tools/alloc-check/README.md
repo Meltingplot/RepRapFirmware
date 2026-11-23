@@ -87,7 +87,8 @@ list is empty. The key names the first allocation function on the chain, or the 
 **Calls through a register.** A call through a function pointer, a virtual call or a `function_ref` has a target that the check
 cannot see. Each one inside a region, and each direct call inside a region to a function that can reach one, gives a finding with
 the target `indirect call`. The calls through a register that a literal load resolves (`ldr rN, =function` then `blx rN`) and the
-`__*_veneer` stubs are followed. The reach towards calls through a register stops at functions that never return
+veneers of the linker (`__*_veneer`) are followed to the function at the address in their literal, also for a C++ function,
+whose veneer has the mangled name. The reach towards calls through a register stops at functions that never return
 (`vAssertCalled`, `SoftwareReset`, ...): they reset the board, or they throw, and the heap chains find a throw.
 
 ## Key format

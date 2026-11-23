@@ -293,6 +293,28 @@ __attribute__((noinline)) void MaskedSaveRestore() noexcept
 	SetPrimask(flags);
 }
 
+// Functions that the linker places far from the code (section .far, see SELFTEST_FLAGS in ../../Makefile), so that the calls
+// to them go through a veneer, as those of Duet3Expansion to its step functions in RAM. Their C++ names make the veneer names
+// the mangled ones (___Z9FarHelperj_veneer)
+__attribute__((noinline, section(".far"))) void *FarHelper(unsigned int n) noexcept { return malloc(n); }
+__attribute__((noinline, section(".far"))) void FarEnable() noexcept { EnableIrq(); }
+
+// Found: an allocation that the region reaches through a veneer
+__attribute__((noinline)) void SuspendedVeneer() noexcept
+{
+	Locker lock;
+	rawSink = FarHelper(5);
+}
+
+// Found: a clear of PRIMASK that the region reaches through a veneer
+__attribute__((noinline)) void MaskedVeneer() noexcept
+{
+	const uint32_t flags = GetPrimask();
+	DisableIrq();
+	FarEnable();
+	SetPrimask(flags);
+}
+
 extern "C" void Reset_Handler() noexcept
 {
 	SuspendedNew(); LockerMalloc(); OutOfLineFree(nullptr); CallsHelperInCritical(); MaskedNew(); BoostedMalloc();
@@ -300,6 +322,7 @@ extern "C" void Reset_Handler() noexcept
 	AllocateAfterRestore(); SwitchOutsideRegion();
 	BoostedNotify(); BoostedLocker(); BoostedCritical(); BoostedCallback(); MaskedNotify(); MaskedGiveFromIsr(); NestedEnable();
 	NotifyAfterBoost(); NotifyInCritical(); BoostedGiveFromIsr(); MaskedSaveRestore();
+	SuspendedVeneer(); MaskedVeneer();
 	for (;;) { }
 }
 
