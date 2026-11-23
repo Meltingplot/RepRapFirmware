@@ -1,6 +1,7 @@
 # Host test of the code length limits of a G-code buffer in SBC mode: the real text of StringParser::Put, AddToChecksum and
-# StoreAndAddToChecksum and of BinaryParser::Put, and the real MaxGCodeStringLength and MaxGCodeBinaryLength, extracted from src/ at
-# build time, with the G-code buffer and Tasks::AllocPermanent played in sbc_code_length_test.cpp. Run with make in WSL (g++ 13).
+# StoreAndAddToChecksum and of BinaryParser::AllocateBuffer and Put, and the real MaxGCodeStringLength and MaxGCodeBinaryLength,
+# extracted from src/ at build time, with the G-code buffer and Tasks::AllocPermanent played in sbc_code_length_test.cpp. Run with
+# make in WSL (g++ 13).
 #
 #   make              build build/sbc-code-length-test
 #   make asan         the same with AddressSanitizer and UBSan, build/asan-sbc-code-length-test
@@ -33,7 +34,7 @@ gen/StringParser.inc: $(SRC)/GCodes/GCodeBuffer/StringParser.cpp $(EXTRACT)
 
 gen/BinaryParser.inc: $(SRC)/GCodes/GCodeBuffer/BinaryParser.cpp $(EXTRACT)
 	@mkdir -p gen
-	awk -v f="$(abspath $<)" -v names="BinaryParser::Put" -f $(EXTRACT) $< > $@.tmp && mv $@.tmp $@
+	awk -v f="$(abspath $<)" -v names="BinaryParser::AllocateBuffer BinaryParser::Put" -f $(EXTRACT) $< > $@.tmp && mv $@.tmp $@
 
 build/sbc-code-length-test: sbc_code_length_test.cpp $(GEN) Makefile
 	@mkdir -p build
