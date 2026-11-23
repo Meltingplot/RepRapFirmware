@@ -1,15 +1,17 @@
 # Census of the unmask allowlist
 
-Each of the 21 entries of `unmask-allowlist.txt` was read in the code:
+Each of the 20 entries of `unmask-allowlist.txt` was read in the code:
 - for a call, every chain that its sites reach and the code of the region after the site;
 - for a call through a register, every target that the firmware sets.
 
 The verdict per entry is its comment in `unmask-allowlist.txt`; this file has the reasoning and the findings.
 
-- **Basis:** 3.7-dev at b857e3530 (2026-11-22) with RRFLibraries 3.7-dev 888b479, configurations `Duet3_MB6HC` (20 entries),
-  `Duet3_MB6XD` (16) and `Duet3Mini5plus` (13). Line numbers refer to that commit, except in a row that names a fix branch: there
+- **Basis:** 3.7-dev at b857e3530 (2026-11-22) with RRFLibraries 3.7-dev 888b479, configurations `Duet3_MB6HC` (19 entries),
+  `Duet3_MB6XD` (15) and `Duet3Mini5plus` (13). Line numbers refer to that commit, except in a row that names a fix branch: there
   they refer to the tree of that branch.
-- **Counts:** 3 SUSPECT, 4 SAFE-LAST, 5 SAFE-GUARDED, 3 SAFE-RESTORE, 6 SAFE-NO-UNMASK.
+- **Fixed:** `DDARing::LowPowerOrStallPause [primask] -> vPortEnterCritical` (SUSPECT, MB6HC and MB6XD) went away with
+  fix/emergency-pause-interrupts: between `IrqDisable` and `IrqEnable` it calls `GetCurrentDDAAlreadyLocked`, which takes no lock.
+- **Counts:** 2 SUSPECT, 4 SAFE-LAST, 5 SAFE-GUARDED, 3 SAFE-RESTORE, 6 SAFE-NO-UNMASK.
 - **How:** `alloc-check.py --unmask` lists each site with the shortest chain, and `--unmask --query FUNCTION` lists every
   chain. For each site of an `indirect call` key, a script on the same ELF files listed every function with a call through a
   register that the site reaches, and every function on the way that passes it a target. An agent read those targets, with
@@ -66,7 +68,6 @@ CHX first: MB6HC in SBC mode.
 
 | Entry | Boards | Verdict | Reason |
 |---|---|---|---|
-| `DDARing::LowPowerOrStallPause [primask] -> vPortEnterCritical` | MB6HC, MB6XD | **SUSPECT** [open] | `IrqDisable()` (`DDARing.cpp:1147`), then `GetCurrentDDA()` (`:1148`), whose `TaskCriticalSectionLocker` (`:566`) ends in `xTaskResumeAll`. Its critical section enables the interrupts again (r0p1), and the rest of the emergency pause up to `IrqEnable()` (`:1180`: `CancelStepping`, `CancelOutputs`, the queue walk) runs with the step interrupt enabled. Duet3D 3.7-dev a507cb8f0 `DDARing.cpp:795-796` has the same code (D. Crocker, 2024) |
 | `TmcLoop [primask] -> vPortEnterCritical` | MB6HC | **SUSPECT** [open] | `AtomicCriticalSectionLocker lock2` (`TMC51xx.cpp:1988`); `TaskBase::ClearCurrentTaskNotifyCount` (`:1994`, `RTOSIface.h:236`) enters a critical section, which enables the interrupts (r0p1). `EnableEndOfTransferInterrupt`, `ResetSpi`, `EnableDma` and `EnableSpi` (`:1995-1998`) then run unmasked; the scheduler stays suspended (`:1979`). D. Crocker added lock2 (3fe403dde, 2023); Duet3D 3.7-dev a507cb8f0 `TMC51xx.cpp:1982-1992` is the same. What an interrupt there can break is not shown |
 | `Move::UpdateCurrentMotion [primask] -> vPortEnterCritical` | MB6HC | **SUSPECT** [open] (census.md B2) | `DriveMovement::UpdateCurrentMotion` holds an `AtomicCriticalSectionLocker` (`DriveMovement.h:330`) and calls `NewSegment` (`:374`). `NewSegment` prints with `debugPrintf` under `DEBUG_DISCONTINUITIES` and M111 `PrintBadMoves` for an extruder (`DriveMovement.cpp:179-197`, `:206-222`). `PhaseStepControlLoop` calls it with BASEPRI 0 (`Move.cpp:2775`), so `debugPrintf` takes the mutex: the r0p1 enables the interrupts, and a wait would assert. Debug only |
 | `Move::AddLinearSegments [basepri] -> vPortExitCritical` | all | SAFE-LAST | Sites:<br>- `Interrupt()` (`Move.cpp:2448`) is the last call of the second booster (`:2408-2453`);<br>- `MoveSegment::Split` (`:2209`) allocates only with an empty free list, and `MoveSegment::PrimeFreeList` (`:2178`) fills it (census.md, SAFE-PRIMED);<br>- `NewSegment` (`:2433`) prints with BASEPRI raised (guarded). |
