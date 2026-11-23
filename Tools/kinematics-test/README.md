@@ -2,7 +2,8 @@
 
 This test runs RRF's real `Move::SetKinematics` from `src/Movement/Move.cpp` on a PC. The Makefile copies the function text out
 of `Move.cpp` at build time, as `Tools/sbc-harness` does with `SbcInterface::TaskLoop`, because `Move.cpp` as a whole needs the
-hardware headers of CoreN2G. `kinematics_test.cpp` gives it a minimal `Move`, `Kinematics` and `reprap`.
+hardware headers of CoreN2G. `kinematics_test.cpp` gives it a minimal `Move`, `Kinematics`, `reprap` and a compile-only
+`ObjectModel::lifetimeLock`.
 
 The test checks what another task sees while the kinematics changes:
 - M665 and M669 call `SetKinematics` in the main task when the kinematics type changes, e.g. `M669 K5` in `config.g` after the

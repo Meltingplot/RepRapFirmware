@@ -12,6 +12,7 @@ The test checks what the CAN receiver task can do while one of these functions u
   allocates a new one, under a write lock on `boardsLock`.
 - `M569` on a remote driver stores the direction (`S`) and mode (`D`) with `StoreDriverDirection` and `StoreDriverMode` in the
   main task (`TaskPriority::SpinPriority`). `Move::GetDirectionValue` reads the direction with `GetDriverDirection`.
+  `GetDriverMode` has no caller; it takes the read lock like the others for uniformity.
 - The receiver task has the higher priority, so it can run at any instruction of these functions.
 
 The test plays the receiver task at the moment the function uses an element of the array, and fails if the receiver task could

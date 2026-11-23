@@ -8,7 +8,8 @@
 // priority than the main task, which runs M558 and M502, walk the list and call CheckTriggered on every entry:
 // - the step ISR, while a move that checks endstops executes (Move::CheckEndstops in src/Movement/Move.cpp);
 // - the CAN receiver task, after every endstop, Z probe or GpIn state change that an expansion board reports
-//   (src/CAN/CommandProcessor.cpp -> Move::OnEndstopOrZProbeStatesChanged), whether or not a move is executing.
+//   (src/CAN/CommandProcessor.cpp -> Move::OnEndstopOrZProbeStatesChanged). Upstream does so whether or not a move is executing;
+//   since #66 the fork does so only while a segment that checks endstops executes. The test plays the upstream reader.
 // So a probe must be out of the list before its deletion starts. M574 shows how: it locks movement, waits for standstill and
 // clears the list before it may delete endstops. The test plays these readers while a probe is deleted (in its destructor,
 // before and after its memory is freed) and at the next remote input change. It never calls a deleted object itself: the reader

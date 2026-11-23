@@ -10,13 +10,16 @@ of CoreN2G. `laser_task_test.cpp` gives them a minimal `Move`, `TaskBase`, `Task
 `RepRap::EmergencyStop` calls `Move::Exit`, which deletes the laser task (`Move::laserTask`). The `TaskBase` destructor
 terminates the task (`TerminateAndUnlink` in `RRFLibraries/src/RTOSIface`: clear `taskId`, unlink it, `vTaskDelete`), then its
 memory is freed. `EmergencyStop` runs in:
-- the main task (`TaskPriority::SpinPriority`), e.g. M112 in `GCodes::DoEmergencyStop`, an M112 trigger, M999;
+- the main task (`TaskPriority::SpinPriority`) for an M112 or M999 that RRF executes itself, e.g. M112 in `GCodes::DoEmergencyStop`
+  in standalone mode or from an aux or USB input, the PanelDue halt sequence, an M112 trigger. In SBC mode DSF sends M112 and M999
+  as the requests below;
 - the SBC task (`TaskPriority::SbcPriority`) for `SbcRequest::EmergencyStop` and `SbcRequest::Reset`, and in
   `SbcInterface::EndConnection` when a connection ends;
 - the CAN receiver task in expansion mode (`CommandProcessor.cpp`).
 
 `EmergencyStop` has no guard against a second call, so a higher priority task can run `Move::Exit` again while a lower priority
-one is inside the deletion, e.g. the SBC task preempting M112 in the main task. Its `Move::Exit` reads `laserTask`. While the
+one is inside the deletion, e.g. the SBC task (DSF's M112 or the end of a connection) preempting an M112 trigger in the main
+task. Its `Move::Exit` reads `laserTask`. While the
 pointer still names the task, that second `Exit` deletes it again: a second free of the same memory, or a destructor on freed
 memory.
 

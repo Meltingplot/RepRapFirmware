@@ -2,8 +2,9 @@
 // Move::WakeLaserTask and DeleteObject (src/RepRapFirmware.h) that the Makefile extracts.
 //
 // RepRap::EmergencyStop calls Move::Exit, which deletes the laser task. EmergencyStop runs in the main task
-// (TaskPriority::SpinPriority, e.g. M112 in GCodes::DoEmergencyStop), in the SBC task (TaskPriority::SbcPriority, for
-// SbcRequest::EmergencyStop and SbcRequest::Reset and when a connection ends) and in the CAN receiver task in expansion mode.
+// (TaskPriority::SpinPriority, e.g. M112 in GCodes::DoEmergencyStop when RRF executes the code itself, or an M112 trigger), in the
+// SBC task (TaskPriority::SbcPriority, for SbcRequest::EmergencyStop and SbcRequest::Reset, which is how DSF sends M112 and M999,
+// and when a connection ends) and in the CAN receiver task in expansion mode.
 // A task with a higher priority can run at any instruction of the deletion: while the TaskBase destructor terminates the task,
 // before its memory is freed and after. At each of these moments Move::laserTask must already be null, because its readers only
 // check the pointer. The test plays two readers at each moment: the Move task starting a move, which calls WakeLaserTask, and a
@@ -204,7 +205,8 @@ static void MoveTaskStartsMove(const char *) noexcept
 	move.WakeLaserTask();
 }
 
-// A second emergency stop from a higher priority task, e.g. the SBC task preempting M112 in the main task
+// A second emergency stop from a higher priority task, e.g. the SBC task (DSF's M112 or the end of a connection) preempting an
+// M112 trigger in the main task
 static void SecondEmergencyStop(const char *) noexcept
 {
 	move.Exit();

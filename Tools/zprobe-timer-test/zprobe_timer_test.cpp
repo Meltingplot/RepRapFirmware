@@ -5,7 +5,7 @@
 //
 // M672 kicks off sending a program to the probe and returns at once (SendProgram). The step ISR then sends the program bit by
 // bit at 1000 bits per second, calling LocalZProbe::Interrupt through the probe's StepTimer, which stays in StepTimer::pendingList
-// until the last bit has gone out: 14 bit times per byte, up to 112ms for the 8 bytes that M672 accepts. M558 with P or C and
+// until the last bit has gone out: 14 bit times per byte, up to 112ms for the 8 bytes that M672 accepts. M558 with P and
 // M502 delete the probe in the main task. If the probe's timer is still pending then, the step ISR calls back the deleted probe;
 // or, when M558 creates a new LocalZProbe and the free list hands it the same memory, the StepTimer constructor resets the pending
 // timer, so the step ISR calls a null callback and the timers behind it in the pending list are lost.
@@ -98,7 +98,7 @@ void operator delete(void* p) noexcept { FreelistManager::Release<_Type>(p); }
 // CANlib src/GCodeResult.h, the values used here
 enum class GCodeResult : uint8_t { notFinished, ok, warning, warningNotSupported, error };
 
-// src/Endstops/EndstopDefs.h:72, the value used here
+// src/Endstops/EndstopDefs.h:76, the value used here
 enum class ZProbeType : uint8_t { none = 0 };
 
 // RRFLibraries StringRef, as far as ProgramZProbe uses it
@@ -388,7 +388,7 @@ static std::string RunStepIsrUntil(StepTimer::Ticks until) noexcept
 	return std::string();
 }
 
-// Another client of the step timer, e.g. Move::stepsTimer (src/Movement/Move.h:657). Its callback checks whether it is really
+// Another client of the step timer, e.g. Move::stepsTimer (src/Movement/Move.h). Its callback checks whether it is really
 // due, as src/Movement/StepTimer.h:16-19 requires of every client.
 static StepTimer otherTimer;
 static unsigned int otherCalls = 0;
@@ -498,7 +498,7 @@ public:
 	}
 
 	// M558 K<k> P5 C"..." when there is no probe K<k> yet: EndstopsManager::HandleM558 creates a LocalZProbe
-	// (src/Endstops/EndstopsManager.cpp:811) and stores it when Configure succeeds (:820)
+	// (src/Endstops/EndstopsManager.cpp) and stores it when Configure succeeds
 	LocalZProbe *NewProbe(unsigned int k) noexcept
 	{
 		LocalZProbe *const newProbe = new LocalZProbe(k);
@@ -506,7 +506,7 @@ public:
 		return newProbe;
 	}
 
-	// M558 K<k> P5 C"..." again: HandleM558 deletes the old probe first (:757), then creates and stores the new one as above
+	// M558 K<k> P5 C"..." again: HandleM558 deletes the old probe first, then creates and stores the new one as above
 	LocalZProbe *ReplaceProbe(unsigned int k) noexcept
 	{
 		DeleteObject(em.zProbes[k]);
@@ -620,7 +620,7 @@ int main()
 		return std::string();
 	});
 
-	// SendProgram cancels the timer before it starts again (LocalZProbe.cpp:154), so a second M672 restarts the send
+	// SendProgram cancels the timer before it starts again (LocalZProbe.cpp:155), so a second M672 restarts the send
 	Case("M672 while a program is being sent starts the new one", [&](Fixture& fx) {
 		LocalZProbe *const probe = fx.NewProbe(0);
 		const StepTimer::Ticks start = now;
@@ -667,7 +667,7 @@ int main()
 	});
 
 	// The probe is deleted by M558 while M672 is sending, and its memory stays on the free list (M558 P0 or P10 create a
-	// DummyZProbe or MotorStallZProbe instead, src/Endstops/EndstopsManager.cpp:763 and 767)
+	// DummyZProbe or MotorStallZProbe instead, EndstopsManager::HandleM558)
 	Case("M558 P deletes the probe while M672 is sending", [&](Fixture& fx) {
 		(void)fx.NewProbe(0);
 		const StepTimer::Ticks start = now;

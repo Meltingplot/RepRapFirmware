@@ -17,8 +17,9 @@ extern "C"
 	const char *testHeapLimit = testArena + TestArenaSize;
 
 	// Stand-in for CoreN2G src/syscalls.h:49-64 (_sbrk), which nano-mallocr.c calls through sbrk_aligned (nano-mallocr.c:264, :266, :277).
-	// The compiled function in the MB6HC build of 3.7-dev (Duet3Firmware_MB6HC.elf, _sbrk at 0x48daf8) loads heapTop once (ldr r0, [r2] at
-	// 0x48db00), adds incr, compares with heapLimit and stores the new top (str r3, [r2] at 0x48db0a), then returns the value it loaded.
+	// The compiled function loads heapTop once (ldr r0, [r2]), adds incr, compares with heapLimit and stores the new top (str r3, [r2]),
+	// then returns the value it loaded. The addresses here and below are those of one MB6HC 3.7-dev build (Duet3Firmware_MB6HC.elf,
+	// _sbrk at 0x48daf8) and change with every build.
 	// This stand-in has the same order of the load and the store; TestPreemptionPointSbrk stands for an interrupt between them, which the
 	// target allows because _sbrk runs with interrupts enabled (Tasks.cpp:117 asserts that BASEPRI and PRIMASK are 0 in GetMallocMutex).
 	void *test_sbrk(ptrdiff_t incr)

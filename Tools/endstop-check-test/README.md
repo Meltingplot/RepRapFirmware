@@ -12,7 +12,7 @@ What the test is about:
   entry out of it (`EndstopsManager::CheckEndstops`). A move that ends without a trigger (G30, G38.x, G1 H1/H3/H4) leaves its
   entries there until the next move that enables endstops rebuilds the list.
 - The step ISR checks the list only while a DM whose step is due executes a segment with the `checkEndstops` flag
-  (`Move::StepDrivers`), the phase stepping control loop only while a DM of `phaseStepDMs` in a motion state does
+  (`Move::StepDrivers`), the phase stepping control loop only while a DM of `phaseStepDMs` in a state after `starting` does
   (`Move::PhaseStepControlLoop`).
 - `Move::OnEndstopOrZProbeStatesChanged` is called by the CAN receiver task (`TaskPriority::CanReceiverPriority`) after an
   expansion board reports an endstop, Z probe or GpIn change (`src/CAN/CommandProcessor.cpp`), and by the main task after a

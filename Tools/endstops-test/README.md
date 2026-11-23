@@ -13,10 +13,15 @@ the endstops and Z probes of the current move:
   rebuilds the list.
 - The step ISR walks the list while a move that checks endstops executes (`Move::CheckEndstops`, `src/Movement/Move.cpp`). The CAN
   receiver task (`TaskPriority::CanReceiverPriority`) walks it after every endstop, Z probe or GpIn state change that an expansion
-  board reports (`src/CAN/CommandProcessor.cpp` -> `Move::OnEndstopOrZProbeStatesChanged`), whether or not a move is executing.
-  Both call `CheckTriggered`, a virtual function, on every entry, and both can run at any instruction of the main task.
-- M558 with `P` or `C` (`HandleM558`) and M502 (`SetZProbeDefaults`) delete Z probes in the main task. M574 shows how this must
-  be done: it locks movement, waits for standstill and clears the list before it may delete endstops.
+  board reports (`src/CAN/CommandProcessor.cpp` -> `Move::OnEndstopOrZProbeStatesChanged`), and the main task does the same after
+  a filament monitor change (`src/FilamentMonitors/FilamentMonitor.cpp`). Upstream walks it there whether or not a move is
+  executing. Since #66 the fork walks it there only while a segment that checks endstops executes. The test plays the upstream
+  reader.
+  The step ISR and the CAN receiver call `CheckTriggered`, a virtual function, on every entry, and both can run at any instruction
+  of the main task.
+- M558 with `P` (`HandleM558`) and M502 (`SetZProbeDefaults`) delete Z probes in the main task. M558 with `C` but without `P` is
+  rejected before the deletion. M574 shows how this must be done: it locks movement, waits for standstill and clears the list
+  before it may delete endstops.
 
 The test plays these readers while a probe is deleted (in its destructor, before and after its memory is freed) and at the next
 remote input change, after a G30 or G38.4 that ended without a trigger and while a G30 probing move of another channel executes.

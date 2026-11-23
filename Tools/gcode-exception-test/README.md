@@ -50,7 +50,8 @@ The Makefile reads the sources from this repository, `../..` (override with `RRF
 
 Every constructor of `GCodeException`, and every function that passes a message on to one, takes a `GCodeExceptionMessage`
 (`GCodeException.h`). Its constructor is `consteval`, so a message that is not a compile-time constant does not compile, and the
-firmware build fails at the next site that passes the text of a buffer. `compile-check/run.sh` compiles the real
+firmware build fails at the next site that passes a run-time pointer, e.g. the text of a local or `String` buffer (the address of
+a static char array is a constant and is not caught). `compile-check/run.sh` compiles the real
 `GCodeException.h` with the stand-ins in `shim/`:
 - `compile-check/accept.cpp` must compile: literals, a `constexpr` named message, a function that returns a constant or null
   message, and text that is built at run time passed as the string parameter of a `"%s"` message;
