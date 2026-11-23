@@ -28,7 +28,7 @@ The test puts codes in both orders, in SBC mode and in standalone mode. It check
 It compiles the real text, which the Makefile extracts at build time with `../macro-error-test/extract.awk`, with `#line` directives
 that point at the real lines (the build fails if one is missing):
 - `src/GCodes/GCodeBuffer/StringParser.cpp`: `Put(char)`, `AddToChecksum` and `StoreAndAddToChecksum`.
-- `src/GCodes/GCodeBuffer/BinaryParser.cpp`: `Put`.
+- `src/GCodes/GCodeBuffer/BinaryParser.cpp`: `AllocateBuffer` and `Put`.
 - `src/Config/Configuration.h` and `src/SBC/SbcMessageFormats.h`: `MaxGCodeStringLength` and `MaxGCodeBinaryLength`.
 
 `sbc_code_length_test.cpp` gives them minimal `GCodeBuffer`, `StringParser`, `BinaryParser`, `RepRap` and `Tasks::AllocPermanent`

@@ -192,12 +192,13 @@ private:
 	bool seenExpression = false;
 };
 
-// The members of BinaryParser (src/GCodes/GCodeBuffer/BinaryParser.h) that the extracted function uses
+// The members of BinaryParser (src/GCodes/GCodeBuffer/BinaryParser.h) that the extracted functions use
 class BinaryParser
 {
 public:
 	explicit BinaryParser(GCodeBuffer& gcodeBuffer) noexcept : gb(gcodeBuffer) { }
 
+	void AllocateBuffer() noexcept;
 	void Put(const uint32_t *data, size_t len) noexcept;
 	bool HasCode() const noexcept { return bufferLength != 0; }
 
