@@ -1,6 +1,6 @@
 // Functions with a known answer for alloc-check.py, see ../../README.md. "make selftest" compiles and links this file with
-// runtime.cpp, with the firmware's compiler, -O2 and -g, and compares the findings with ../expected.txt. Each function says
-// whether the check must find it.
+// runtime.cpp, with the firmware's compiler, -O2 and -g, and compares the findings with ../expected.txt (heap) and
+// ../expected-unmask.txt (--unmask). Each function says whether the check must find it.
 
 #include "runtime.h"
 
@@ -170,11 +170,136 @@ void CallStatic() noexcept
 	StaticSuspended();
 }
 
+// The cases of the unmask check (--unmask), keys in ../expected-unmask.txt. BASEPRI 0xa0 is NvicPriorityStep (5) on a board
+// with 3 priority bits, as BasePriorityBooster(NvicPriorityStep) sets it. The functions are not inlined, so that each finding has
+// its own name
+
+// Found: a FreeRTOS call with BASEPRI raised, whose critical section ends with BASEPRI 0, as Move::OnEndstopOrZProbeStatesChanged
+// wakes the Move task
+__attribute__((noinline)) void BoostedNotify() noexcept
+{
+	const uint32_t old = GetBasepri();
+	SetBasepriMax(0xa0);
+	(void)xTaskGenericNotify();
+	SetBasepri(old);
+}
+
+// Found: a task critical section with BASEPRI raised; xTaskResumeAll ends with a critical section
+__attribute__((noinline)) void BoostedLocker() noexcept
+{
+	const uint32_t old = GetBasepri();
+	SetBasepriMax(0xa0);
+	{
+		Locker lock;
+		selector = 13;
+	}
+	SetBasepri(old);
+}
+
+// Found: a critical section of the function itself with BASEPRI raised, whose end writes BASEPRI 0
+__attribute__((noinline)) void BoostedCritical() noexcept
+{
+	const uint32_t old = GetBasepri();
+	SetBasepriMax(0xa0);
+	vPortEnterCritical();
+	selector = 16;
+	vPortExitCritical();
+	SetBasepri(old);
+}
+
+// Found: a call through a function pointer with BASEPRI raised (also a finding of the heap check)
+__attribute__((noinline)) void BoostedCallback() noexcept
+{
+	const uint32_t old = GetBasepri();
+	SetBasepriMax(0xa0);
+	callback();
+	SetBasepri(old);
+}
+
+// Found: a task notification with PRIMASK set; vPortEnterCritical ends with cpsie i on the Cortex-M7 r0p1
+__attribute__((noinline)) void MaskedNotify() noexcept
+{
+	const uint32_t flags = GetPrimask();
+	DisableIrq();
+	(void)xTaskGenericNotify();
+	SetPrimask(flags);
+}
+
+// Found: a FromISR function with PRIMASK set, which ends its raise of BASEPRI with cpsie i on the Cortex-M7 r0p1
+__attribute__((noinline)) void MaskedGiveFromIsr() noexcept
+{
+	const uint32_t flags = GetPrimask();
+	DisableIrq();
+	vTaskGenericNotifyGiveFromISR();
+	SetPrimask(flags);
+}
+
+// Found: a nested region whose inner end clears PRIMASK for the outer one too
+__attribute__((noinline)) void NestedEnable() noexcept
+{
+	const uint32_t flags = GetPrimask();
+	DisableIrq();
+	DisableIrq();
+	selector = 14;
+	EnableIrq();
+	selector = 15;
+	SetPrimask(flags);
+}
+
+// Not found: the notification after the region, as Move::OnEndstopOrZProbeStatesChanged wakes the CAN sender
+__attribute__((noinline)) void NotifyAfterBoost() noexcept
+{
+	const uint32_t old = GetBasepri();
+	SetBasepriMax(0xa0);
+	const bool wake = (selector != 0);
+	SetBasepri(old);
+	if (wake)
+	{
+		(void)xTaskGenericNotify();
+	}
+}
+
+// Not found: a FreeRTOS call inside a critical section of the function: the nested end keeps the mask
+__attribute__((noinline)) void NotifyInCritical() noexcept
+{
+	vPortEnterCritical();
+	(void)xTaskGenericNotify();
+	vPortExitCritical();
+}
+
+// Not found: a FromISR function with BASEPRI raised; it restores BASEPRI to the value that it found
+__attribute__((noinline)) void BoostedGiveFromIsr() noexcept
+{
+	const uint32_t old = GetBasepri();
+	SetBasepriMax(0xa0);
+	vTaskGenericNotifyGiveFromISR();
+	SetBasepri(old);
+}
+
+// Not found: a callee that saves and restores PRIMASK, as IrqSave and IrqRestore do
+__attribute__((noinline)) void SaveRestoreHelper() noexcept
+{
+	const uint32_t flags = GetPrimask();
+	DisableIrq();
+	selector = 17;
+	SetPrimask(flags);
+}
+
+__attribute__((noinline)) void MaskedSaveRestore() noexcept
+{
+	const uint32_t flags = GetPrimask();
+	DisableIrq();
+	SaveRestoreHelper();
+	SetPrimask(flags);
+}
+
 extern "C" void Reset_Handler() noexcept
 {
 	SuspendedNew(); LockerMalloc(); OutOfLineFree(nullptr); CallsHelperInCritical(); MaskedNew(); BoostedMalloc();
 	SuspendedCallback(); CallStatic(); SwitchInRegion(); AllocateBeforeRegion(); ConditionalRegion(true);
 	AllocateAfterRestore(); SwitchOutsideRegion();
+	BoostedNotify(); BoostedLocker(); BoostedCritical(); BoostedCallback(); MaskedNotify(); MaskedGiveFromIsr(); NestedEnable();
+	NotifyAfterBoost(); NotifyInCritical(); BoostedGiveFromIsr(); MaskedSaveRestore();
 	for (;;) { }
 }
 

@@ -167,7 +167,8 @@ them, and none is fixed here:
   - `DDARing.cpp:500-501` says this code "must make no FreeRTOS calls".
 - **B2, the same with PRIMASK set** (MB6HC, PrintBadMoves). `DriveMovement::UpdateCurrentMotion` takes an
   `AtomicCriticalSectionLocker` (`DriveMovement.h:329`), and `NewSegment` (`:374`) can print from inside it. `debugPrintf`'s
-  test does not see PRIMASK.
+  test does not see PRIMASK. `make scan-unmask` finds this one (`unmask-census.md`), because the mutex enables the interrupts on
+  the Cortex-M7 r0p1.
 - **B3, SysTick stuck-task path with M111 Heat.** `LocalHeater::SwitchOff` calls `MessageF` (`LocalHeater.cpp:258-261`), which
   takes mutexes in an ISR.
 - **B4, `RingBuffer::Init`** (RRFLibraries `RingBuffer.h:69-82`, M111 F) frees and reallocates the debug buffer while an ISR may

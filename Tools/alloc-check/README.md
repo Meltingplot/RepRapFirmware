@@ -1,7 +1,8 @@
 # Heap use inside protected regions check
 
 This check fails when RepRapFirmware can reach the heap from a new place inside a protected region, unless `allowlist.txt` names
-it. A protected region is code that runs
+it. With `--unmask` it fails when a new place lifts the mask of a region that masks interrupts too early, unless
+`unmask-allowlist.txt` names it (see below). A protected region is code that runs
 - with the scheduler suspended (`vTaskSuspendAll` to `xTaskResumeAll`),
 - inside a FreeRTOS critical section (`vPortEnterCritical` to `vPortExitCritical`),
 - with BASEPRI raised (`msr BASEPRI_MAX`),
@@ -127,22 +128,78 @@ function to the heap and to calls through a register.
 - **Other errors in regions.** A blocking call (a mutex, a `ReadWriteLock`, a notification wait) inside a region is a different
   error and only found where it also reaches the heap.
 
+## Interrupts unmasked inside a region (`--unmask`)
+
+`make scan-unmask` runs the same analysis for a second error class: code that lifts the mask of a region that masks interrupts
+before the region ends. `unmask-allowlist.txt` names the findings that may stay, and `unmask-census.md` has the reasoning.
+
+**Why.** A BASEPRI or PRIMASK region keeps an interrupt out while the code works on data that the interrupt uses too: the step
+interrupt, a DMA interrupt. If the mask is lifted early, the interrupt runs while the region still relies on it. FreeRTOS lifts
+masks in places that are easy to miss:
+- In task context every FreeRTOS critical section ends with BASEPRI 0 when its nesting count drops to 0 (`vPortExitCritical`,
+  `port.c:480-489` on the Cortex-M7 r0p1, `:492-499` on the Cortex-M4F). Task notifications, mutexes, queues and `xTaskResumeAll`
+  (`tasks.c:4038-4162`, so the end of every `TaskCriticalSectionLocker`) work inside one. Inside a `BasePriorityBooster` each of
+  them sets BASEPRI to 0.
+- The SAME70 boards build FreeRTOS with the Cortex-M7 r0p1 port (FreeRTOS `Makefiles/SAME70.mk:7`). Its `vPortRaiseBASEPRI`
+  and `ulPortRaiseBASEPRI` wrap the write of BASEPRI in `cpsid i` and `cpsie i` (`portmacro.h:210-224`, `:228-247`), so every
+  critical section and every `FromISR` function clears PRIMASK. Inside an `AtomicCriticalSectionLocker` or after `IrqDisable`
+  each of them enables the interrupts.
+- On the Cortex-M0+ (`Makefiles/SAMC21.mk:7`, Duet3Expansion) a critical section masks with PRIMASK, and its end runs `cpsie i`.
+- `IrqEnable` is an unconditional `cpsie i` (CoreN2G `src/Core.h:378-381`). A function that pairs `IrqDisable` with `IrqEnable`
+  enables the interrupts for a caller that had disabled them.
+
+**What counts.** The check follows the region state of each function as for the heap and reports:
+- a call with PRIMASK set to a function that reaches a clear of PRIMASK (`cpsie i`, or `msr PRIMASK` with 0);
+- a call with BASEPRI raised to a function that reaches a write of BASEPRI 0, or that reaches `vPortExitCritical` while the
+  function has no critical section of its own open, and the end of the function's own outermost critical section with BASEPRI
+  raised;
+- inside a critical section of the function (`critical`), a call that reaches a clear of the mask that critical sections use;
+- a clear in the function itself while one of its regions is still open around it (nested regions), with the function as target;
+- a call through a register inside such a region, and a call to a function that can reach one.
+
+Which mask a critical section uses comes from what `vPortEnterCritical` leaves raised: BASEPRI on the Cortex-M4F and M7, PRIMASK
+on the Cortex-M0+. `vPortExitCritical` is known by name, because the check cannot see the value that it writes. The chains pass
+through `xTaskResumeAll`. An exception handler is not a region of its own here: an interrupt at the handler's priority or below
+stays out whatever BASEPRI and PRIMASK are, so only the regions that a handler opens count.
+
+**Key.** `Opener [kind] -> target` as above, with the kinds `basepri`, `primask` and `critical`. The target is the function that
+holds the instruction that lifts the mask (`vPortExitCritical`, `vPortEnterCritical`, `vTaskGenericNotifyGiveFromISR`, ...), the
+opener itself for a nested clear, or `indirect call`. A call that reaches both gives only the key of the function. The message is
+`interrupts unmasked inside a protected region` or `call through a register inside a region that masks interrupts`.
+
+**What it does not see**, in addition to the list above:
+- **A restore by a test.** ASF's `cpu_irq_restore` runs `cpsie i` only if the saved state had the interrupts enabled (CoreN2G
+  `src/SAM4S_4E_E70/asf/common/utils/interrupt/interrupt_sam_nvic.h:163-167`). The check counts that as a clear;
+  `efc_perform_command` is such a case.
+- **A critical section that a caller holds.** A FreeRTOS call then leaves the mask in place, but the check reports it.
+- **When the mask is lifted.** A call that lifts it as the last thing in the region is found like one at its start.
+  `unmask-census.md` tells them apart (SAFE-LAST), and such an entry has to be read again when its region changes.
+
+Better than an allowlist entry: make the FreeRTOS call after the region. Upstream does this in
+`Move::OnEndstopOrZProbeStatesChanged`, which leaves the wake-up of the CAN sender to its caller (`src/Movement/Move.cpp:4157`).
+
 ## Use
 
 The Makefile needs the Arm GNU toolchain (`CROSS_COMPILE`, default `arm-none-eabi-`: `objdump`, `nm`, `addr2line`) and python3.
 The firmware build container of DuetSoftwareFramework has both. The ELF files are those that `Tools/pointer-check` builds with
 `-g`; the check reads the source lines from their debug information.
 
-    make check                      # build the configurations with -g (Tools/pointer-check), then check them
+    make check                      # build the configurations with -g (Tools/pointer-check), then run both checks
     make check CONFIGS=Duet3_MB6HC  # only this configuration; entries of the others show up as notes
-    make scan                       # check the ELF files that are already there, without building
-    make update                     # rewrite allowlist.txt from the ELF files that are there
+    make scan                       # the heap check on the ELF files that are already there, without building
+    make scan-unmask                # the unmask check on the same ELF files
+    make update                     # rewrite allowlist.txt and unmask-allowlist.txt from the ELF files that are there
     make selftest                   # check alloc-check.py against selftest/src/sample.cpp and no-alloc.cpp
 
 One run takes a few seconds per ELF file. `selftest/src/sample.cpp` has positive and negative cases: inline and out-of-line
 regions, a callee that allocates, `cpsid i`, `BASEPRI_MAX`, a call through a function pointer, a static function, a jump table,
-an exception handler. `selftest/expected.txt` has their keys. `no-alloc.cpp` has none: `make selftest` runs `--update` on it, which
-must write an allowlist with the header and no entries.
+an exception handler. `selftest/expected.txt` has their keys. The unmask cases have theirs in `selftest/expected-unmask.txt`:
+- with BASEPRI raised, a task notification, a `TaskCriticalSectionLocker`, a critical section and a call through a register;
+- with PRIMASK set, a notification, a `FromISR` function and a nested `cpsie i`;
+- and the patterns that must not be found.
+
+The runtime stand-ins model the Cortex-M7 r0p1 port. `no-alloc.cpp` has none of either: `make selftest` runs `--update` on it
+for both, which must write an allowlist with the header and no entries.
 
 ## A new finding
 
@@ -151,6 +208,7 @@ possible, add the key from the error message to `allowlist.txt` with the reason 
 goes away, the check prints a note, and `make update` removes it from the list.
 
 The Meltingplot release workflow (`.github/workflows/mp-release.yml`) runs `make selftest` and `make scan` right after the raw
-pointer check, on the ELF files it has built. A new finding stops the release.
+pointer check, on the ELF files it has built, and `make scan-unmask` as a step of its own after them. A new finding stops the
+release.
 
 The firmware builds do not use this folder: make and CMake only read `src/`.
