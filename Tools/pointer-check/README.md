@@ -6,9 +6,11 @@ This check fails when RepRapFirmware declares a new raw pointer that can be rese
 
 Other tasks read many pointers without a lock, for example the object model when the SBC task or a network task serialises
 it. When the main task deletes an object while such a pointer still names it, the reader follows a pointer to freed memory.
-Two cases were fixed in this fork:
+The first two cases fixed in this fork were:
 - `StringHandle::Delete` released the slot before it cleared the handle (#50).
 - `Move::SetKinematics` deleted the old kinematics before it pointed `kinematics` at the new one (#51).
+
+`census.md` lists the ones found since.
 
 Neither order is visible in the declaration `T *p`. The aim is that every pointer that another task can read states how it is
 shared, through a pointer class instead of a raw pointer. This check finds the raw pointers. The pointer classes do not exist
@@ -24,10 +26,12 @@ pointers, and whose pointer is not const:
 - `T *p`, `const T *p`, `T *volatile p`, function pointers and typedefs of pointers (`TaskHandle`) count.
 - `T *const p` and references do not count.
 - Declarations inside functions do not count: locals, static locals, local classes and the members of lambda closures.
-- Code under `src/` that comes from elsewhere does not count: lwIP, the GMAC driver, MQTT-C, the Wiznet driver,
-  `src/Libraries`, BOSSA, `src/libc` and `src/libcpp`. `VENDORED` in `pointer-check.py` lists these folders.
+- Code under `src/` that comes from elsewhere does not count: lwIP, the Atmel Ethernet glue in `Networking/LwipEthernet/GMAC`,
+  MQTT-C, the Wiznet driver, `src/Libraries`, BOSSA, `src/libc` and `src/libcpp`. `VENDORED` in `pointer-check.py` lists these
+  folders. The GMAC drivers in `src/Hardware/SAME70/Ethernet` and `src/Hardware/SAME5x/Ethernet` do count (`gmac_device`).
 
-`selftest/src/sample.cpp` has one example of each case. `selftest/src/no-pointers.cpp` has none: `make selftest` runs
+`selftest/src/sample.cpp` has one example of each case above except the `VENDORED` folders, for which the selftest has no
+file. `selftest/src/no-pointers.cpp` has none: `make selftest` runs
 `--update` on it, which must write an allowlist with the header and no entries.
 
 ## How it works
@@ -74,7 +78,8 @@ The exit code is 1 if there is a new pointer.
 
 Use a pointer class that states how the pointer is shared. Until RepRapFirmware has such classes, add the key from the error
 message to `allowlist.txt` with the reason why the pointer is safe, e.g. that only one task reads and writes it. A static member
-is reported at its definition in the `.cpp` file, not at the declaration in the class. When a pointer goes away, the check
+is reported at its declaration or at its definition, whichever comes first by path and line; for `Foo.h` and `Foo.cpp` that is
+the definition in `Foo.cpp`. When a pointer goes away, the check
 prints a note, and `make update` removes it from the list.
 
 The Meltingplot release workflow (`.github/workflows/mp-release.yml`) runs `make check` before it uploads the binaries. A new
