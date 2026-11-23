@@ -30,18 +30,19 @@ The verdict per entry is its comment in `unmask-allowlist.txt`; this file has th
 ## Facts that several entries share
 
 - **Priorities** on these boards (3 priority bits, `src/RepRapFirmware.h:738-769`):
-  - 0 watchdog, 1 Aux UART receive, 2 WiFi UART receive;
+  - 0 watchdog;
+  - on the Mini5plus 1 Aux UART receive, 2 WiFi UART receive, 3 their transmit; on MB6HC and MB6XD 3 Aux and WiFi UART;
   - the FreeRTOS system call limit is 3 (`configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY`, FreeRTOS
     `src/include/FreeRTOSConfig.h:323`);
-  - 4 CAN, pins, ADC, driver diagnostics;
+  - 4 CAN, pins, I2C, TMC UART, and on the Mini5plus ADC and driver diagnostics;
   - 5 step and DMA;
   - 6 USB and HSMCI, 7 SPI and Ethernet.
 
-  `BasePriorityBooster(NvicPriorityStep)` keeps out 5 and below. Inside a `FromISR` function BASEPRI is the system call limit, so
-  only 0 to 2 can run.
+  `BasePriorityBooster(NvicPriorityStep)` keeps out priorities 5 to 7. Inside a `FromISR` function BASEPRI is the system call
+  limit, so only 0 to 2 can run.
 - **Ports.**
   - MB6HC and MB6XD build FreeRTOS with the Cortex-M7 r0p1 port (`Makefiles/Duet3_MB6HC.mk:85`, `Duet3_MB6XD.mk:85`). Its
-    critical sections and `FromISR` functions run `cpsie i` (FreeRTOS `portmacro.h:210-224`, `:228-247`).
+    critical sections and the `FromISR` functions that mask run `cpsie i` (FreeRTOS `portmacro.h:210-224`, `:228-247`).
   - Mini5plus uses the Cortex-M4F port (`Makefiles/Duet3Mini5plus.mk:80`), which leaves PRIMASK alone.
 
   This is why the PRIMASK entries that end in `vPortEnterCritical` or a `FromISR` function are MB6HC/MB6XD only.
@@ -69,11 +70,11 @@ CHX first: MB6HC in SBC mode.
 | `DDARing::Hold [basepri] -> vPortExitCritical` | all | **SUSPECT** [open] | Inside `BasePriorityBooster(NvicPriorityStep)` (`DDARing.cpp:855`), `CancelHomingMoveInFlight` (`:857`) calls `GetCurrentDDA` first (`:888`), whose locker writes BASEPRI 0. The rest of `CancelHomingMoveInFlight` (`CancelStepping`, `:895-907`), `CutHomingMove` or `FindStopPoint`, and `GetEndCoordinates` (`:859-868`) then run with the step interrupt enabled. Only when a homing move is in flight and last in the queue (`:856`). The other sites are `debugPrintf` with BASEPRI raised (guarded, see above), but after the early unmask BASEPRI is 0, so a Lookahead `debugPrintf` would take the mutex with the scheduler suspended (census.md B1). Feed hold, 3.7-ch e7e30e13f |
 | `DDARing::StopMoves [basepri] -> vPortExitCritical` | all | **SUSPECT** [open] | The same `CancelHomingMoveInFlight` call as the first statement of the booster (`DDARing.cpp:1091-1092`); `FindStopPoint` and the walk that frees the queued moves (`:1094` on) then run unmasked. The `debugPrintf` site (`:1094`) is guarded. Feed hold, 3.7-ch e7e30e13f |
 | `TmcLoop [primask] -> vPortEnterCritical` | MB6HC | **SUSPECT** [open] | `AtomicCriticalSectionLocker lock2` (`TMC51xx.cpp:1988`); `TaskBase::ClearCurrentTaskNotifyCount` (`:1994`, `RTOSIface.h:236`) enters a critical section, which enables the interrupts (r0p1). `EnableEndOfTransferInterrupt`, `ResetSpi`, `EnableDma` and `EnableSpi` (`:1995-1998`) then run unmasked; the scheduler stays suspended (`:1979`). D. Crocker added lock2 (3fe403dde, 2023); Duet3D 3.7-dev a507cb8f0 `TMC51xx.cpp:1982-1992` is the same. What an interrupt there can break is not shown |
-| `Move::UpdateCurrentMotion [primask] -> vPortEnterCritical` | MB6HC | **SUSPECT** [open] (census.md B2) | `DriveMovement::UpdateCurrentMotion` holds an `AtomicCriticalSectionLocker` (`DriveMovement.h:330`) and calls `NewSegment` (`:374`). `NewSegment` prints with `debugPrintf` under `DEBUG_DISCONTINUITIES` and M111 `PrintBadMoves` for an extruder (`DriveMovement.cpp:179-197`, `:206-222`). `PhaseStepControlLoop` calls it with BASEPRI 0 (`Move.cpp:2775`), so `debugPrintf` takes the mutex: the r0p1 enables the interrupts, and a wait would assert. Debug only |
+| `Move::UpdateCurrentMotion [primask] -> vPortEnterCritical` | MB6HC | **SUSPECT** [open] (census.md B2) | `DriveMovement::UpdateCurrentMotion` holds an `AtomicCriticalSectionLocker` (`DriveMovement.h:330`) and calls `NewSegment` (`:374`). `NewSegment` prints with `debugPrintf` under `DEBUG_DISCONTINUITIES` and M111 `PrintBadMoves` for an extruder (`DriveMovement.cpp:179-197`, `:206-222`). `PhaseStepControlLoop` calls it with BASEPRI 0 (`Move.cpp:2775`), so `debugPrintf` takes the USB mutex (`Platform.cpp:3362`): the r0p1 enables the interrupts inside the locker, and if another task holds the mutex the TMC task waits there. Debug only |
 | `Move::AddLinearSegments [basepri] -> vPortExitCritical` | all | SAFE-LAST | Sites:<br>- `Interrupt()` (`Move.cpp:2448`) is the last call of the second booster (`:2408-2453`);<br>- `MoveSegment::Split` (`:2209`) allocates only with an empty free list, and `MoveSegment::PrimeFreeList` (`:2178`) fills it (census.md, SAFE-PRIMED);<br>- `NewSegment` (`:2433`) prints with BASEPRI raised (guarded). |
 | `Move::PhaseStepControlLoop [basepri] -> vPortExitCritical` | MB6HC | SAFE-LAST | The TMC task calls it (`TMC51xx.cpp:1915`). `Interrupt()` (`Move.cpp:2851`) is the last call of its booster (`:2848-2853`). The `UpdateCurrentMotion` site (`:2797`) prints with BASEPRI raised (guarded) |
 | `Move::OnEndstopOrZProbeStatesChanged [basepri] -> vPortExitCritical` | all | SAFE-LAST | `CheckEndstops(true)` (`Move.cpp:4154`) is the last call of the booster (`:4128-4156`). It wakes the Move task only before it returns:<br>- at once for `stopAll` (`:3041-3049`);<br>- for `stopAxis`, only when no endstop is active any more (`:3060-3063`). The next `emgr.CheckEndstops()` then walks an empty list and returns no hit (`EndstopsManager.cpp:316-318`, `:368`), so `CheckEndstops` returns (`Move.cpp:3098-3103`).<br>The CAN sender is woken after the booster (`:4157`) |
-| `RxDmaCompleteCallback [primask] -> vTaskGenericNotifyGiveFromISR` | MB6HC | SAFE-LAST | `tmcTask.GiveFromISR` is the last statement of the locker (`TMC51xx.cpp:1817-1822`). In the DMA interrupt (priority 5) the cleared PRIMASK lets in only priorities below 5, and the step interrupt has 5 too (`RepRapFirmware.h:759-760`) |
+| `RxDmaCompleteCallback [primask] -> vTaskGenericNotifyGiveFromISR` | MB6HC | SAFE-LAST | `tmcTask.GiveFromISR` is the last statement of the locker (`TMC51xx.cpp:1817-1822`). In the DMA interrupt (priority 5) the cleared PRIMASK lets in only priorities 0 to 4, and the step interrupt has 5 too (`RepRapFirmware.h:759-760`) |
 | `DDA::Prepare [basepri] -> vPortExitCritical` | all | SAFE-GUARDED | `CheckEndstops(false)` (`DDA.cpp:1492`) wakes the Move task only `if (executingMove)` (`Move.cpp:3041`, `:3060`) |
 | `DDARing::PauseMoves [basepri] -> vPortExitCritical` | all | SAFE-GUARDED | Its only site is `FindStopPoint` (`DDARing.cpp:693`), which reaches `debugPrintf` with BASEPRI raised |
 | `RepRap::StartIap [primask] -> FileStore::Close` | all | SAFE-GUARDED | `MassStorage::CombineName` (`RepRap.cpp:2280`) calls `MessageF` only when the name overflows. The `OpenFile` check before excludes that with the same `CombineName` (`RepRap.cpp:2059`, census.md) |

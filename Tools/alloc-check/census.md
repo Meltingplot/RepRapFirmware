@@ -41,7 +41,7 @@ From `src/Platform/TaskPriorities.h:12-40`, with preemption and time slicing on 
 | 2 | SBC |
 | 3 | heat, USB |
 | 4 | Move, TMC, analog in, height controller |
-| 5 | laser, CAN sender, Ethernet |
+| 5 | laser, CAN sender, Ethernet, TMC while phase stepping (MB6HC, `TMC51xx.cpp:2257`) |
 | 6 | CAN receiver, accelerometer |
 | 7 | CAN clock |
 
@@ -69,11 +69,12 @@ CHX first: MB6HC in SBC mode, with TOOL1LC, EXP1HCL and SZP expansion boards on 
 | `Move::AddLinearSegments` [basepri] | Move, CAN receiver in expansion mode | SAFE-PRIMED | upstream cdcd49333 |
 
 Notes on the heap findings:
-- **K23, `ReadWriteLock`.** The four lock functions allocate their `LockRecord` after `RTOSIface::EnterTaskCriticalSection()`
-  (RRFLibraries `RTOSIface.cpp:235-470`). The record comes from the freelist, and from `::operator new` when that is empty
-  (`FreelistManager.h:34-48`). `Tools/lock-record-alloc-test` shows the corruption with the real `nano-mallocr.c`, malloc mutex
-  and `vTaskSuspendAll`. The fix gets the record before the scheduler is suspended and gives an unused one back after it is
-  resumed. `ConditionalLockForReading` and `ConditionalLockForWriting` are not linked into these three configurations and so have
+- **K23, `ReadWriteLock`.** K23 is the number of this finding in the K list of the raw pointer census and its follow-up
+  (`Tools/pointer-check/census.md`). The four lock functions allocate their `LockRecord` after
+  `RTOSIface::EnterTaskCriticalSection()` (RRFLibraries `RTOSIface.cpp:235-453`). The record comes from the freelist, and from
+  `::operator new` when that is empty (`FreelistManager.h:34-48`). `Tools/lock-record-alloc-test` shows the corruption with
+  the real `nano-mallocr.c`, malloc mutex and `vTaskSuspendAll`. The fix gets the record before the scheduler is suspended and
+  gives an unused one back after it is resumed. `ConditionalLockForReading` and `ConditionalLockForWriting` are not linked into these three configurations and so have
   no entry; the fix covers them too. After the fix the allocation takes the malloc mutex, which asserts if BASEPRI or PRIMASK is
   set (`Tasks.cpp:117`) and is skipped again if the caller has suspended the scheduler. Built against the fixed RRFLibraries
   (with `LIBRARIES_DIR`), the three configurations have exactly the same entries minus the two `ReadWriteLock` keys, so
@@ -155,8 +156,8 @@ Each group shares one reason in `allowlist.txt`.
 
 ## Findings outside this class
 
-The targets above reach no heap. Four of them block where they must not. These are not allocations, so the check does not report
-them, and none is fixed here:
+The targets above reach no heap, but three of them block where they must not (B1-B3), and M111 F frees a buffer that an ISR may
+write (B4). The check does not report these, and none is fixed here:
 - **B1, `debugPrintf` with the scheduler suspended resets the board.** `debugPrintf` (`RepRapFirmware.cpp:211-223`) goes to
   `Platform::DebugMessage` when there is no M111 F buffer and BASEPRI is 0. It does not check the scheduler.
   `DebugMessage` takes a `MutexLocker` (`Platform.cpp:3362`). If another task holds the mutex, or nobody does,
@@ -165,10 +166,11 @@ them, and none is fixed here:
     `DDARing::AddHoldJog` (`DDARing.cpp:1000`).
   - Needs the Lookahead flag plus a lookahead error, or PrintTransforms (`Move.cpp:1302`, every transform).
   - `DDARing.cpp:500-501` says this code "must make no FreeRTOS calls".
-- **B2, the same with PRIMASK set** (MB6HC, PrintBadMoves). `DriveMovement::UpdateCurrentMotion` takes an
-  `AtomicCriticalSectionLocker` (`DriveMovement.h:329`), and `NewSegment` (`:374`) can print from inside it. `debugPrintf`'s
+- **B2, the same mutex with PRIMASK set** (MB6HC, PrintBadMoves). `DriveMovement::UpdateCurrentMotion` takes an
+  `AtomicCriticalSectionLocker` (`DriveMovement.h:330`), and `NewSegment` (`:374`) can print from inside it. `debugPrintf`'s
   test does not see PRIMASK. `make scan-unmask` finds this one (`unmask-census.md`), because the mutex enables the interrupts on
-  the Cortex-M7 r0p1.
+  the Cortex-M7 r0p1. The TMC task calls `PhaseStepControlLoop` outside its `TaskCriticalSectionLocker` (`TMC51xx.cpp:1915`,
+  `:1979`), so there a wait for the mutex blocks instead of asserting.
 - **B3, SysTick stuck-task path with M111 Heat.** `LocalHeater::SwitchOff` calls `MessageF` (`LocalHeater.cpp:258-261`), which
   takes mutexes in an ISR.
 - **B4, `RingBuffer::Init`** (RRFLibraries `RingBuffer.h:69-82`, M111 F) frees and reallocates the debug buffer while an ISR may
