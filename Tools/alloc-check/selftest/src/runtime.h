@@ -1,7 +1,8 @@
-// The names that alloc-check.py knows, for the selftest: the region primitives of FreeRTOS, two FreeRTOS API functions for the
+// The names that alloc-check.py knows, for the selftest: the region primitives of FreeRTOS, three FreeRTOS API functions for the
 // unmask check, the heap functions of RepRapFirmware's src/libc/nano-mallocr.c, and the instructions that CoreN2G's Core.h and
 // CoreIO.h use to mask interrupts.
-// runtime.cpp defines the functions; they do nothing useful, the selftest only reads their machine code.
+// runtime.cpp defines the functions; they do nothing useful, the selftest only reads their machine code. With RESTORING_PORT
+// defined, they behave as the ports of Meltingplot/FreeRTOS from PR #1 on (see runtime.cpp).
 
 #ifndef ALLOC_CHECK_SELFTEST_RUNTIME_H
 #define ALLOC_CHECK_SELFTEST_RUNTIME_H
@@ -17,6 +18,7 @@ extern "C"
 	void vPortExitCritical() noexcept;
 	long xTaskGenericNotify() noexcept;
 	void vTaskGenericNotifyGiveFromISR() noexcept;
+	long xQueueSemaphoreTake(unsigned long ticksToWait) noexcept;
 	void *malloc(size_t n) noexcept;
 	void free(void *p) noexcept;
 }

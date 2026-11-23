@@ -1,0 +1,7 @@
+BoostedCallback [basepri] -> indirect call
+BoostedPoll [basepri] -> xPortTaskCanBlock
+BoostedTake [basepri] -> xPortTaskCanBlock
+MaskedTake [primask] -> xPortTaskCanBlock
+MaskedVeneer [primask] -> FarEnable
+NestedEnable [primask] -> NestedEnable
+TakeInCritical [critical] -> xPortTaskCanBlock

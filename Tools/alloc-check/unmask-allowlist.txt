@@ -1,38 +1,61 @@
-# Places where a region that masks interrupts can lift its mask before it ends, that RepRapFirmware may keep, see README.md
-# ("Interrupts unmasked inside a region"). alloc-check.py --unmask fails for every other one. One key per line, then a comment:
+# Places where a region that masks interrupts can lift its mask before it ends or can block, that RepRapFirmware may keep, see
+# README.md ("Interrupts unmasked inside a region"). alloc-check.py --unmask fails for every other one. One key per line, then a
+# comment:
 #   Function [kind] -> target           kind: basepri, primask, or critical (a critical section of the function); target: the
 #                                       function that holds the instruction that lifts the mask, the function itself for a
-#                                       nested clear, or "indirect call"
+#                                       nested clear, "indirect call", or xPortTaskCanBlock for a call that can block
 #   path/below/src.cpp: Function [...]  static functions and functions in anonymous namespaces
 #
-# The list is the state of 3.7-dev at b857e3530 (RRFLibraries 3.7-dev 888b479) in Duet3_MB6HC, Duet3_MB6XD and
-# Duet3Mini5plus. Each comment gives the verdict of the census in unmask-census.md and the reason:
+# The list is the state of 3.7-dev at d68586f10 (RRFLibraries 3.7-dev 888b479) in Duet3_MB6HC, Duet3_MB6XD and
+# Duet3Mini5plus, built against two FreeRTOS versions:
+#   - 3.7-dev 980af10, whose vPortExitCritical clears the mask: the keys -> vPortExitCritical, -> vPortEnterCritical and
+#     -> vTaskGenericNotifyGiveFromISR;
+#   - with Meltingplot/FreeRTOS PR #1, whose critical sections restore the mask and whose hooks assert xPortTaskCanBlock() where
+#     a task blocks: the keys -> xPortTaskCanBlock and the indirect calls of DDA::Prepare, DDARing::PauseMoves,
+#     Move::OnEndstopOrZProbeStatesChanged, Move::PhaseStepControlLoop and Move::UpdateCurrentMotion, which the lift of the
+#     critical section hid before.
+# Once every build uses that FreeRTOS (DuetSoftwareFramework pin), "make update" removes the keys of the first one.
+# Each comment gives the verdict of the census in unmask-census.md and the reason:
 #   SUSPECT          the mask can be lifted while code that the region protects still runs; the fix branch is in brackets,
 #                    or "open"
 #   SAFE-LAST        the mask is lifted by the last call of the region, and nothing that the region protects runs after it.
 #                    Read the entry again when its region changes
 #   SAFE-GUARDED     the path to the instruction runs only under a run-time condition that the check does not evaluate, and the
 #                    condition excludes it inside the region
+#   SAFE-PRIMED      the path runs only when a free list is empty, and the region fills it before it starts
 #   SAFE-RESTORE     the instruction that the check counts as a clear restores the state that its function saved
-#   SAFE-NO-UNMASK   a call through a register: every target the firmware sets was read and none lifts the mask
-# A new entry needs the reason why the mask stays in place. Better: make the call after the region.
+#   SAFE-NO-UNMASK   a call through a register: every target the firmware sets was read and none lifts the mask or blocks
+# A new entry needs the reason why the mask stays in place, or why the call cannot block there. Better: make the call after the
+# region.
 # "make update" rewrites the list from the firmware and keeps the comments of the entries that stay.
 CanDevice::Interrupt [primask] -> indirect call                      # SAFE-NO-UNMASK: rxCallback is StepTimer::CanTimingMessageReceived, which stores three values and reads the timer registers (StepTimer.cpp:289-294); only boards without an external timestamp counter (Mini5plus)
+DDA::Prepare [basepri] -> indirect call                              # SAFE-NO-UNMASK: CheckEndstops(false) (DDA.cpp:1492) calls the endstop and Z probe overrides, which read pins, the ADC or cached states (census.md "Move::CheckEndstops"), Kinematics::GetHomingMode, which returns a constant, and IterateDrivers with the lambdas of StopAxisOrExtruder (Move.cpp:3378-3389)
 DDA::Prepare [basepri] -> vPortExitCritical                          # SAFE-GUARDED: CheckEndstops(false) wakes the Move task only if executingMove (Move.cpp:3041, :3060)
-DDARing::Hold [basepri] -> indirect call                             # SAFE-NO-UNMASK: CancelHomingMoveInFlight -> CancelStepping reaches IterateDrivers with the lambdas of CancelStepping, as for LowPowerOrStallPause [primask] -> indirect call
+DDARing::Hold [basepri] -> indirect call                             # SAFE-NO-UNMASK: CancelHomingMoveInFlight -> CancelStepping reaches IterateDrivers with the lambdas of CancelStepping, as for LowPowerOrStallPause [primask] -> indirect call; CutHomingMove, FindStopPoint and GetEndCoordinates reach the kinematics overrides (unmask-census.md, DDARing::Hold -> vPortExitCritical) and debugPrintf, whose putc with a mask is Platform::IsrDebugPutc, a ring buffer write (RepRapFirmware.cpp:217, Platform.cpp:385-394)
 DDARing::Hold [basepri] -> vPortExitCritical                         # SAFE-GUARDED: CutHomingMove, FindStopPoint and GetEndCoordinates reach a FreeRTOS call only through debugPrintf, which takes no mutex with BASEPRI raised (RepRapFirmware.cpp:219); CancelHomingMoveInFlight takes no lock (GetCurrentDDAAlreadyLocked)
+DDARing::Hold [basepri] -> xPortTaskCanBlock                         # SAFE-GUARDED: CutHomingMove, FindStopPoint and GetEndCoordinates reach it only through debugPrintf, which takes no mutex with BASEPRI raised or PRIMASK set (RepRapFirmware.cpp:219); the Release on the shortest chain is a give, which does not block (FreeRTOS queue.c:83, :790)
 DDARing::LowPowerOrStallPause [primask] -> indirect call             # SAFE-NO-UNMASK: IterateDrivers runs the lambdas of CancelStepping (Move.cpp:1137-1138) and StopAxisOrExtruder (:3378-3389), which set a flag or edit the CAN stop lists
+DDARing::PauseMoves [basepri] -> indirect call                       # SAFE-NO-UNMASK: FindStopPoint reaches only debugPrintf, whose putc with a mask is Platform::IsrDebugPutc, a ring buffer write (RepRapFirmware.cpp:217, Platform.cpp:385-394)
 DDARing::PauseMoves [basepri] -> vPortExitCritical                   # SAFE-GUARDED: FindStopPoint reaches only debugPrintf, which takes no mutex with BASEPRI raised (RepRapFirmware.cpp:219)
+DDARing::PauseMoves [basepri] -> xPortTaskCanBlock                   # SAFE-GUARDED: FindStopPoint reaches it only through debugPrintf, which takes no mutex with BASEPRI raised or PRIMASK set (RepRapFirmware.cpp:219); the Release on the shortest chain is a give, which does not block (FreeRTOS queue.c:83, :790)
 DDARing::StopMoves [basepri] -> indirect call                        # SAFE-NO-UNMASK: as DDARing::Hold [basepri] -> indirect call
 DDARing::StopMoves [basepri] -> vPortExitCritical                    # SAFE-GUARDED: FindStopPoint reaches only debugPrintf, as for PauseMoves; CancelHomingMoveInFlight takes no lock (GetCurrentDDAAlreadyLocked)
+DDARing::StopMoves [basepri] -> xPortTaskCanBlock                    # SAFE-GUARDED: as DDARing::PauseMoves [basepri] -> xPortTaskCanBlock
 EraseAndReset [primask] -> efc_perform_command                       # SAFE-RESTORE: cpu_irq_restore runs cpsie i only if the saved state was enabled (interrupt_sam_nvic.h:163-167); erase before a reset
 Flash::WriteUserSignature [primask] -> efc_perform_command           # SAFE-RESTORE: cpu_irq_restore runs cpsie i only if the saved state was enabled (interrupt_sam_nvic.h:163-167)
-Move::AddLinearSegments [basepri] -> indirect call                   # SAFE-NO-UNMASK: printf and catf reach putc of SafeVsnprintf, which writes to the buffer (SafeVsnprintf.cpp:812-821); IterateDrivers runs the SetDriversDirection lambda, a pin write (Move2.cpp:474)
+Move::AddLinearSegments [basepri] -> indirect call                   # SAFE-NO-UNMASK: printf and catf reach putc of SafeVsnprintf, which writes to the buffer (SafeVsnprintf.cpp:812-821); IterateDrivers runs the SetDriversDirection lambda, a pin write (Move2.cpp:474); Interrupt reaches CheckEndstops, as for DDA::Prepare [basepri] -> indirect call
 Move::AddLinearSegments [basepri] -> vPortExitCritical               # SAFE-LAST: Interrupt() wakes the Move task only as it ends, and is the last call of the booster; Split is primed (SAFE-PRIMED in census.md), NewSegment prints guarded
+Move::AddLinearSegments [basepri] -> xPortTaskCanBlock               # SAFE-PRIMED: MoveSegment::Allocate reaches Tasks::AllocPermanent only when the free list is empty (MoveSegment.cpp:19-31), and PrimeFreeList fills it before the booster (Move.cpp:2178, allowlist.txt); GetMallocMutex asserts on that path anyway (Tasks.cpp:117). NewSegment (MB6HC) reaches it only through debugPrintf, which takes no mutex with BASEPRI raised or PRIMASK set (RepRapFirmware.cpp:219); the Release on the shortest chain is a give, which does not block (FreeRTOS queue.c:83, :790)
+Move::OnEndstopOrZProbeStatesChanged [basepri] -> indirect call      # SAFE-NO-UNMASK: CheckEndstops(true) (Move.cpp:4154), as for DDA::Prepare [basepri] -> indirect call
 Move::OnEndstopOrZProbeStatesChanged [basepri] -> vPortExitCritical  # SAFE-LAST: CheckEndstops(true) is the last call of the booster and wakes the Move task only when it returns or no endstop is left active
+Move::PhaseStepControlLoop [basepri] -> indirect call                # SAFE-NO-UNMASK: UpdateCurrentMotion reaches debugPrintf in NewSegment, whose putc with a mask is Platform::IsrDebugPutc (RepRapFirmware.cpp:217, Platform.cpp:385-394); Interrupt reaches CheckEndstops, as for DDA::Prepare [basepri] -> indirect call (MB6HC)
 Move::PhaseStepControlLoop [basepri] -> vPortExitCritical            # SAFE-LAST: Interrupt() (TMC task) is the last call of its booster and wakes the Move task only as it ends; UpdateCurrentMotion prints guarded
+Move::PhaseStepControlLoop [basepri] -> xPortTaskCanBlock            # SAFE-GUARDED: UpdateCurrentMotion and Interrupt reach it only through NewSegment and debugPrintf, which takes no mutex with BASEPRI raised or PRIMASK set (RepRapFirmware.cpp:219); the Release on the shortest chain is a give, which does not block (FreeRTOS queue.c:83, :790) (MB6HC)
+Move::UpdateCurrentMotion [primask] -> indirect call                 # SAFE-NO-UNMASK: NewSegment reaches debugPrintf, whose putc with a mask is Platform::IsrDebugPutc (RepRapFirmware.cpp:217, Platform.cpp:385-394) (MB6HC)
 Move::UpdateCurrentMotion [primask] -> vPortEnterCritical            # SAFE-GUARDED (census.md B2): NewSegment reaches a FreeRTOS call only through debugPrintf, which takes no mutex with PRIMASK set (RepRapFirmware.cpp:219) (MB6HC)
+Move::UpdateCurrentMotion [primask] -> xPortTaskCanBlock             # SAFE-GUARDED (census.md B2): NewSegment reaches it only through debugPrintf, which takes no mutex with BASEPRI raised or PRIMASK set (RepRapFirmware.cpp:219); the Release on the shortest chain is a give, which does not block (FreeRTOS queue.c:83, :790) (MB6HC)
 RepRap::StartIap [primask] -> FileStore::Close                       # SAFE-GUARDED: CombineName calls MessageF only on overflow, which the OpenFile check with the same CombineName excludes (RepRap.cpp:2059)
+RepRap::StartIap [primask] -> xPortTaskCanBlock                      # SAFE-GUARDED: CombineName reaches it only through MessageF, as for RepRap::StartIap [primask] -> FileStore::Close
 RxDmaCompleteCallback [primask] -> vTaskGenericNotifyGiveFromISR     # SAFE-LAST: GiveFromISR is the last statement of the locker; in the DMA interrupt (5) the step interrupt (5) stays out (MB6HC)
 SoftwareReset [primask] -> efc_perform_command                       # SAFE-RESTORE: cpu_irq_restore runs cpsie i only if the saved state was enabled (interrupt_sam_nvic.h:163-167); reset path
 SoftwareReset [primask] -> indirect call                             # SAFE-NO-UNMASK: GetAsyncPort(n)->canWrite() is AsyncSerial::canWrite, which returns RingBuffer::SpaceLeft (CoreN2G AsyncSerial.cpp)

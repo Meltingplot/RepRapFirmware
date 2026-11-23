@@ -135,7 +135,8 @@ function to the heap and to calls through a register.
 ## Interrupts unmasked inside a region (`--unmask`)
 
 `make scan-unmask` runs the same analysis for a second error class: code that lifts the mask of a region that masks interrupts
-before the region ends. `unmask-allowlist.txt` names the findings that may stay, and `unmask-census.md` has the reasoning.
+before the region ends, or that can block inside it. `unmask-allowlist.txt` names the findings that may stay, and
+`unmask-census.md` has the reasoning.
 
 **Why.** A BASEPRI or PRIMASK region keeps an interrupt out while the code works on data that the interrupt uses too: the step
 interrupt, a DMA interrupt. If the mask is lifted early, the interrupt runs while the region still relies on it. FreeRTOS lifts
@@ -152,6 +153,13 @@ masks in places that are easy to miss:
 - `IrqEnable` is an unconditional `cpsie i` (CoreN2G `src/Core.h:378-381`). A function that pairs `IrqDisable` with `IrqEnable`
   enables the interrupts for a caller that had disabled them.
 
+The first three points are those of the ports of upstream FreeRTOS V11.3.0. From Meltingplot/FreeRTOS PR #1 on, the ports
+restore the mask instead: `vPortExitCritical` writes back the BASEPRI (PRIMASK on the Cortex-M0+) that the outermost
+`vPortEnterCritical` found, and the r0p1 workaround restores PRIMASK. A FreeRTOS call inside a region then keeps its mask, but a
+task that blocks there cannot switch away, because the context switch (PendSV) runs at the lowest priority. The `FreeRTOSConfig.h`
+of that FreeRTOS asserts `xPortTaskCanBlock()` in the trace hooks where a task blocks, suspends or deletes itself, so such a
+block stops the firmware in `vAssertCalled`.
+
 **What counts.** The check follows the region state of each function as for the heap and reports:
 - a call with PRIMASK set to a function that reaches a clear of PRIMASK (`cpsie i`, or `msr PRIMASK` with 0);
 - a call with BASEPRI raised to a function that reaches a write of BASEPRI 0, or that reaches `vPortExitCritical` while the
@@ -159,17 +167,23 @@ masks in places that are easy to miss:
   raised;
 - inside a critical section of the function (`critical`), a call that reaches a clear of the mask that critical sections use;
 - a clear in the function itself while one of its regions is still open around it (nested regions), with the function as target;
-- a call through a register inside such a region, and a call to a function that can reach one.
+- a call through a register inside such a region, and a call to a function that can reach one;
+- a call that reaches `xPortTaskCanBlock` with BASEPRI raised, with PRIMASK set or inside a critical section of the function: a
+  place where the task can block. Firmware built with a FreeRTOS without the hooks has no such function and no such finding.
 
 Which mask a critical section uses comes from what `vPortEnterCritical` leaves raised: BASEPRI on the Cortex-M4F and M7, PRIMASK
-on the Cortex-M0+. `vPortExitCritical` is known by name, because the check cannot see the value that it writes. The chains pass
-through `xTaskResumeAll`. An exception handler is not a region of its own here: an interrupt at the handler's priority or below
+on the Cortex-M0+. `vPortExitCritical` of upstream FreeRTOS is known by name, because the check cannot see the value that it
+writes: the compiler writes the nesting count that it has just found to be 0. A `vPortExitCritical` that writes the masks only
+with values that it loaded from memory and did not test, and never clears one, restores the mask (`exit_restores`), as the ports
+of Meltingplot/FreeRTOS from PR #1 on do; then it lifts nothing. The chains pass through `xTaskResumeAll`. An exception handler is not a region of its own here: an interrupt at the handler's priority or below
 stays out whatever BASEPRI and PRIMASK are, so only the regions that a handler opens count.
 
 **Key.** `Opener [kind] -> target` as above, with the kinds `basepri`, `primask` and `critical`. The target is the function that
 holds the instruction that lifts the mask (`vPortExitCritical`, `vPortEnterCritical`, `vTaskGenericNotifyGiveFromISR`, ...), the
-opener itself for a nested clear, or `indirect call`. A call that reaches both gives only the key of the function. The message is
-`interrupts unmasked inside a protected region` or `call through a register inside a region that masks interrupts`.
+opener itself for a nested clear, `indirect call`, or `xPortTaskCanBlock` for a call that can block. A call that reaches both a
+lift and a call through a register gives only the key of the function; a call that can block gives its own key as well. The
+message is `interrupts unmasked inside a protected region`, `call through a register inside a region that masks interrupts` or
+`a call that can block inside a region that masks interrupts`.
 
 **What it does not see**, in addition to the list above:
 - **A restore by a test.** ASF's `cpu_irq_restore` runs `cpsie i` only if the saved state had the interrupts enabled (CoreN2G
@@ -178,6 +192,9 @@ opener itself for a nested clear, or `indirect call`. A call that reaches both g
 - **A critical section that a caller holds.** A FreeRTOS call then leaves the mask in place, but the check reports it.
 - **When the mask is lifted.** A call that lifts it as the last thing in the region is found like one at its start.
   `unmask-census.md` tells them apart (SAFE-LAST), and such an entry has to be read again when its region changes.
+- **Whether a call blocks.** The check follows a call to the place where it would block, whatever its block time: a take with
+  timeout 0 counts like one that waits, and a give reaches the block in `xQueueGenericSend` although a mutex give uses block
+  time 0 (`queueMUTEX_GIVE_BLOCK_TIME`, FreeRTOS `src/queue.c:83`, `:790`).
 
 Better than an allowlist entry: make the FreeRTOS call after the region. Upstream does this in
 `Move::OnEndstopOrZProbeStatesChanged`: `CheckEndstops` returns whether the CAN sender must be woken
@@ -202,10 +219,15 @@ an exception handler, a call through a veneer of the linker (section `.far`). `s
 cases have theirs in `selftest/expected-unmask.txt`:
 - with BASEPRI raised, a task notification, a `TaskCriticalSectionLocker`, a critical section and a call through a register;
 - with PRIMASK set, a notification, a `FromISR` function, a nested `cpsie i` and a `cpsie i` behind a veneer;
+- a semaphore take with a timeout with BASEPRI raised, with PRIMASK set and inside a critical section, and one with timeout 0;
 - and the patterns that must not be found.
 
-The runtime stand-ins model the Cortex-M7 r0p1 port. `no-alloc.cpp` has none of either: `make selftest` runs `--update` on it
-for both, which must write an allowlist with the header and no entries.
+The runtime stand-ins model the Cortex-M7 r0p1 port of upstream FreeRTOS. `make selftest` builds `sample.cpp` a second time with
+`RESTORING_PORT`, whose stand-ins restore the mask and check `xPortTaskCanBlock` where the take blocks, as the ports of
+Meltingplot/FreeRTOS from PR #1 on. Its keys are in `selftest/expected-unmask-restoring.txt`: the lifts of the critical sections
+are gone, and the takes are found with the target `xPortTaskCanBlock`. Its heap keys must be those of `selftest/expected.txt`.
+`no-alloc.cpp` has none of either: `make selftest` runs `--update` on it for both, which must write an allowlist with the header
+and no entries.
 
 ## A new finding
 

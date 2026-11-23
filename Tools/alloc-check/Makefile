@@ -8,7 +8,8 @@
 #   make scan-unmask  the unmask check on the same ELF files: fail for each finding that unmask-allowlist.txt does not name
 #   make update       rewrite both allowlists with the findings of the ELF files that are there (keeps the comments of
 #                     existing entries)
-#   make selftest     check alloc-check.py against selftest/src/sample.cpp and selftest/src/no-alloc.cpp
+#   make selftest     check alloc-check.py against selftest/src/sample.cpp and selftest/src/no-alloc.cpp, and against
+#                     sample.cpp built for a FreeRTOS port whose critical sections restore the mask (RESTORING_PORT)
 #
 # CONFIGS selects the configurations, default those of "make all" in the top-level Makefile.
 
@@ -51,18 +52,29 @@ build/selftest/%.elf: selftest/src/%.cpp selftest/src/runtime.cpp selftest/src/r
 	@mkdir -p build/selftest
 	cd selftest && $(CROSS_COMPILE)g++ $(SELFTEST_FLAGS) src/$*.cpp src/runtime.cpp -o $(abspath $@)
 
-selftest: build/selftest/sample.elf build/selftest/no-alloc.elf
+# The same with the stand-ins of a port whose critical sections restore the mask (Meltingplot/FreeRTOS from PR #1 on)
+build/selftest/%-restoring.elf: selftest/src/%.cpp selftest/src/runtime.cpp selftest/src/runtime.h Makefile
+	@mkdir -p build/selftest
+	cd selftest && $(CROSS_COMPILE)g++ $(SELFTEST_FLAGS) -DRESTORING_PORT src/$*.cpp src/runtime.cpp -o $(abspath $@)
+
+selftest: build/selftest/sample.elf build/selftest/no-alloc.elf build/selftest/sample-restoring.elf
 	$(CHECK) --root selftest --keys $< > build/selftest/keys.txt
 	diff -u selftest/expected.txt build/selftest/keys.txt
 	$(CHECK) --root selftest --allowlist selftest/expected.txt $<
 	! $(CHECK) --root selftest $< > build/selftest/without-allowlist.txt
-	grep -q 'src/sample.cpp:32: error: heap reached inside a protected region: SuspendedNew \[suspended\] -> operator new' build/selftest/without-allowlist.txt
-	grep -q 'src/sample.cpp:81: error: call through a register inside a protected region: SuspendedCallback' build/selftest/without-allowlist.txt
+	grep -q 'src/sample.cpp:34: error: heap reached inside a protected region: SuspendedNew \[suspended\] -> operator new' build/selftest/without-allowlist.txt
+	grep -q 'src/sample.cpp:83: error: call through a register inside a protected region: SuspendedCallback' build/selftest/without-allowlist.txt
 	$(CHECK) --root selftest --unmask --keys $< > build/selftest/unmask-keys.txt
 	diff -u selftest/expected-unmask.txt build/selftest/unmask-keys.txt
 	$(CHECK) --root selftest --unmask --allowlist selftest/expected-unmask.txt $<
 	! $(CHECK) --root selftest --unmask $< > build/selftest/unmask-without-allowlist.txt
 	grep -q 'src/sample.cpp:[0-9]*: error: interrupts unmasked inside a protected region: BoostedNotify \[basepri\] -> vPortExitCritical' build/selftest/unmask-without-allowlist.txt
+	$(CHECK) --root selftest --keys build/selftest/sample-restoring.elf > build/selftest/restoring-keys.txt
+	diff -u selftest/expected.txt build/selftest/restoring-keys.txt
+	$(CHECK) --root selftest --unmask --keys build/selftest/sample-restoring.elf > build/selftest/unmask-restoring-keys.txt
+	diff -u selftest/expected-unmask-restoring.txt build/selftest/unmask-restoring-keys.txt
+	! $(CHECK) --root selftest --unmask build/selftest/sample-restoring.elf > build/selftest/unmask-restoring-without-allowlist.txt
+	grep -q 'src/sample.cpp:[0-9]*: error: a call that can block inside a region that masks interrupts: BoostedTake \[basepri\] -> xPortTaskCanBlock' build/selftest/unmask-restoring-without-allowlist.txt
 	printf '# header\nGone [suspended] -> malloc  # an entry of a finding that no longer exists\n' > build/selftest/update.txt
 	$(CHECK) --root selftest --allowlist build/selftest/update.txt --update build/selftest/no-alloc.elf
 	printf '# header\n' | diff -u - build/selftest/update.txt
