@@ -170,6 +170,9 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 	if (src <= CanId::MaxCanAddress)
 	{
 		ExpansionBoardData& board = boards[src];
+#if SUPPORT_ACCELEROMETERS
+		bool restarted = false;
+#endif
 		{
 			WriteLocker lock(boardsLock);
 
@@ -187,7 +190,7 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 					Event::AddEvent(EventType::expansion_reconnect, 0, src, 0, "");
 				}
 #if SUPPORT_ACCELEROMETERS
-				Accelerometers::RemoteBoardRestarted(src);
+				restarted = true;
 #endif
 			}
 			board.hasVin = board.hasV12 = board.hasMcuTemp = false;
@@ -246,6 +249,14 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 			}
 			UpdateBoardState(src, BoardState::running);
 		}
+
+#if SUPPORT_ACCELEROMETERS
+		if (restarted)
+		{
+			// Not under boardsLock: in SBC mode finishing the file waits for the SBC task, which reads the board data under that lock
+			Accelerometers::RemoteBoardRestarted(src);
+		}
+#endif
 
 		// Tell the sending board that we don't need any more announcements from it
 		buf->SetupRequestMessageNoRid<CanMessageAcknowledgeAnnounce>(CanInterface::GetCanAddress(), src);
