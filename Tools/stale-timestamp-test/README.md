@@ -37,8 +37,9 @@ Without the fix the 8 runs with a newer report during the check fail; the others
 
 Not covered:
 - the other places of the census that were found to be ordered right, or where the writer cannot preempt the reader;
-- `SbcInterface` (fork code, census F7) and Duet3Expansion `CanInterface::UpdateSyncLockState` (census F2), which are fixed
-  separately.
+- the same order in `SbcInterface::ApplyRecordedAborts` (fork code, census F7, only the M122 value `maxAbortApplyDelay`), recorded in
+  DuetSoftwareFramework `design/open-findings.md`;
+- Duet3Expansion `CanInterface::UpdateSyncLockState` (census F2), fixed in Meltingplot/Duet3Expansion#29 with its own test.
 
 The firmware builds do not use this folder: make and CMake only read `src/`, and a resource filter in `.project` hides it from Eclipse.
 
