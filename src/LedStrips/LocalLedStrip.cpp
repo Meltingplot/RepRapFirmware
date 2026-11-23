@@ -11,6 +11,7 @@
 
 #include <GCodes/GCodeBuffer/GCodeBuffer.h>
 #include <Movement/StepTimer.h>
+#include <Cache.h>
 
 #if SUPPORT_REMOTE_COMMANDS
 # include <CanMessageGenericParser.h>
@@ -317,6 +318,7 @@ void LocalLedStrip::LedParams::ApplyBrightness() noexcept
 // DMA the data. Must be a multiple of 2 bytes if USE_16BIT_SPI is true.
 void LocalLedStrip::DmaSendChunkBuffer(size_t numBytes) noexcept
 {
+	Cache::FlushBeforeDMASend(chunkBuffer, numBytes);
 # if LEDSTRIP_USES_USART
 	DotStarUsart->US_CR = US_CR_RSTRX | US_CR_RSTTX | US_CR_TXDIS;			// reset transmitter and receiver, disable transmitter
 	Pdc * const usartPdc = usart_get_pdc_base(DotStarUsart);
