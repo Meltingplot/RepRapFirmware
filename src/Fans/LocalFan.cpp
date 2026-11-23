@@ -211,10 +211,13 @@ int32_t LocalFan::GetRPM() const noexcept
 	// The ISR sets fanInterval to the number of step interrupt clocks it took to get fanMaxInterruptCount interrupts.
 	// We get 2 tacho pulses per revolution, hence 2 interrupts per revolution.
 	// When the fan stops, we get no interrupts and fanInterval stops getting updated. We must recognise this and return zero.
+	// Capture the values that the ISR writes before we read the timer, otherwise an interrupt in between makes the reading look old.
+	const uint32_t lastResetTime = tachoLastResetTime;
+	const uint32_t interval = tachoInterval;
 	return (!tachoPort.IsValid())
 			? -1																			// we return -1 if there is no tacho configured
-			: (tachoInterval != 0 && StepTimer::GetTimerTicks() - tachoLastResetTime < 3 * StepClockRate)	// if we have a reading and it is less than 3 seconds old
-			  ? tachoMultiplier/tachoInterval												// then calculate RPM
+			: (interval != 0 && StepTimer::GetTimerTicks() - lastResetTime < 3 * StepClockRate)	// if we have a reading and it is less than 3 seconds old
+			  ? tachoMultiplier/interval													// then calculate RPM
 			  : 0;																			// else assume fan is off or tacho not connected
 }
 
