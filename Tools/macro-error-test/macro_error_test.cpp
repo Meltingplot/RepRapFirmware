@@ -395,6 +395,9 @@ public:
 		Log("SetFileFinished");
 		Check(!OnStack(machineState, mustBeGone), "SetFileFinished runs while the failed macro is still on the stack");
 	}
+	// The buffer of every stand-in GB exists from the start, so FillBuffer never takes its first-code path (GCodeBuffer.h)
+	bool HasBuffer() const noexcept { return true; }
+	void PrimeBinaryBuffer() noexcept { }
 	void PutBinary(const uint32_t *, size_t, uint8_t) noexcept
 	{
 		Log("PutBinary");

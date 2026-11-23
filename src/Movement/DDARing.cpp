@@ -564,6 +564,13 @@ void DDARing::UpdateStartCoordinates(const float coords[MaxAxes]) noexcept
 DDA *_ecv_null DDARing::GetCurrentDDA() const noexcept
 {
 	TaskCriticalSectionLocker lock;
+	return GetCurrentDDAAlreadyLocked();
+}
+
+// The same for a caller that already keeps the Move task out. Taking the lock again would not be harmless: its end runs a
+// FreeRTOS critical section, which sets BASEPRI to 0 and on the Cortex-M7 r0p1 also enables the interrupts
+DDA *_ecv_null DDARing::GetCurrentDDAAlreadyLocked() const noexcept
+{
 	DDA *cdda = getPointer;
 	const uint32_t now = StepTimer::GetMovementTimerTicks();
 	while (cdda->IsCommitted())
@@ -885,7 +892,7 @@ void DDARing::Hold() noexcept
 // Must be called with the step interrupt locked out and the Move task suspended. Sets wakeAsyncSender if a remote driver was told to stop
 DDA *_ecv_null DDARing::CancelHomingMoveInFlight(bool& wakeAsyncSender) noexcept
 {
-	DDA *_ecv_null const cdda = GetCurrentDDA();
+	DDA *_ecv_null const cdda = GetCurrentDDAAlreadyLocked();
 	if (cdda == nullptr || cdda != lastHomingMoveDda || !cdda->IsCheckingEndstops())
 	{
 		return nullptr;
@@ -1145,7 +1152,7 @@ bool DDARing::LowPowerOrStallPause(MovementState& ms) noexcept
 	bool wakeAsyncSender = false;
 
 	IrqDisable();
-	DDA *_ecv_null dda = GetCurrentDDA();
+	DDA *_ecv_null dda = GetCurrentDDAAlreadyLocked();
 	if (dda != nullptr && dda->GetFilePosition() != noFilePosition)
 	{
 		// We are executing a move that has a file address, so we can interrupt it

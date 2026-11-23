@@ -216,7 +216,7 @@ void debugPrintf(const char *_ecv_array fmt, ...) noexcept
 	{
 		vuprintf(Platform::IsrDebugPutc, fmt, vargs);
 	}
-	else if (__get_BASEPRI() == 0 && !inInterrupt())		// we need both tests to make sure it is safe to write to USB
+	else if (__get_BASEPRI() == 0 && __get_PRIMASK() == 0 && !inInterrupt())	// we need all three tests to make sure it is safe to write to USB
 	{
 		reprap.GetPlatform().DebugMessage(fmt, vargs);
 	}
