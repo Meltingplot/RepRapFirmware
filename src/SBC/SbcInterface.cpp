@@ -859,7 +859,7 @@ void SbcInterface::ExchangeData() noexcept
 			if (OutputBuffer::Allocate(buf))
 			{
 				MessageType type;
-				if (transfer.ReadMessage(type, buf))
+				if (transfer.ReadMessage(packet->length, type, buf))
 				{
 					// Check if this is a targeted reply to a single channel (e.g. a response to M121 retransmitted by DSF)
 					GCodeBuffer *gb = nullptr;
@@ -1317,7 +1317,7 @@ void SbcInterface::ExchangeData() noexcept
 		{
 			if (fileOperation == FileOperation::read)
 			{
-				int bytesRead = transfer.ReadFileData(fileReadBuffer, fileBufferLength);
+				int bytesRead = transfer.ReadFileData(packet->length, fileReadBuffer, fileBufferLength);
 				fileSuccess = bytesRead >= 0;
 				fileOffset = fileSuccess ? bytesRead : 0;
 				fileOperation = FileOperation::none;
@@ -1335,7 +1335,7 @@ void SbcInterface::ExchangeData() noexcept
 		{
 			if (fileOperation == FileOperation::getFileList)
 			{
-				fileBufferLength = transfer.ReadFileList(fileReadBuffer, fileBufferLength, fileListEndOfList);
+				fileBufferLength = transfer.ReadFileList(packet->length, fileReadBuffer, fileBufferLength, fileListEndOfList);
 				fileSuccess = true;
 				fileOperation = FileOperation::none;
 				fileSemaphore.Give();

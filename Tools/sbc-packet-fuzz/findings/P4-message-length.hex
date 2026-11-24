@@ -1,4 +1,5 @@
-# expect: AddressSanitizer: heap-buffer-overflow at OutputMemory.cpp:240 in OutputBuffer::cat
+# expect: clean
+# Fixed: the Read function reads its lengths only as far as they lie within the packet. Before the fix: AddressSanitizer: heap-buffer-overflow at OutputMemory.cpp:240 in OutputBuffer::cat
 # P4: Message with a length larger than the packet; OutputBuffer::cat copies beyond rxBuffer (DataTransfer.cpp:731-732, OutputMemory.cpp:240)
 # seed 1 input 394: AddressSanitizer: heap-buffer-overflow at OutputMemory.cpp:240 in OutputBuffer::cat
 # =================================================================

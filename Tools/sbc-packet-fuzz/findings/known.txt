@@ -1,11 +1,2 @@
-# Report keys of the open findings P1-P5 (README.md), from the deterministic runs of seed 1 and 3 with 50000 inputs each. make check fails
-# on a report that is not listed here
-AddressSanitizer: SEGV at DataTransfer.cpp:659 in DataTransfer::ReadGetObjectModel
-AddressSanitizer: SEGV at DataTransfer.cpp:685 in DataTransfer::ReadPrintStartedInfo
-AddressSanitizer: SEGV at DataTransfer.cpp:689 in DataTransfer::ReadPrintStartedInfo
-AddressSanitizer: heap-buffer-overflow at DataTransfer.cpp:659 in DataTransfer::ReadGetObjectModel
-AddressSanitizer: heap-buffer-overflow at DataTransfer.cpp:685 in DataTransfer::ReadPrintStartedInfo
-AddressSanitizer: heap-buffer-overflow at DataTransfer.cpp:689 in DataTransfer::ReadPrintStartedInfo
-AddressSanitizer: heap-buffer-overflow at DataTransfer.cpp:781 in DataTransfer::ReadFileData
-AddressSanitizer: heap-buffer-overflow at OutputMemory.cpp:240 in OutputBuffer::cat
-AddressSanitizer: heap-buffer-overflow at SbcInterface.cpp:749 in SbcInterface::ProcessPackets
+# Report keys of the open findings (README.md) in the deterministic runs. P1-P5 are fixed and the runs of seed 1 and 3 with 50000 inputs
+# each report nothing, so make check fails on any report

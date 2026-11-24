@@ -68,12 +68,12 @@ public:
 	GCodeChannel ReadMacroCompleteInfo(bool &error) noexcept;								// Read info about a completed macro file
 	GCodeChannel ReadCodeChannel() noexcept;												// Read a code channel
 	GCodeChannel ReadEvaluateExpression(size_t packetLength, const StringRef& expression) noexcept;	// Read an expression request
-	bool ReadMessage(MessageType& type, OutputBuffer *buf) noexcept;						// Read a request to output a message
+	bool ReadMessage(size_t packetLength, MessageType& type, OutputBuffer *buf) noexcept;						// Read a request to output a message
 	GCodeChannel ReadSetVariable(bool& createVariable, const StringRef& varName, const StringRef& expression) noexcept;	// Read a variable set request
 	GCodeChannel ReadDeleteLocalVariable(const StringRef& varName) noexcept;				// Read a variable deletion request
 	FileHandle ReadOpenFileResult(FilePosition& fileLength) noexcept;						// Read the result of a file open request
-	int ReadFileData(char *buffer, size_t length) noexcept;									// Read file data from the SBC
-	size_t ReadFileList(char *buffer, size_t length, bool& endOfList) noexcept;				// Read a chunk of a directory listing from the SBC
+	int ReadFileData(size_t packetLength, char *buffer, size_t length) noexcept;									// Read file data from the SBC
+	size_t ReadFileList(size_t packetLength, char *buffer, size_t length, bool& endOfList) noexcept;				// Read a chunk of a directory listing from the SBC
 	GCodeChannel ReadSetLastCodeResult(GCodeResult& result) noexcept;						// Read the result of the last executed code
 
 	// The packets that belong to the work of a code channel take the tag of its channel epoch, see SbcMessageFormats.h. A code reply carries it in its message type
