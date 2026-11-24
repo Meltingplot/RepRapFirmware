@@ -239,6 +239,47 @@ namespace
 	}
 }
 
+// The parameter layout that BinaryParser::Put must accept: the parameter table, then the value of each parameter in table order, as DSF
+// writes them (Writer.WriteCode, Writer.cs) and BinaryParser::WriteParameters steps over them (BinaryParser.cpp): intValue elements of
+// 4 bytes for the array types, intValue bytes padded to a multiple of 4 for String, Expression and DateTime, intValue bytes for
+// BoolArray, 8 bytes for ULong and Bitmap64, nothing for the others. The code fits if every value ends within it and no element count is
+// negative. 64-bit arithmetic, written independently of BinaryParser::ParametersFit, which the target checks against it
+static bool CodeFitsModel(const uint8_t *code, size_t length) noexcept
+{
+	CodeHeader h;
+	memcpy(&h, code, sizeof(h));
+	int64_t end = (int64_t)sizeof(CodeHeader) + (int64_t)h.numParameters * (int64_t)sizeof(CodeParameter);
+	if (end > (int64_t)length) { return false; }
+	for (unsigned int i = 0; i < h.numParameters; ++i)
+	{
+		CodeParameter p;
+		memcpy(&p, code + sizeof(CodeHeader) + i * sizeof(CodeParameter), sizeof(p));
+		const int64_t n = p.intValue;
+		switch (p.type)
+		{
+		case DataType::IntArray: case DataType::UIntArray: case DataType::FloatArray: case DataType::DriverIdArray:
+			if (n < 0) { return false; }
+			end += 4 * n;
+			break;
+		case DataType::String: case DataType::Expression: case DataType::DateTime:
+			if (n < 0) { return false; }
+			end += (n + 3) / 4 * 4;
+			break;
+		case DataType::BoolArray:
+			if (n < 0) { return false; }
+			end += n;
+			break;
+		case DataType::ULong: case DataType::Bitmap64:
+			end += 8;
+			break;
+		default:
+			break;
+		}
+		if (end > (int64_t)length) { return false; }
+	}
+	return true;
+}
+
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
 	if (size < ConfigBytes + sizeof(CodeHeader) || size - ConfigBytes > MaxGCodeBinaryLength || ((size - ConfigBytes) % sizeof(uint32_t)) != 0)
@@ -262,6 +303,20 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	std::vector<uint32_t> words(codeLength / sizeof(uint32_t));
 	memcpy(words.data(), data + ConfigBytes, codeLength);
 	gb->binaryParser.Put(words.data(), words.size());
+	const bool accepted = (gb->binaryParser.DataLength() != 0);
+	if (accepted != CodeFitsModel(data + ConfigBytes, codeLength))
+	{
+		// BinaryParser::Put stores a code whose parameters do not fit in it, or refuses one whose parameters fit
+		fprintf(stderr, "ERROR: FUZZ: BinaryParser::Put %s a code of %u bytes that %s\nSUMMARY: FUZZ: parameter-check-differs\n",
+				(accepted) ? "stored" : "refused", (unsigned int)codeLength, (accepted) ? "does not fit" : "fits");
+		abort();
+	}
+	if (gb->overflowed || gb->malformed != !accepted)
+	{
+		fprintf(stderr, "ERROR: FUZZ: overflow %d and malformed %d after BinaryParser::Put of a code of %u bytes\nSUMMARY: FUZZ: put-flags-wrong\n",
+				(int)gb->overflowed, (int)gb->malformed, (unsigned int)codeLength);
+		abort();
+	}
 	if (getenv("FUZZ_POISON_STALE") != nullptr)
 	{
 		// Report reads of what earlier codes left behind the code, too (wrong data, not a memory error)
@@ -430,6 +485,15 @@ static std::vector<Bytes> FuzzSeeds()
 								{ IntParam('P', 0), FloatParam('X', 1.0f), FloatParam('a', 2.0f) }));
 			seeds.push_back(Code(config, getter, 4, 'M', 569, 1, 0, { DriverParam('P', 1, 2), StringParam('S', "1", DataType::Expression) }));
 			seeds.push_back(Code(config, getter, 4, 'M', 999, -1, 0, { }));
+		}
+	}
+	for (const Bytes& b : seeds)
+	{
+		// The seeds are codes as DSF writes them, so the layout model must take each of them
+		if (!CodeFitsModel(b.data() + ConfigBytes, b.size() - ConfigBytes))
+		{
+			fprintf(stderr, "ERROR: FUZZ: a seed of %u bytes does not fit the layout model\nSUMMARY: FUZZ: seed-does-not-fit\n", (unsigned int)b.size());
+			abort();
 		}
 	}
 	return seeds;

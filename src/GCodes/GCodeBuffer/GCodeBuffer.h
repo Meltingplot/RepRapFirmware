@@ -76,6 +76,7 @@ public:
 	bool FileEnded() noexcept;														// Called when we reach the end of the file we are reading from
 	void DecodeCommand() noexcept;													// Decode the command in the buffer when it is complete
 	bool HadOverflow() noexcept { return overflowed; }								// Indicates if the previous binary G-code was too long
+	bool WasMalformed() noexcept { return malformed; }								// Indicates if the parameters of the previous binary G-code did not fit in it
 	bool CheckMetaCommand(const StringRef& reply) THROWS(GCodeException);			// Check whether the current command is a meta command, or we are skipping a block
 
 	char GetCommandLetter() const noexcept;
@@ -422,6 +423,7 @@ private:
 	char *_ecv_array _ecv_null buffer;					// if allocated must be aligned because in SBC binary mode we do dword fetches from it
 	size_t bufferLength;								// length of the allocated buffer in bytes
 	bool overflowed;									// true if the buffer overflowed
+	bool malformed;										// true if the parameters of the binary G-code in the buffer did not fit in it
 
 #if HAS_SBC_INTERFACE
 	// Accessed by both the Main and SBC tasks

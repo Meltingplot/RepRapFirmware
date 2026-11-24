@@ -1,49 +1,10 @@
-# Report keys of the open findings B1-B8 (README.md), from the deterministic runs of seed 1 and 3 with 50000 inputs each and the
-# libFuzzer run of 360 s. make check fails on a report that is not listed here
-AddressSanitizer: SEGV at BinaryParser.cpp:1003 in BinaryParser::AddParameters
-AddressSanitizer: SEGV at BinaryParser.cpp:249 in BinaryParser::GetIValue
-AddressSanitizer: SEGV at BinaryParser.cpp:391 in BinaryParser::GetIPAddress
-AddressSanitizer: SEGV at BinaryParser.cpp:444 in BinaryParser::GetMacAddress
-AddressSanitizer: SEGV at BinaryParser.cpp:502 in BinaryParser::GetPossiblyQuotedString
-AddressSanitizer: SEGV at BinaryParser.cpp:508 in BinaryParser::GetPossiblyQuotedString
-AddressSanitizer: SEGV at BinaryParser.cpp:536 in BinaryParser::GetFloatArray
-AddressSanitizer: SEGV at BinaryParser.cpp:540 in BinaryParser::GetFloatArray
-AddressSanitizer: SEGV at BinaryParser.cpp:558 in BinaryParser::GetIntArray
-AddressSanitizer: SEGV at BinaryParser.cpp:572 in BinaryParser::GetUnsignedArray
-AddressSanitizer: SEGV at BinaryParser.cpp:576 in BinaryParser::GetUnsignedArray
-AddressSanitizer: SEGV at BinaryParser.cpp:603 in BinaryParser::GetDriverIdArray
-AddressSanitizer: SEGV at BinaryParser.cpp:660 in BinaryParser::GetStringOrUIValue
-AddressSanitizer: SEGV at BinaryParser.cpp:665 in BinaryParser::GetStringOrUIValue
-AddressSanitizer: SEGV at BinaryParser.cpp:912 in BinaryParser::WriteParameters
-AddressSanitizer: SEGV at StringHandle.cpp:70 in StringHandle::InternalAssign
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:249 in BinaryParser::GetIValue
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:444 in BinaryParser::GetMacAddress
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:502 in BinaryParser::GetPossiblyQuotedString
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:558 in BinaryParser::GetIntArray
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:660 in BinaryParser::GetStringOrUIValue
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:854 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:857 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:860 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:865 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:869 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:879 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:891 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:903 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:912 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:929 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:939 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:945 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:955 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:963 in BinaryParser::WriteParameters
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:97 in BinaryParser::DecodeCommand
-AddressSanitizer: heap-use-after-free at BinaryParser.cpp:963 in BinaryParser::WriteParameters
-AddressSanitizer: stack-overflow at BinaryParser.cpp:911 in BinaryParser::WriteParameters
-AddressSanitizer: unknown-crash at BinaryParser.cpp:912 in BinaryParser::WriteParameters
-AddressSanitizer: unknown-crash at BinaryParser.cpp:963 in BinaryParser::WriteParameters
-UBSan: BinaryParser.cpp:911:33: signed integer overflow: N + N cannot be represented in type 'int' (at BinaryParser.cpp:911 in BinaryParser::WriteParameters)
-UBSan: BinaryParser.cpp:911:36: variable length array bound evaluates to non-positive value N (at BinaryParser.cpp:911 in BinaryParser::WriteParameters)
+# Report keys of the open findings B6, B8 and B9 (README.md), from the deterministic runs of seed 1 and 3 with 50000 inputs each after
+# the fix of B1-B5 and B7, and the inputs in findings/. make check fails on a report that is not listed here
+AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:470 in BinaryParser::GetIPAddress
+AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:523 in BinaryParser::GetMacAddress
+AddressSanitizer: heap-buffer-overflow at StringHandle.cpp:70 in StringHandle::InternalAssign
 UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself
-UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:742 in BinaryParser::PrintCommand)
-UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:760 in BinaryParser::AppendFullCommand)
-UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:763 in BinaryParser::AppendFullCommand)
-UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:860 in BinaryParser::WriteParameters)
+UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:821 in BinaryParser::PrintCommand)
+UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:839 in BinaryParser::AppendFullCommand)
+UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:842 in BinaryParser::AppendFullCommand)
+UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:939 in BinaryParser::WriteParameters)

@@ -58,13 +58,25 @@ void BinaryParser::Put(const uint32_t *data, size_t len) noexcept
 		bufferLength = 0;
 		gb.bufferState = GCodeBufferState::executing;
 		gb.overflowed = true;
+		gb.malformed = false;
 	}
 	else
 	{
 		memcpyu32(reinterpret_cast<uint32_t *>(gb.buffer), data, len);
-		bufferLength = codeLength;
-		gb.bufferState = GCodeBufferState::parsingGCode;
 		gb.overflowed = false;
+		if (ParametersFit(codeLength))
+		{
+			bufferLength = codeLength;
+			gb.bufferState = GCodeBufferState::parsingGCode;
+			gb.malformed = false;
+		}
+		else
+		{
+			// Don't parse a code whose parameters don't fit in it, else the functions below read beyond it. Report an error later
+			bufferLength = 0;
+			gb.bufferState = GCodeBufferState::executing;
+			gb.malformed = true;
+		}
 	}
 
 	// Copy G-code data
@@ -73,6 +85,73 @@ void BinaryParser::Put(const uint32_t *data, size_t len) noexcept
 #if SUPPORT_ASYNC_MOVES
 	gb.CurrentFileMachineState().fpos = GetFilePosition();
 #endif
+}
+
+// Check that the parameter table and the value of every parameter lie within the code of the given length, which is in the buffer.
+// WriteParameters steps over the values of more data types than Seen and AddParameters do, by the same amounts, so this follows its
+// steps: the values that Seen and AddParameters find then lie within the code as well.
+// Put calls this, possibly with the scheduler suspended. The table check comes first, so the loop runs at most
+// (MaxGCodeBinaryLength - sizeof(CodeHeader)) / sizeof(CodeParameter) times
+bool BinaryParser::ParametersFit(size_t codeLength) const noexcept
+{
+	const char *parameterStart = reinterpret_cast<const char*>(gb.buffer) + sizeof(CodeHeader);
+	size_t valueStart = sizeof(CodeHeader) + header->numParameters * sizeof(CodeParameter);
+	if (valueStart > codeLength)
+	{
+		return false;
+	}
+
+	for (size_t i = 0; i < header->numParameters; i++)
+	{
+		const CodeParameter *param = reinterpret_cast<const CodeParameter*>(parameterStart + i * sizeof(CodeParameter));
+		const size_t bytesLeft = codeLength - valueStart;
+		size_t valueLength;
+		switch (param->type)
+		{
+		// The intValue of the array, string and expression types is the number of elements or bytes of the value. A negative one gives
+		// a uintValue that is above any code length, and checking it first keeps the products below from wrapping around
+		case DataType::IntArray:
+		case DataType::UIntArray:
+		case DataType::FloatArray:
+		case DataType::DriverIdArray:
+			if (param->uintValue > bytesLeft / sizeof(uint32_t))
+			{
+				return false;
+			}
+			valueLength = param->uintValue * sizeof(uint32_t);
+			break;
+
+		case DataType::String:
+		case DataType::Expression:
+		case DataType::DateTime:
+			if (param->uintValue > bytesLeft)
+			{
+				return false;
+			}
+			valueLength = AddPadding(param->uintValue);
+			break;
+
+		case DataType::BoolArray:
+			valueLength = param->uintValue;
+			break;
+
+		case DataType::ULong:
+		case DataType::Bitmap64:
+			valueLength = sizeof(uint64_t);
+			break;
+
+		default:
+			valueLength = 0;					// the value is held in the parameter itself
+			break;
+		}
+
+		if (valueLength > bytesLeft)
+		{
+			return false;
+		}
+		valueStart += valueLength;
+	}
+	return true;
 }
 
 void BinaryParser::DecodeCommand() noexcept

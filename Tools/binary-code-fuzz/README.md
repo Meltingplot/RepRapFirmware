@@ -33,6 +33,10 @@ Played (`shim/`, `binary_code_fuzz.cpp`):
   reading, which this target does not model
 - `ExpressionValue` (reference counts of heap strings as in the real class) and `VariableSet` (keeps a copy of each macro parameter);
   the constructors of `GCodeException` that take a G-code buffer (they only add the file and line of a file macro); the RTOS locks
+- a layout check after each `Put`: `BinaryParser::Put` must store the code if and only if its parameter table and every value lie
+  within it, as an independent model in 64-bit arithmetic computes it (`CodeFitsModel`, the steps of `WriteParameters`); a difference
+  reports `FUZZ: parameter-check-differs`. The seeds must fit the model (`FUZZ: seed-does-not-fit`), so a code as DSF writes it is
+  stored
 - an invariant check: a heap string must end within its storage space (`Heap.h:22-26`). `StringHandle::InternalAssign` makes sure of
   that for every length that fits; a string that does not end there is read on into the next storage spaces of the 2 KB heap block,
   which ASan cannot see. The check reports `FUZZ: unterminated-heap-string`
@@ -62,11 +66,17 @@ from Eclipse.
 
 ## Findings
 
-The inputs are in `findings/`, each with its report. All defect lines are upstream code (git blame: Christian Hammacher 2019, David
-Crocker 2020-2025). None is reachable from a DSF that writes what `Writer.cs` writes (it sets `numParameters` to the parameter count and
-`intValue` to the UTF-8 byte count or the array length, `Writer.cs:107, 171-236`); they are reached by a DSF or SBC process that writes
-inconsistent values, by a corruption that the CRC32 of SPI misses, and on USB by any corruption that reaches RRF. B6 is reachable
-from a correct DSF.
+The inputs are in `findings/`, each with its report (`# expect: clean` for a fixed one: the input no longer reports anything). All
+defect lines are upstream code (git blame: Christian Hammacher 2019, David Crocker 2020-2025). B1 to B5 and B7 are not reachable from a
+DSF that writes what `Writer.cs` writes (it sets `numParameters` to the parameter count and `intValue` to the UTF-8 byte count or the
+array length, `Writer.cs:107, 171-236`); they are reached by a DSF or SBC process that writes inconsistent values, by a corruption that
+the CRC32 of SPI misses, and on USB by any corruption that reaches RRF. B6, B8 and B9 are reachable from a correct DSF: B6 with a
+number of -2147483648, B8 and B9 with a code of exactly 384 bytes whose last value is a string of the right kind.
+
+B1 to B5 and B7 are fixed: `BinaryParser::Put` checks that the parameter table and every value lie within the code
+(`BinaryParser::ParametersFit`) and refuses a code that does not, the way it refuses a code that is too long for the buffer: the code
+is not parsed, and GCodes replies with the error "GCode command malformed" (`GCodes2.cpp`). The table keeps the line numbers of RRF
+3.7-dev 6c45e07a7, before the fix.
 
 | ID | Defect | Report | Effect on the board |
 |----|--------|--------|---------------------|
@@ -77,7 +87,8 @@ from a correct DSF.
 | B5 | the same with -1: the copy limit is 0, `SafeStrncpy` writes `dst[-1]` (the high byte of the length field) and the string gets neither its text nor a null (`StringHandle.cpp:70`, `StringFunctions.cpp:136-140`) | FUZZ: unterminated-heap-string | the macro reads the parameter on into the next heap strings: wrong data |
 | B6 | RRFLibraries `SafeVsnprintf.cpp:368` negates `INT_MIN` when it prints a G-code number or integer parameter of -2147483648 with `%d` (`BinaryParser.cpp:742, 760, 763, 860`) | UBSan negation overflow at SafeVsnprintf.cpp:368 | undefined behaviour; the printed text was not checked on the board |
 | B7 | array getters: `CheckArrayLength` limits the count to the caller's array, so nothing is written beyond it, but the elements are read from beyond the code (`GetArray`, `BinaryParser.cpp:775-829`; `GetDriverIdArray`, 597-605; `CheckArrayLength`, 832-838) | heap-buffer-overflow at 558 | wrong data |
-| B8 | `GetIPAddress` / `GetMacAddress` parse with `StrToU32` / `StrHexToU32` first and check the end against `intValue` afterwards (`BinaryParser.cpp:388-392`, 441-445) | heap-buffer-overflow at 444 | reads digits beyond the code: wrong data or an error |
+| B8 | `GetIPAddress` / `GetMacAddress` parse with `StrToU32` / `StrHexToU32` first and check the end against `intValue` afterwards (`BinaryParser.cpp:388-392`, 441-445). Open after the fix: a string of digits up to the end of a code of 384 bytes is read on beyond the code buffer | heap-buffer-overflow at 444 (523 after the fix) | reads digits beyond the value: an error, or one byte beyond the buffer for a code of 384 bytes |
+| B9 | `StringHandle::InternalAssign` copies with `SafeStrncpy(..., s, len + 1)` (`StringHandle.cpp:70`), so `strncpy` reads the byte after `len` if the first `len` bytes hold no null. A string value of `AddParameters` has no null after it if its length is a multiple of 4 (`BinaryParser.cpp:995`); the other callers pass parts of null-terminated strings (`ExpressionParser.cpp`, take and drop). Open | heap-buffer-overflow at StringHandle.cpp:70 for a code of 384 bytes, use-after-poison with `FUZZ_POISON_STALE=1` | reads one byte beyond the value, which the null then replaces |
 
 What was fuzzed (2026-11-24, RRF 3.7-dev 6c45e07a7): the seeds; seed 1 and seed 3, 50000 inputs each; seed 2, 50000 inputs with
 `FUZZ_POISON_STALE=1` (also reports reads of the rest of earlier codes in the buffer, the same functions as above); libFuzzer 360 s with
@@ -85,6 +96,10 @@ What was fuzzed (2026-11-24, RRF 3.7-dev 6c45e07a7): the seeds; seed 1 and seed 
 coverage after seed 1 with 50000 inputs (`make coverage RUNS=50000`): `BinaryParser.cpp` 554 of 582 lines; not reached are `DataStart`
 and `DataLength` (the target does not call them), `ConstructParseException(..., const char *)` and single lines in the getters.
 `StringHandle::InternalAssign`, `Delete`, `IncreaseRefCount` and `Get` 100 %.
+
+After the fix of B1-B5 and B7 (2026-11-24): the seeds; seed 1 and seed 3, 50000 inputs each (reports: B6, and B8 once in seed 3);
+seed 2, 50000 inputs with `FUZZ_POISON_STALE=1` (B6, B8 in `GetIPAddress`, B9). No `parameter-check-differs`. Against the tree without
+the fix, every input of B1-B5 and B7 reports `parameter-check-differs`.
 
 Not found: no write beyond the array of an array getter, no write beyond a `String<N>` (`StringRef::copy` limits both), no report in
 `Heap.cpp` itself. Observation without a sanitizer report: `WriteParameters` steps over the values of `BoolArray`, `ULong`, `Bitmap64`
