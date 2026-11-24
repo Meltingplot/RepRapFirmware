@@ -1,6 +1,6 @@
 # Host test of the timeout checks that compare a clock reading with a time stamp that another task or an ISR writes: the real text of
-# RemoteHeater::GetTemperature, GetAveragePWM, GetMode, RemoteFan::Check, LocalFan::GetRPM and the remote branches of FilamentMonitor,
-# extracted at build time. stale_timestamp_test.cpp runs them with a writer that stores a newer stamp right after the clock read.
+# RemoteHeater::GetTemperature, GetAveragePWM, GetMode, RemoteFan::Check, LocalFan::GetRPM, the remote branches of FilamentMonitor and
+# PulsedFilamentMonitor::Check and IsLocalMotionDetected, extracted at build time. stale_timestamp_test.cpp runs them with a writer that stores a newer stamp right after the clock read.
 # Run with make in WSL (g++ 13).
 #
 #   make              build build/stale-timestamp-test
@@ -16,7 +16,7 @@ ASANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
 EXTRACT = @mkdir -p gen && awk -v f="$(abspath $<)" -v names="$(1)" -f extract.awk $< > $@.tmp && mv $@.tmp $@
 
-GEN := gen/RemoteHeater.inc gen/RemoteFan.inc gen/LocalFan.inc gen/FilamentMonitor.inc
+GEN := gen/RemoteHeater.inc gen/RemoteFan.inc gen/LocalFan.inc gen/FilamentMonitor.inc gen/PulsedFilamentMonitor.inc
 
 .PHONY: all asan check clean
 all: build/stale-timestamp-test
@@ -33,6 +33,9 @@ gen/LocalFan.inc: $(RRF)/src/Fans/LocalFan.cpp extract.awk Makefile
 
 gen/FilamentMonitor.inc: $(RRF)/src/FilamentMonitors/FilamentMonitor.cpp extract.awk Makefile
 	$(call EXTRACT,FilamentMonitor::FilamentPresenceKnown FilamentMonitor::IsFilamentPresent FilamentMonitor::IsMotionDetected)
+
+gen/PulsedFilamentMonitor.inc: $(RRF)/src/FilamentMonitors/PulsedFilamentMonitor.cpp extract.awk Makefile
+	$(call EXTRACT,PulsedFilamentMonitor::Interrupt PulsedFilamentMonitor::Check PulsedFilamentMonitor::IsLocalMotionDetected)
 
 build/stale-timestamp-test: stale_timestamp_test.cpp $(GEN) Makefile
 	@mkdir -p build

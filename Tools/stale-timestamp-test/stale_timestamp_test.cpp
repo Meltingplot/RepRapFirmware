@@ -1,6 +1,6 @@
 // Host test of the timeout checks that compare a clock reading with a time stamp that another task or an ISR writes:
-// RemoteHeater::GetTemperature, GetAveragePWM and GetMode, RemoteFan::Check, LocalFan::GetRPM, and FilamentMonitor::FilamentPresenceKnown,
-// IsFilamentPresent and IsMotionDetected. The functions are the real text, extracted by the Makefile; the classes around them are
+// RemoteHeater::GetTemperature, GetAveragePWM and GetMode, RemoteFan::Check, LocalFan::GetRPM, FilamentMonitor::FilamentPresenceKnown,
+// IsFilamentPresent and IsMotionDetected, and PulsedFilamentMonitor::Check and IsLocalMotionDetected. The functions are the real text, extracted by the Makefile; the classes around them are
 // stand-ins with the members that the functions use. See README.md.
 
 #include <cstdint>
@@ -149,6 +149,46 @@ public:
 	bool remoteMotion = false;
 };
 
+// CANlib src/RRF3Common.h:139-147 and :55
+enum class FilamentSensorStatus : uint8_t { noMonitor, ok, noDataReceived, noFilament, tooLittleMovement, tooMuchMovement, sensorError };
+constexpr uint32_t FilamentMonitorMotionLatchTime = 500;
+
+class PulsedFilamentMonitor
+{
+public:
+	bool Interrupt() noexcept;
+	FilamentSensorStatus Check(bool isPrinting, bool fromIsr, uint32_t isrMillis, float filamentConsumed) noexcept;
+	bool IsLocalMotionDetected() const noexcept;
+
+	// Check calls these; the test only records whether the "sync overdue" comparison ran
+	void Poll() noexcept { }
+	FilamentSensorStatus CheckFilament(float amountCommanded, float amountMeasured, bool overdue) noexcept
+	{
+		if (overdue)
+		{
+			++overdueComparisons;
+		}
+		return FilamentSensorStatus::ok;
+	}
+	uint8_t GetEnableMode() const noexcept { return 1; }
+
+	unsigned int overdueComparisons = 0;
+
+	// src/FilamentMonitors/PulsedFilamentMonitor.h:53-78
+	float minimumExtrusionCheckLength = 5.0;
+	uint32_t sensorValue = 0;
+	uint32_t lastIsrTime = 0;
+	uint32_t lastMeasurementTime = 0;
+	float extrusionCommandedAtInterrupt = 0.0;
+	float extrusionCommandedSinceLastSync = 0.0;
+	float movementMeasuredSinceLastSync = 0.0;
+	bool wasPrintingAtInterrupt = false;
+	bool haveInterruptData = false;
+	float extrusionCommandedThisSegment = 0.0;
+	float movementMeasuredThisSegment = 0.0;
+	uint8_t samplesReceived = 0;
+};
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // The real code
 
@@ -156,6 +196,7 @@ public:
 #include "RemoteFan.inc"
 #include "LocalFan.inc"
 #include "FilamentMonitor.inc"
+#include "PulsedFilamentMonitor.inc"
 
 // ---------------------------------------------------------------------------------------------------------------------------------
 
@@ -294,12 +335,50 @@ static void FilamentCases() noexcept
 	}
 }
 
+static void PulsedCases() noexcept
+{
+	for (Arrival a : { Arrival::fresh, Arrival::tooOld, Arrival::newerDuringCheck })
+	{
+		for (int fn = 0; fn < 2; ++fn)
+		{
+			PulsedFilamentMonitor m;
+			millisNow = 5000000;
+			m.samplesReceived = 10;
+			// Enough extrusion since the last sync for the "sync overdue" branch of Check, but not for the regular comparison
+			m.extrusionCommandedThisSegment = 3.0;
+			m.extrusionCommandedSinceLastSync = 8.0;
+			// A pulse 100 ms ago is recent for both checks (sync overdue after 220 ms, motion latched for 500 ms)
+			m.lastMeasurementTime = (a == Arrival::tooOld) ? millisNow - 600 : millisNow - 100;
+			if (a == Arrival::newerDuringCheck)
+			{
+				// PulsedFilamentMonitor::Interrupt, the real pin interrupt
+				writerAfterClockRead = [&m]() { (void)m.Interrupt(); };
+			}
+			const bool recent = (a != Arrival::tooOld);
+			std::string name = std::string("PulsedFilamentMonitor::") + ((fn == 0) ? "Check" : "IsLocalMotionDetected") + ", " + ArrivalName(a);
+			if (fn == 0)
+			{
+				(void)m.Check(true, false, 0, 0.0);
+				const bool overdue = m.overdueComparisons != 0;
+				Expect(overdue == !recent, name, (recent) ? "expected no \"sync overdue\" comparison" : "expected the \"sync overdue\" comparison");
+			}
+			else
+			{
+				const bool moving = m.IsLocalMotionDetected();
+				Expect(moving == recent, name, (recent) ? "expected motion detected" : "expected no motion");
+			}
+			writerAfterClockRead = nullptr;
+		}
+	}
+}
+
 int main()
 {
 	HeaterCases();
 	FanCases();
 	TachoCases();
 	FilamentCases();
+	PulsedCases();
 	std::printf("%u runs, %u failed\n", runs, failures);
 	return (failures == 0) ? 0 : 1;
 }
