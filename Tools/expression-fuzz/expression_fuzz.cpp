@@ -733,6 +733,101 @@ namespace
 		}
 	}
 
+	void Report(const std::string& name, const std::string& why) noexcept
+	{
+		if (why.empty())
+		{
+			printf("PASS %s\n", name.c_str());
+		}
+		else
+		{
+			++takeDropFailures;
+			printf("FAIL %s:%s\n", name.c_str(), why.c_str());
+		}
+	}
+
+	// Evaluate an expression with the real parser and return its value as echo prints it, or the message of its exception
+	std::string EvaluateToString(const char *expression) noexcept
+	{
+		String<StringLength256> reply;
+		FuzzStack::Begin(stackBytes);
+		try
+		{
+			ExpressionParser parser(&fuzzGb, expression, expression + strlen(expression), 5);
+			const ExpressionValue val = parser.Parse(true);
+			val.AppendAsString(reply.GetRef(), true);
+		}
+		catch (const GCodeException& e)
+		{
+			reply.copy("exception: ");
+			String<StringLength256> message;
+			e.GetMessage(message.GetRef(), &fuzzGb);
+			reply.cat(message.c_str());
+		}
+		FuzzStack::Begin(0);
+		return reply.c_str();
+	}
+
+	// A nested object model array (move.axes[n].drivers and .workplaceOffsets, whose functions read the parent index with
+	// context.GetIndex(1) and the number of elements of axis n with context.GetLastIndex(), as Move.cpp:100-113) must give the elements of
+	// axis n through take(), drop() and the array parsers, the same as the index operator, which puts the parent index into the context
+	void CheckSameValue(const char *expression, const char *reference) noexcept
+	{
+		const std::string got = EvaluateToString(expression), expected = EvaluateToString(reference);
+		Report(std::string(expression) + " is " + reference, (got == expected) ? "" : " \"" + got + "\" instead of \"" + expected + "\"");
+	}
+
+	void CheckFloatArray(const char *expression, const std::vector<float>& expected) noexcept
+	{
+		std::string why;
+		float values[32];
+		size_t length = ARRAY_SIZE(values);
+		FuzzStack::Begin(stackBytes);
+		try
+		{
+			ExpressionParser parser(&fuzzGb, expression, expression + strlen(expression), 5);
+			parser.ParseFloatArray(values, length);
+			if (length != expected.size()) { why = " " + std::to_string(length) + " elements instead of " + std::to_string(expected.size()); }
+			for (size_t i = 0; why.empty() && i < length; ++i)
+			{
+				if (values[i] != expected[i]) { why = " element " + std::to_string(i) + " is " + std::to_string(values[i]) + " instead of " + std::to_string(expected[i]); }
+			}
+		}
+		catch (const GCodeException& e)
+		{
+			why = " exception";
+		}
+		FuzzStack::Begin(0);
+		Report(std::string("ParseFloatArray ") + expression, why);
+	}
+
+	void CheckDriverIdArray(const char *expression, unsigned int board, unsigned int numDrivers) noexcept
+	{
+		std::string why;
+		DriverId values[32];
+		size_t length = ARRAY_SIZE(values);
+		FuzzStack::Begin(stackBytes);
+		try
+		{
+			ExpressionParser parser(&fuzzGb, expression, expression + strlen(expression), 5);
+			parser.ParseDriverIdArray(values, length);
+			if (length != numDrivers) { why = " " + std::to_string(length) + " elements instead of " + std::to_string(numDrivers); }
+			for (size_t i = 0; why.empty() && i < length; ++i)
+			{
+				if (values[i].boardAddress != board || values[i].localDriver != i)
+				{
+					why = " element " + std::to_string(i) + " is " + std::to_string(values[i].boardAddress) + "." + std::to_string(values[i].localDriver);
+				}
+			}
+		}
+		catch (const GCodeException& e)
+		{
+			why = " exception";
+		}
+		FuzzStack::Begin(0);
+		Report(std::string("ParseDriverIdArray ") + expression, why);
+	}
+
 	int RunTakeDropChecks() noexcept
 	{
 		const std::string operand = "0123456789abcdefghijklmnopqrstuvwxyzABCD";
@@ -740,6 +835,19 @@ namespace
 		CheckTakeDrop("take(var.op, 100)", operand, operand);					// as long as the operand
 		CheckTakeDrop("drop(var.op, 30)", operand, operand.substr(30));
 		CheckTakeDrop("drop(var.op, 1)", operand, operand.substr(1));
+
+		// Nested object model arrays (finding E4). The stand-in axes have 1, 2 and 3 drivers; driver i of axis n is (n + 1).i, and
+		// workplace offset i of axis n is i * n
+		CheckSameValue("take(move.axes[1].drivers, 100)", "move.axes[1].drivers");
+		CheckSameValue("take(move.axes[2].drivers, 1)", "{(move.axes[2].drivers)[0],}");
+		CheckSameValue("take(move.axes[2].workplaceOffsets, 2)", "{(move.axes[2].workplaceOffsets)[0], (move.axes[2].workplaceOffsets)[1]}");
+		CheckSameValue("drop(move.axes[1].drivers, 0)", "move.axes[1].drivers");
+		CheckSameValue("drop(move.axes[2].drivers, 2)", "{(move.axes[2].drivers)[2],}");
+		CheckSameValue("drop(move.axes[2].workplaceOffsets, 7)", "{(move.axes[2].workplaceOffsets)[7], (move.axes[2].workplaceOffsets)[8]}");
+		CheckFloatArray("{move.axes[2].workplaceOffsets}", { 0.0f, 2.0f, 4.0f, 6.0f, 8.0f, 10.0f, 12.0f, 14.0f, 16.0f });
+		CheckDriverIdArray("{move.axes[2].drivers}", 3, 3);
+		CheckDriverIdArray("{move.axes[0].drivers}", 1, 1);
+
 		printf("%u failed\n", takeDropFailures);
 		return (takeDropFailures == 0) ? 0 : 1;
 	}

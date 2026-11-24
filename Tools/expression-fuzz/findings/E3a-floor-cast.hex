@@ -1,4 +1,4 @@
-# expect: UBSan: ExpressionParser.cpp:2032:28: N+N is outside the range of representable values of type 'int' (at ExpressionParser.cpp:2032 in ExpressionParser::ParseIdentifierExpression)
+# expect: UBSan: ExpressionParser.cpp:2040:28: N+N is outside the range of representable values of type 'int' (at ExpressionParser.cpp:2040 in ExpressionParser::ParseIdentifierExpression)
 # E3: float to int32 conversion of 2^31, ExpressionParser.cpp:2034-2036: the check f <= (float)INT32_MAX admits 2147483648.0f
 # expression: floor(2147483648)
 0007666c6f6f72283231343734383336343829

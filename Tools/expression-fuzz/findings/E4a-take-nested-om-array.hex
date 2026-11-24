@@ -1,4 +1,5 @@
-# expect: FUZZ: internal-error at ObjectModel.cpp:614 in ObjectExplorationContext::GetLastIndex
-# E4: EvaluateTake (ExpressionParser.cpp:1067-1083) counts and reads a nested object model array without the parent index; the OM functions (as Move.cpp:103-105) then call GetLastIndex/GetIndex(1) with too few indices (ObjectModel.cpp:603, 614)
+# expect: clean
+# Fixed: ParseArray, EvaluateTake and EvaluateDrop put the parent index into the context, as ApplyObjectModelArrayIndex does. Before the fix: FUZZ: internal-error at ObjectModel.cpp:614 in ObjectExplorationContext::GetLastIndex
+# E4: EvaluateTake (ExpressionParser.cpp:1067-1083) counts and reads a nested object model array without the parent index; the OM functions (as Move.cpp:104-105) then call GetLastIndex/GetIndex(1) with too few indices (ObjectModel.cpp:603, 614)
 # expression: take(move.axes[1].drivers, 1)
 000774616b65286d6f76652e617865735b315d2e647269766572732c203129
