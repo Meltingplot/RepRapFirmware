@@ -120,7 +120,7 @@ RRF) was not checked here. Line numbers are those of 6c45e07a7.
 | E5 | **`vector(n, v)` with n >= 2^29, board only**: `ArrayHandle::Allocate` (`ArrayHandle.cpp:29-42`) computes `4 + n * 8` in the 32-bit `size_t`, which wraps (2^29 * 8 + 4 = 4); the space check passes, the uint16 `count` is truncated, and the loop constructs n elements from the start of a 2 KB heap block (`HeapBlockSize`, `Heap.cpp:20`). Reached from `vector` at `ExpressionParser.cpp:2239-2261` | none on the host (64-bit `size_t`: "Array too large") | a write of 2^29 * 8 bytes beyond a heap block, i.e. over the whole RAM: memory corruption, then a fault. Confirmed in the MB6HC ELF disassembly (0x4839dc-0x483a0a: `lsls r5,r4,#3; adds r5,#4`, `strh r4,[r0,#2]`, loop while `r3 < r4`); not run on a board. **High** |
 | E6 | `SafeStrptime` takes `%m` without a range check (`strptime.cpp:144`, `tm_mon = ret - 1`) and indexes `_DAYS_BEFORE_MONTH[12]` with it (237, also 273). Reached by `datetime("2026-99-01T00:00:00")` (`ParseDateTime`, `ExpressionParser.cpp:2439`) | UBSan index out of bounds at 237; signed overflow at 144 for month INT_MIN | a read outside a static table of flash/RAM: wrong date. For a large month the address can lie outside memory; not checked. Low to medium |
 | E7 | signed overflows in `SafeStrptime`: `%Y` of INT_MIN (`strptime.cpp:186`), `%d` of INT_MAX (285) | UBSan signed overflow | undefined behaviour, wrong date. Low |
-| E8 | throw with less than `StackUsage::Throw` left: `CheckStack(StackUsage::ParseGeneralArray)` (`ExpressionParser.cpp:132`) reserves 360 + 1050 + 300 bytes; `ParseGeneralArray` (360) calls `ParseInternal` (80) unchecked (994), which calls `ParseQuotedString` (312, `String<MaxStringExpressionLength>` on the stack) unchecked (196), which throws through `ThrowParseException` (32): 784 bytes, more than the 300 of `StackUsage::Margin`. Found by libFuzzer: `m[[1,[5,m[[1,[2,"` | `no-stack-to-throw` at 2639, 1024 of 1050 bytes left with the 4096 byte budget | the unwinder may write below the task stack, into the task control block below it (`ObjectModel.cpp:640`). How much stack the unwinder really needs, and so whether 26 to 124 missing bytes corrupt anything, was not checked. The input is tuned to the 4096 byte budget (4000 or 4200 are clean); on the board it has to be tuned to the stack in use when the expression starts, which was not done. Medium |
+| E8 | **Fixed, see "E8 fixed" below.** Throw with less than `StackUsage::Throw` left: `CheckStack(StackUsage::ParseGeneralArray)` (`ExpressionParser.cpp:132`) reserves 360 + 1050 + 300 bytes; `ParseGeneralArray` (360) calls `ParseInternal` (80) unchecked (994), which calls `ParseQuotedString` (312, `String<MaxStringExpressionLength>` on the stack) unchecked (196), which throws through `ThrowParseException` (32): 784 bytes, more than the 300 of `StackUsage::Margin`. Found by libFuzzer: `m[[1,[5,m[[1,[2,"` | `no-stack-to-throw` at 2639, 1024 of 1050 bytes left with the 4096 byte budget | the unwinder may write below the task stack, into the task control block below it (`ObjectModel.cpp:640`). How much stack the unwinder really needs, and so whether 26 to 124 missing bytes corrupt anything, was not checked. The input is tuned to the 4096 byte budget (4000 or 4200 are clean); on the board it has to be tuned to the stack in use when the expression starts, which was not done. Medium |
 
 Observations without a sanitizer report:
 - O1: `ObjectModel.cpp:80-84` ignores a failure of `gmtime_r`; a date-time beyond the year range is printed from uninitialised `tm`
@@ -154,8 +154,28 @@ up to the end of the block, releases the garbage, and evaluates `take(var.op, 5)
 was allocated (`Heap::Diagnostics`), so a change of the heap that stops the case from collecting shows as a failure. Without the fix all
 four cases fail: the result is filler text ("xxxxx" instead of "01234").
 
-The fix removes four lines of `ExpressionParser.cpp` before the lines of E2, E3 and E8, so their keys in `findings/known.txt` and on the
-`# expect:` lines are 2056, 2032 and 2635 now. The table above keeps the line numbers of 6c45e07a7.
+The fix removes four lines of `ExpressionParser.cpp` before the lines of E2, E3 and E8. The table above keeps the line numbers of
+6c45e07a7; `findings/known.txt` and the `# expect:` lines have those of the current source.
+
+## E8 fixed: stack checks before ParseQuotedString and in ParseGeneralArray
+
+`CheckStack` is to be called "before making a recursive call, or before calling a function that needs a lot of stack from a recursive
+function" (its comment in `ExpressionParser.cpp`), and `StackUsage::Margin` (300, `GCodeException.h:17`) is "the margin we allow for
+calls to non-recursive functions that can throw". E8 breaks both:
+- `ParseInternal` called `ParseQuotedString` without a check. Its frame is 312 bytes (28 pushed + 284, `String<MaxStringExpressionLength>`
+  on the stack; MB6HC and Mini 5+ ELF), and with `ThrowParseException` (32) a throw from it needs 344 bytes, more than the margin.
+- `ParseGeneralArray` called `ParseInternal` for the second and later elements without `CheckStack(StackUsage::ParseInternal)`. Every
+  other call of `ParseInternal` has the check or a comment why an earlier check covers it.
+
+The fix adds `StackUsage::ParseQuotedString` = 312 (both MCU branches, the same figure in both ELFs), `CheckStack` with it before
+`ParseQuotedString`, and `CheckStack(StackUsage::ParseInternal)` before the element parse of `ParseGeneralArray`. Behaviour change: an
+expression that ends in a quoted string at a depth where the stack is short now fails with "Expression nesting too deep" before the
+string is parsed. The frames of `ParseInternal` (80), `ParseGeneralArray` (360) and `ParseQuotedString` (312) in the MB6HC ELF are
+unchanged. `findings/E8-unchecked-quoted-string-throw.hex` expects `clean` now, and the key is no longer in `findings/known.txt`, so
+a recurrence shows as a new report.
+
+Budget sweep of the E8 input (`FUZZ_STACK_BYTES` from 2000 to 6000 in steps of 4, 1001 runs): before the fix 27
+budgets ended in `no-stack-to-throw`, with the fix all 1001 are clean.
 
 ## What was fuzzed (2026-11-24, RRF 3.7-dev 6c45e07a7)
 

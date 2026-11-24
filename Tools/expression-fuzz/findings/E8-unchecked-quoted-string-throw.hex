@@ -1,4 +1,5 @@
-# expect: FUZZ: no-stack-to-throw at ExpressionParser.cpp:2635 in ExpressionParser::ThrowParseException
+# expect: clean
+# Fixed: CheckStack(StackUsage::ParseQuotedString) before ParseQuotedString (ExpressionParser.cpp:199) and CheckStack(StackUsage::ParseInternal) before the element parse of ParseGeneralArray (:998) throw "Expression nesting too deep" while there is enough stack. Before the fix: FUZZ: no-stack-to-throw at ExpressionParser.cpp:2635 in ExpressionParser::ThrowParseException
 # E8: with the default 4096 byte board stack budget the parse error of the unterminated string is thrown with 1024 bytes left, less than StackUsage::Throw (1050, GCodeException.h:16). CheckStack(ParseGeneralArray) at ExpressionParser.cpp:132 reserves 360 + 1050 + 300 bytes, then ParseGeneralArray (360) calls ParseInternal (80, ExpressionParser.cpp:994) unchecked, which calls ParseQuotedString (312, ExpressionParser.cpp:196) unchecked, which calls ThrowParseException (32): 784 bytes, more than StackUsage::Margin (300). Entry 4 (ParseUnsigned), with gb. The input is tuned to the 4096 byte budget (FUZZ_STACK_BYTES=4000 or 4200 is clean); the gap exists for every budget
 # expression: m[[1,[5,m[[1,[2,"
 72616d5b5b312c5b352c6d5b5b312c5b322c22

@@ -37,6 +37,7 @@ namespace StackUsage
 	constexpr uint32_t EvaluateTake = 128;
 	constexpr uint32_t EvaluateDrop = 200;
 	constexpr uint32_t GetObjectValueUsingTableNumber = 48;
+	constexpr uint32_t ParseQuotedString = 312;
 #else
 	constexpr uint32_t ParseInternal = 80;
 	constexpr uint32_t ParseIdentifierExpression = 280;
@@ -46,6 +47,7 @@ namespace StackUsage
 	constexpr uint32_t EvaluateTake = 128;
 	constexpr uint32_t EvaluateDrop = 200;
 	constexpr uint32_t GetObjectValueUsingTableNumber = 48;
+	constexpr uint32_t ParseQuotedString = 312;
 #endif
 }
 
@@ -193,6 +195,7 @@ void ExpressionParser::ParseInternal(ExpressionValue& val, bool evaluate, uint8_
 	switch (c)
 	{
 	case '"':
+		CheckStack(StackUsage::ParseQuotedString);							// it keeps the string on the stack
 		ParseQuotedString(val);
 		break;
 
@@ -991,6 +994,7 @@ void ExpressionParser::ParseGeneralArray(ExpressionValue& firstElementAndResult,
 		{
 			break;							// we allow a trailing comma and it can be used to distinguish a 1-element array from a bracketed value
 		}
+		CheckStack(StackUsage::ParseInternal);
 		ParseInternal(elements[index], evaluate, 0);
 		++index;
 	} while (CurrentCharacter() == ',');

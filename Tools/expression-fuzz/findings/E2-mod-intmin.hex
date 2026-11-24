@@ -1,4 +1,4 @@
-# expect: UBSan: ExpressionParser.cpp:2056:17: division of N by N cannot be represented in type 'int' (at ExpressionParser.cpp:2056 in ExpressionParser::ParseIdentifierExpression)
+# expect: UBSan: ExpressionParser.cpp:2060:17: division of N by N cannot be represented in type 'int' (at ExpressionParser.cpp:2060 in ExpressionParser::ParseIdentifierExpression)
 # E2: mod(INT_MIN, -1), ExpressionParser.cpp:2060 (rslt.iVal %= nextOperand.iVal); the check before it catches only 0
 # expression: mod(-2147483647 - 1, -1)
 00076d6f64282d32313437343833363437202d20312c202d3129
