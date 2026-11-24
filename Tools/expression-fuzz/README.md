@@ -168,9 +168,14 @@ calls to non-recursive functions that can throw". E8 breaks both:
   other call of `ParseInternal` has the check or a comment why an earlier check covers it.
 
 The fix adds `StackUsage::ParseQuotedString` = 312 (both MCU branches, the same figure in both ELFs), `CheckStack` with it before
-`ParseQuotedString`, and `CheckStack(StackUsage::ParseInternal)` before the element parse of `ParseGeneralArray`. Behaviour change: an
-expression that ends in a quoted string at a depth where the stack is short now fails with "Expression nesting too deep" before the
-string is parsed. The frames of `ParseInternal` (80), `ParseGeneralArray` (360) and `ParseQuotedString` (312) in the MB6HC ELF are
+`ParseQuotedString`, and `CheckStack(StackUsage::ParseInternal)` before the element parse of `ParseGeneralArray`.
+
+Behaviour change: with less than 1662 bytes of stack left (312 + `Throw` 1050 + `Margin` 300), any quoted string fails with
+"Expression nesting too deep" before it is parsed, a valid, terminated one as well. The second and later elements of an array need
+1430 bytes left (80 + 1350). Before, such a string or element was parsed when the stack was enough for it, and threw with too little
+stack when it was not. This is the same margin that every other `CheckStack` keeps.
+
+The frames of `ParseInternal` (80), `ParseGeneralArray` (360) and `ParseQuotedString` (312) in the MB6HC ELF are
 unchanged. `findings/E8-unchecked-quoted-string-throw.hex` expects `clean` now, and the key is no longer in `findings/known.txt`, so
 a recurrence shows as a new report.
 
