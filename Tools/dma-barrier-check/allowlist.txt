@@ -1,0 +1,1 @@
+# Starts of an XDMAC channel that may stay without a memory barrier before them, with the reason. See README.md.

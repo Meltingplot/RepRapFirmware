@@ -1,0 +1,5 @@
+BranchStart <- Reset_Handler
+IndirectOnlyStart
+InlineStart <- Reset_Handler
+StartChannel <- ConditionalBarrierStart <- Reset_Handler
+StartChannel <- UnflushedStart <- Reset_Handler
