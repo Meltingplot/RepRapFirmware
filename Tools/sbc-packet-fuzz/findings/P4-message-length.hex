@@ -1,0 +1,44 @@
+# expect: AddressSanitizer: heap-buffer-overflow at OutputMemory.cpp:240 in OutputBuffer::cat
+# P4: Message with a length larger than the packet; OutputBuffer::cat copies beyond rxBuffer (DataTransfer.cpp:731-732, OutputMemory.cpp:240)
+# seed 1 input 394: AddressSanitizer: heap-buffer-overflow at OutputMemory.cpp:240 in OutputBuffer::cat
+# =================================================================
+# ==302079==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x525000004900 at pc 0x771b318fb42e bp 0x7ffc76115e30 sp 0x7ffc761155d8
+# READ of size 256 at 0x525000004900 thread T0
+#     #0 0x771b318fb42d in memcpy ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_memintrinsics.inc:115
+#     #1 0x5c3348bfdf74 in memcpy /usr/include/x86_64-linux-gnu/bits/string_fortified.h:29
+#     #2 0x5c3348bfdf74 in OutputBuffer::cat(char const*, unsigned long) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/Platform/OutputMemory.cpp:240
+#     #3 0x5c3348bfe463 in OutputBuffer::copy(char const*, unsigned long) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/Platform/OutputMemory.cpp:170
+#     #4 0x5c3348beffa2 in DataTransfer::ReadMessage(MessageType&, OutputBuffer*) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/SBC/DataTransfer.cpp:732
+#     #5 0x5c3348c0520b in SbcInterface::ProcessPackets() /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/SBC/SbcInterface.cpp:862
+#     #6 0x5c3348c0a7c5 in RunSpi /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/sbc_packet_fuzz.cpp:610
+#     #7 0x5c3348c0a7c5 in LLVMFuzzerTestOneInput /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/sbc_packet_fuzz.cpp:653
+#     #8 0x5c3348c27b85 in FuzzDriver::Run(int, char**, std::vector<std::vector<unsigned char, std::allocator<unsigned char> >, std::allocator<std::vector<unsigned char, std::allocator<unsigned char> > > > const&, unsigned long) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/fuzz_driver.inc:307
+#     #9 0x5c3348c2a3a2 in main /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/fuzz_driver.inc:390
+#     #10 0x771b3082a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #11 0x771b3082a28a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #12 0x5c3348bee0e4 in _start (/tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/build/asan-sbc-packet-fuzz+0x5c0e4) (BuildId: 5ace6352a7475a0e72b0e2af555430213d245aa1)
+# 
+# 0x525000004900 is located 0 bytes after 8192-byte region [0x525000002900,0x525000004900)
+# allocated by thread T0 here:
+#     #0 0x771b318fd340 in calloc ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:77
+#     #1 0x5c3348bfeb46 in AllocateFromPbufPool(unsigned long) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/sbc_packet_fuzz.cpp:165
+#     #2 0x5c3348bee8de in DataTransfer::Init() /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/SBC/DataTransfer.cpp:460
+#     #3 0x5c3348c002fa in SbcInterface::SbcInterface() /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/sbc_packet_fuzz.cpp:471
+#     #4 0x5c3348c09602 in StartInput /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/sbc_packet_fuzz.cpp:521
+#     #5 0x5c3348c09602 in LLVMFuzzerTestOneInput /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/sbc_packet_fuzz.cpp:644
+#     #6 0x5c3348c27b85 in FuzzDriver::Run(int, char**, std::vector<std::vector<unsigned char, std::allocator<unsigned char> >, std::allocator<std::vector<unsigned char, std::allocator<unsigned char> > > > const&, unsigned long) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/fuzz_driver.inc:307
+#     #7 0x5c3348c2a3a2 in main /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/fuzz_driver.inc:390
+#     #8 0x771b3082a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #9 0x771b3082a28a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #10 0x5c3348bee0e4 in _start (/tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/sbc-packet-fuzz/build/asan-sbc-packet-fuzz+0x5c0e4) (BuildId: 5ace6352a7475a0e72b0e2af555430213d245aa1)
+# 
+# SUMMARY: AddressSanitizer: heap-buffer-overflow ../../../../src/libsanitizer/sanitizer_common/sanitizer_common_interceptors_memintrinsics.inc:115 in memcpy
+# Shadow bytes around the buggy address:
+#   0x525000004680: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#   0x525000004700: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#   0x525000004780: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#   0x525000004800: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#   0x525000004880: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+# =>0x525000004900:[fa]fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+#   0x525000004980: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+00040601680211000000600200000800787878787878787878787878787878787878787878787878787878000058020000787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878f14878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878
