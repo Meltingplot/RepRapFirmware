@@ -229,13 +229,14 @@ FilamentSensorStatus PulsedFilamentMonitor::Check(bool isPrinting, bool fromIsr,
 	Poll();														// this may update movementMeasured
 
 	// 4. Decide whether it is time to do a comparison, and return the status
+	const uint32_t whenLastMeasured = lastMeasurementTime;		// capture it before we call millis(), the pin interrupt may update it
 	FilamentSensorStatus ret = FilamentSensorStatus::ok;
 	if (extrusionCommandedThisSegment >= minimumExtrusionCheckLength)
 	{
 		ret = CheckFilament(extrusionCommandedThisSegment, movementMeasuredThisSegment, false);
 		extrusionCommandedThisSegment = movementMeasuredThisSegment = 0.0;
 	}
-	else if (extrusionCommandedThisSegment + extrusionCommandedSinceLastSync >= minimumExtrusionCheckLength * 2 && millis() - lastMeasurementTime > 220)
+	else if (extrusionCommandedThisSegment + extrusionCommandedSinceLastSync >= minimumExtrusionCheckLength * 2 && millis() - whenLastMeasured > 220)
 	{
 		// A sync is overdue
 		ret = CheckFilament(extrusionCommandedThisSegment + extrusionCommandedSinceLastSync, movementMeasuredThisSegment + movementMeasuredSinceLastSync, true);
@@ -243,6 +244,12 @@ FilamentSensorStatus PulsedFilamentMonitor::Check(bool isPrinting, bool fromIsr,
 	}
 
 	return (GetEnableMode() != 0) ? ret : FilamentSensorStatus::ok;
+}
+
+bool PulsedFilamentMonitor::IsLocalMotionDetected() const noexcept
+{
+	const uint32_t whenLastMeasured = lastMeasurementTime;		// capture it before we call millis(), the pin interrupt may update it
+	return samplesReceived != 0 && millis() - whenLastMeasured < FilamentMonitorMotionLatchTime;
 }
 
 // Compare the amount commanded with the amount of extrusion measured, and set up for the next comparison
