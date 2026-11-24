@@ -1945,12 +1945,12 @@ bool DataTransfer::WriteMessageAcknowledged(GCodeChannel channel, uint16_t tag) 
 	return true;
 }
 
-bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varName, const ExpressionValue& value, uint16_t tag) noexcept
+// Return the data length of the result of a SetVariable request with a plain value. A value that is sent as a string is written to rslt
+/*static*/ size_t DataTransfer::GetSetVariableResultLength(const char *varName, const ExpressionValue& value, const StringRef& rslt) noexcept
 {
 	// Calculate payload length
 	const size_t varNameLength = strlen(varName);
 	size_t payloadLength;
-	String<StringLength50> rslt;
 	switch (value.GetType())
 	{
 	case TypeCode::Bool_tc:
@@ -1970,7 +1970,7 @@ bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varN
 	case TypeCode::MacAddress_tc:
 	case TypeCode::DateTime_tc:
 		// All these types are represented as strings
-		value.AppendAsString(rslt.GetRef());
+		value.AppendAsString(rslt);
 		payloadLength = varNameLength + rslt.strlen();
 		break;
 	case TypeCode::HeapString:
@@ -1982,17 +1982,35 @@ bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varN
 		payloadLength = varNameLength + rslt.strlen();
 		break;
 	}
+	return sizeof(EvaluationResultHeader) + payloadLength;
+}
 
+bool DataTransfer::CanWriteSetVariableResult(const char *varName, const ExpressionValue& value) const noexcept
+{
+	String<StringLength50> rslt;
+	return CanWritePacket(GetSetVariableResultLength(varName, value, rslt.GetRef()));
+}
+
+bool DataTransfer::CanWriteSetVariableResult(const char *varName, const OutputBuffer *json) const noexcept
+{
+	return CanWritePacket(sizeof(EvaluationResultHeader) + strlen(varName) + json->Length());
+}
+
+bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varName, const ExpressionValue& value, uint16_t tag) noexcept
+{
 	// Check if it fits
-	if (!CanWritePacket(sizeof(EvaluationResultHeader) + payloadLength))
+	String<StringLength50> rslt;
+	const size_t dataLength = GetSetVariableResultLength(varName, value, rslt.GetRef());
+	if (!CanWritePacket(dataLength))
 	{
 		return false;
 	}
 
 	// Write packet header
-	(void)WritePacketHeader(FirmwareRequest::VariableResult, sizeof(EvaluationResultHeader) + payloadLength, tag);
+	(void)WritePacketHeader(FirmwareRequest::VariableResult, dataLength, tag);
 
 	// Write partial header
+	const size_t varNameLength = strlen(varName);
 	EvaluationResultHeader *header = WriteDataHeader<EvaluationResultHeader>();
 	header->channel = channel.ToBaseType();
 	header->expressionLength = varNameLength;
@@ -2061,7 +2079,7 @@ bool DataTransfer::WriteSetVariableResult(GCodeChannel channel, const char *varN
 {
 	// Check if we can write the JSON result
 	const size_t varNameLength = strlen(varName);
-	if (!CanWritePacket(sizeof(EvaluationResultHeader) + varNameLength + json->Length()))
+	if (!CanWriteSetVariableResult(varName, json))
 	{
 		OutputBuffer::ReleaseAll(json);
 		return false;

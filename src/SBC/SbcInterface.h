@@ -180,6 +180,7 @@ private:
 	void RecordChannelAbort(GCodeBuffer& gb, bool connectionLost) noexcept;	// Record the abort of a channel for the main task
 	void InvalidateChannel(GCodeBuffer& gb) noexcept;						// End everything of a channel that the SBC has dropped
 	bool IsDroppedByEpoch(GCodeBuffer& gb, const PacketHeader& packet) noexcept;	// Check if a packet of the SBC must be dropped because of the epoch of its channel
+	bool MakeJsonAnswer(OutputBuffer *_ecv_null &json, const ExpressionValue& val, size_t otherDataLength) THROWS(GCodeException);	// Write an array value as JSON for an answer to the SBC
 	void DefragmentBufferedCodes() noexcept;								// Attempt to defragment the code buffer ring to avoid stalls
 	bool DefragmentCodeBlock(uint16_t start, volatile uint16_t &end) noexcept;	// Defragment a specific code buffer region returning true if anything was defragmented
 	void InvalidateBufferedCodes(GCodeChannel channel) noexcept;           	// Invalidate every buffered G-code of the corresponding channel from the buffer ring
