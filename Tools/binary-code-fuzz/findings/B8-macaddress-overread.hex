@@ -1,4 +1,5 @@
-# expect: AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:523 in BinaryParser::GetMacAddress
+# expect: clean
+# Fixed: GetMacAddress parses a null-terminated copy of the value. Before the fix: AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:523 in BinaryParser::GetMacAddress
 # B8: M540 P with a string of 356 '0' that ends at the last byte of a code of 384 bytes (MaxGCodeBinaryLength). The parameters fit,
 # so BinaryParser::Put stores the code; StrHexToU32 reads on beyond intValue and beyond the code buffer (GetMacAddress)
 # The first input of B8 (seed 1 input 327) had a parameter table that does not fit in its code and is refused since the B1 fix

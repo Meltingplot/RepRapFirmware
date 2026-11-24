@@ -1,10 +1,7 @@
-# Report keys of the open findings B6, B8 and B9 (README.md), from the deterministic runs of seed 1 and 3 with 50000 inputs each after
-# the fix of B1-B5 and B7, and the inputs in findings/. make check fails on a report that is not listed here
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:470 in BinaryParser::GetIPAddress
-AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:523 in BinaryParser::GetMacAddress
-AddressSanitizer: heap-buffer-overflow at StringHandle.cpp:70 in StringHandle::InternalAssign
+# Report keys of the open finding B6 (README.md), from the deterministic runs of seed 1 and 3 with 50000 inputs each after the fix of
+# B1-B5, B7, B8 and B9, and the inputs in findings/. make check fails on a report that is not listed here
 UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself
-UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:821 in BinaryParser::PrintCommand)
-UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:839 in BinaryParser::AppendFullCommand)
-UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:842 in BinaryParser::AppendFullCommand)
-UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:939 in BinaryParser::WriteParameters)
+UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:827 in BinaryParser::PrintCommand)
+UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:845 in BinaryParser::AppendFullCommand)
+UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:848 in BinaryParser::AppendFullCommand)
+UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:945 in BinaryParser::WriteParameters)
