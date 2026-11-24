@@ -140,7 +140,7 @@ const char *_ecv_array _ecv_null SafeStrptime(const char *_ecv_array buf, const 
 				{
 					const char *_ecv_array s;
 					const int ret = strtol_l (buf, &s, 10, locale);
-					if (s == buf) { return nullptr; }
+					if (s == buf || ret < 1 || ret > 12) { return nullptr; }		// tm_mon indexes _DAYS_BEFORE_MONTH below
 					timeptr->tm_mon = ret - 1;
 					buf = s;
 					ymd |= SET_MON;
