@@ -17,6 +17,10 @@
 #include <Platform/Tasks.h>
 #include <Networking/NetworkDefs.h>
 
+#if HAS_SBC_INTERFACE
+# include <SBC/SbcInterface.h>
+#endif
+
 // Replace the default definition of THROW_INTERNAL_ERROR by one that gives line information
 #undef THROW_INTERNAL_ERROR
 #define THROW_INTERNAL_ERROR	ThrowGCodeException("internal error at file " __FILE__ "(%d)", __LINE__)
@@ -524,6 +528,12 @@ bool StringParser::ProcessConditionalGCode(const StringRef& reply, BlockType ski
 			}
 			if (StringStartsWith(command, "set"))
 			{
+#if HAS_SBC_INTERFACE
+				if (SendGlobalAssignmentToSbc(true))
+				{
+					break;
+				}
+#endif
 				ProcessSetCommand();
 				return true;
 			}
@@ -578,6 +588,12 @@ bool StringParser::ProcessConditionalGCode(const StringRef& reply, BlockType ski
 		case 6:
 			if (StringStartsWith(command, "global"))
 			{
+#if HAS_SBC_INTERFACE
+				if (SendGlobalAssignmentToSbc(false))
+				{
+					break;
+				}
+#endif
 				ProcessVarOrGlobalCommand(true);
 				return true;
 			}
@@ -1274,6 +1290,72 @@ size_t StringParser::DataLength() const noexcept
 {
 	return commandEnd - commandStart;
 }
+
+#if HAS_SBC_INTERFACE
+
+// Return true if the text from 'start' to 'end' calls fileexists() or fileread(), which DSF evaluates in SBC mode.
+// A name in an unquoted string that is followed by '(' counts as a call too, which only costs a round trip to DSF.
+bool StringParser::CallsFileFunction(unsigned int start, unsigned int end) const noexcept
+{
+	static constexpr const char *_ecv_array FileFunctions[] = { "fileexists", "fileread" };
+
+	bool inQuotes = false;
+	for (unsigned int i = start; i < end; ++i)
+	{
+		const char c = gb.buffer[i];
+		if (c == '"')
+		{
+			inQuotes = !inQuotes;											// a quote inside a string is doubled, so it toggles twice
+		}
+		else if (!inQuotes)
+		{
+			if (c == ';')
+			{
+				break;														// the rest of the line is a comment
+			}
+			const char prev = (i == start) ? ' ' : gb.buffer[i - 1];
+			if (!isAlnum(prev) && prev != '_' && prev != '.')				// the start of an identifier
+			{
+				for (const char *_ecv_array name : FileFunctions)
+				{
+					const size_t len = strlen(name);
+					if (i + len <= end && memcmp(gb.buffer + i, name, len) == 0)
+					{
+						unsigned int j = i + len;
+						while (j < end && (gb.buffer[j] == ' ' || gb.buffer[j] == '\t'))
+						{
+							++j;
+						}
+						if (j < end && gb.buffer[j] == '(')
+						{
+							return true;
+						}
+					}
+				}
+			}
+		}
+	}
+	return false;
+}
+
+// In SBC mode DSF evaluates fileexists() and fileread() in the codes it sends, before we get them. Pass a global command, or a set command
+// for a global variable, that calls them to DSF too: here it would hold the write lock of the global variables while it waits for the SBC task,
+// which needs the read lock to report them to DSF (see SbcInterface::WaitForFileSlot). The meta command is the whole line.
+bool StringParser::SendGlobalAssignmentToSbc(bool isSet) noexcept
+{
+	if (   !reprap.UsingSbcInterface() || !reprap.GetSbcInterface().IsConnected()
+		|| (isSet && !StringStartsWith(gb.buffer + readPointer + strspn(gb.buffer + readPointer, " \t"), "global."))
+		|| !CallsFileFunction(readPointer, gcodeLineEnd)
+	   )
+	{
+		return false;
+	}
+	commandEnd = gcodeLineEnd;
+	gb.SendToSbc();
+	return true;
+}
+
+#endif
 
 // Return true if the command being processed is the last one in this line of GCode
 bool StringParser::IsLastCommand() const noexcept

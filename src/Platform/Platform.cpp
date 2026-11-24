@@ -3932,6 +3932,20 @@ bool Platform::SysFileExists(const char *_ecv_array filename) const noexcept
 	return MakeSysFileName(location.GetRef(), filename) && MassStorage::FileExists(location.c_str());
 }
 
+// Release the heap lock before the check, because in SBC mode it waits for the SBC task, which may need the heap lock for writing
+bool Platform::SysFileExists(const StringHandle& filename) const noexcept
+{
+	String<MaxFilenameLength> location;
+	{
+		const ReadLockedPointer<const char> p = filename.Get();
+		if (!MakeSysFileName(location.GetRef(), p.Ptr()))
+		{
+			return false;
+		}
+	}
+	return MassStorage::FileExists(location.c_str());
+}
+
 FileStore *_ecv_null Platform::OpenSysFile(const char *_ecv_array filename, OpenMode mode) const noexcept
 {
 	String<MaxFilenameLength> location;

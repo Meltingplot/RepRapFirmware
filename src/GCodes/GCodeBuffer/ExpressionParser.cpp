@@ -2185,11 +2185,7 @@ void ExpressionParser::ParseIdentifierExpression(ExpressionValue& rslt, bool eva
 						break;
 
 					case TypeCode::HeapString:
-						{
-							ReadLockedPointer<const char> p = rslt.shVal.Get();
-							// We assume that calling SysFileExists doesn't need to use the heap, so we are OK keeping the lock around the call and we don't need to copy the string
-							b = reprap.GetPlatform().SysFileExists(p.Ptr());
-						}
+						b = reprap.GetPlatform().SysFileExists(rslt.shVal);
 						break;
 
 					default:

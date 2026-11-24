@@ -353,6 +353,7 @@ public:
 	GCodeResult SetWebDir(const char *_ecv_array dir, const StringRef& reply) noexcept;				// Set the web files path
 
 	bool SysFileExists(const char *_ecv_array filename) const noexcept;
+	bool SysFileExists(const StringHandle& filename) const noexcept;
 	FileStore *_ecv_null OpenSysFile(const char *_ecv_array filename, OpenMode mode) const noexcept;
 # if HAS_MASS_STORAGE || HAS_SBC_INTERFACE
 	bool DeleteSysFile(const char *_ecv_array filename) const noexcept;

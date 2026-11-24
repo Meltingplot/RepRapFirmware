@@ -349,6 +349,12 @@ void GCodeBuffer::EndConnectionOfCodes() noexcept
 	}
 }
 
+// Return true if the current command is text that calls fileexists() or fileread()
+bool GCodeBuffer::CallsFileFunction() const noexcept
+{
+	return !IsBinary() && stringParser.CallsFileFunction();
+}
+
 // Return true if the code being executed belongs to an SBC connection that has ended, so that none of its replies may be written to the SBC.
 // Between the record of the end of the connection and its apply this is true for every code on the stack
 bool GCodeBuffer::IsCodeOfEndedConnection() const noexcept
@@ -1334,6 +1340,10 @@ bool GCodeBuffer::RequestMacroFile(const char *filename, bool fromCode) noexcept
 	if (GetChannel() != GCodeChannel::Daemon || machineState->doingFileMacro)
 	{
 		// Wait for a response (but not forever)
+		if (TaskBase::GetCallerWriteLocksHeld() != 0)		// the SBC task needs the locks of the object model to answer DSF, see SbcInterface::WaitForFileSlot
+		{
+			REPORT_INTERNAL_ERROR;
+		}
 		isWaitingForMacro = true;
 		lock.Release();										// don't keep a lock of our own while waiting for the SBC
 		reprap.GetSbcInterface().EventOccurred(true);

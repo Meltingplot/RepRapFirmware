@@ -112,6 +112,13 @@ bool GCodes::ActOnCode(GCodeBuffer& gb, const StringRef& reply) noexcept
 	}
 #endif
 
+#if HAS_SBC_INTERFACE
+	if (gb.IsSendRequested())
+	{
+		return false;										// the SBC task has yet to pass this code to DSF
+	}
+#endif
+
 	try
 	{
 #if HAS_SBC_INTERFACE
@@ -132,6 +139,15 @@ bool GCodes::ActOnCode(GCodeBuffer& gb, const StringRef& reply) noexcept
 		{
 			throw GCodeException(&gb, -1, "not allowed in a trigger action, put it in the trigger macro");
 		}
+#if HAS_SBC_INTERFACE
+		// DSF evaluates fileexists() and fileread() in the codes it sends, before we get them. Pass a command of text that calls them to DSF too:
+		// its handler may wait for the SBC task while it holds a write lock that the SBC task needs to answer DSF (see SbcInterface::WaitForFileSlot)
+		if (reprap.UsingSbcInterface() && reprap.GetSbcInterface().IsConnected() && gb.CallsFileFunction())
+		{
+			gb.SendToSbc();
+			return false;
+		}
+#endif
 		switch (gb.GetCommandLetter())
 		{
 		case 'G':

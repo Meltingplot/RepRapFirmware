@@ -2652,6 +2652,13 @@ void SbcInterface::CloseFile(FileHandle handle) noexcept
 // Return false if we timed out waiting for it. Caller must own fileMutex
 bool SbcInterface::WaitForFileSlot() noexcept
 {
+	// Every file operation of another task may wait for the SBC task from here on. The SBC task takes the locks of the object model when it
+	// answers DSF, so it would wait for a write lock of the caller until the caller's request has timed out
+	if (TaskBase::GetCallerWriteLocksHeld() != 0)
+	{
+		REPORT_INTERNAL_ERROR;
+	}
+
 	// The semaphore may still be signalled from an earlier write nobody waited for, so loop until the slot is actually free
 	while (fileOperation == FileOperation::writeAsync)
 	{
