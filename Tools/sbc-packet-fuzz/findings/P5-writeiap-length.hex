@@ -1,4 +1,5 @@
-# expect: AddressSanitizer: heap-buffer-overflow at SbcInterface.cpp:749 in SbcInterface::ProcessPackets
+# expect: clean
+# Fixed: ReadPacket refuses a packet whose data does not fit in the rest of the transfer. Before the fix: AddressSanitizer: heap-buffer-overflow at SbcInterface.cpp:749 in SbcInterface::ProcessPackets
 # P5: WriteIap packet at the end of the transfer; ReceiveAndStartIap copies packet->length bytes that the transfer does not hold (SbcInterface.cpp:749)
 # seed 1 input 454: AddressSanitizer: heap-buffer-overflow at SbcInterface.cpp:749 in SbcInterface::ProcessPackets
 # =================================================================

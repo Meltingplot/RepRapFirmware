@@ -69,11 +69,24 @@ as bool (finding P7). The alignment check is off: `rxPointer` is always a multip
 
 ## Findings
 
-The inputs are in `findings/`, each with its report. All defect lines are upstream code (git blame: Christian Hammacher, David
+The inputs are in `findings/`, each with its report (`# expect: clean` for a fixed one: the input no longer reports anything). All
+defect lines are upstream code (git blame: Christian Hammacher, David
 Crocker). None of them is reachable from a DSF that writes what `src/DuetControlServer/Link/Protocol/Writer.cs` writes; they are reached
 by a DSF or SBC process that writes inconsistent lengths, by a corruption that the CRC32 of SPI misses, and on USB by any corruption
 that reaches RRF, since RRF checks no CRC there. The common cause: `ReadPacket` checks that the 8-byte header fits in the transfer
 (`DataTransfer.cpp:618`) and nothing checks `packet->length` or the lengths inside the data against what the transfer holds.
+
+P1 to P5 are fixed:
+- `ReadPacket` refuses a packet whose data doesn't fit in the rest of the transfer (P5), the way it refuses a header that doesn't fit:
+  it returns no packet, and `ExchangeData` stops reading the transfer. DSF writes the data of each packet right after its header
+  (`WritePacket` and `GetWriteBuffer`, `SPI.cs` and `USB.cs`), so every packet that DSF writes fits.
+- `ReadGetObjectModel`, `ReadPrintStartedInfo`, `ReadMessage` and `ReadFileData` read their inner lengths only as far as they lie within
+  the packet (P1-P4). That is the way `ReadFileData` already treats the read buffer and `StringRef::copy` its destination: a value
+  that does not fit is cut. `ReadMessage` and `ReadFileData` get the packet length for that, as the other two already did.
+- `ReadFileList` treats entry data beyond the packet as it treats entry data beyond the read buffer: "the two sides disagree about the
+  format", end of list. Same defect as P3; the run with `FUZZ_POISON_STALE=1` showed it (use-after-poison in `ReadFileList`).
+
+The table keeps the line numbers of RRF 3.7-dev 6c45e07a7, before the fix.
 
 | ID | Request | Defect | Report | Effect on the board |
 |----|---------|--------|--------|---------------------|
@@ -82,8 +95,11 @@ that reaches RRF, since RRF checks no CRC there. The common cause: `ReadPacket` 
 | P3 | FileReadResult | `DataTransfer.cpp:775-781`: `bytesRead` is checked against the read buffer, not against the packet | heap-buffer-overflow at 781 | copies up to the buffer size from beyond the packet into the file data: wrong data |
 | P4 | Message | `DataTransfer.cpp:731-732`: `header->length` unchecked, `OutputBuffer::cat` copies it (`OutputMemory.cpp:240`) | heap-buffer-overflow at OutputMemory.cpp:240 | message text from beyond the packet |
 | P5 | WriteIap | `SbcInterface.cpp:749`: `ReceiveAndStartIap(transfer.ReadData(packet->length), packet->length)` | heap-buffer-overflow at 749 | the IAP image gets bytes from beyond the packet; DSF can flash anything here anyway |
-| P6 | every request with a data header | the `Read*` functions read their header and data beyond the received data but inside `rxBuffer` | use-after-poison with `FUZZ_POISON_STALE=1` | stale bytes of an earlier transfer: wrong data, no memory error |
+| P6 | every request with a data header | the `Read*` functions read their header and data beyond the received data but inside `rxBuffer`. Open after the fix of P1-P5: `ReadDataHeader` reads the whole header of a packet that is shorter than it; `ReadSetVariable` and `ReadDeleteLocalVariable` read their 8-bit lengths unchecked; `ObjectModelKeyChanged` compares the key as a null-terminated string (`SbcInterface.cpp:1455`) | use-after-poison with `FUZZ_POISON_STALE=1` | stale bytes of an earlier transfer: wrong data, no memory error |
 | P7 | every request with a bool field | `ReadBoolean` (`DataTransfer.cpp:645`) and the others load a packet byte other than 0 or 1 as bool | UBSan load of invalid bool (`UBSAN_BOOL=1`) | undefined behaviour; what the firmware build makes of such a byte was not checked |
+
+After the fix of P1-P5 (2026-11-24): the seeds; seed 1 and seed 3, 50000 inputs each, report nothing. Seed 2 with 50000 inputs and
+`FUZZ_POISON_STALE=1` reports P6 only. With only the `ReadPacket` check and none of the others, P1-P4 still report and P5 does not.
 
 What was fuzzed (2026-11-24, RRF 3.7-dev 6c45e07a7): the seeds; seed 1 and seed 3, 50000 inputs each; seed 2, 50000 inputs with
 `FUZZ_POISON_STALE=1`; libFuzzer 600 s with 4 workers (2.06 million inputs, 5589 crash artifacts: 5454 with the keys above, the other 135
