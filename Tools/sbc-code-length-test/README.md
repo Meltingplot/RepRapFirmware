@@ -23,17 +23,21 @@ both parsers take their limit from the same `GCodeBuffer::bufferLength`:
 The test puts codes in both orders, in SBC mode and in standalone mode. It checks:
 - that a text line of 255 characters is stored and one of 256 characters is refused;
 - that a binary code of up to 384 bytes is stored and one of 388 bytes is refused;
-- the size of the allocation.
+- the size of the allocation;
+- that a binary code of 384 bytes whose string or array ends at its last byte is stored, and that one whose parameter table, string or
+  array goes beyond the code, or whose string or array length is negative, is marked as malformed and not stored;
+- that the next binary code clears the malformed mark.
 
 It compiles the real text, which the Makefile extracts at build time with `../macro-error-test/extract.awk`, with `#line` directives
 that point at the real lines (the build fails if one is missing):
 - `src/GCodes/GCodeBuffer/StringParser.cpp`: `Put(char)`, `AddToChecksum` and `StoreAndAddToChecksum`.
-- `src/GCodes/GCodeBuffer/BinaryParser.cpp`: `AllocateBuffer` and `Put`.
+- `src/GCodes/GCodeBuffer/BinaryParser.cpp`: `AllocateBuffer`, `Put` and `ParametersFit`.
 - `src/Config/Configuration.h` and `src/SBC/SbcMessageFormats.h`: `MaxGCodeStringLength` and `MaxGCodeBinaryLength`.
 
 `sbc_code_length_test.cpp` gives them minimal `GCodeBuffer`, `StringParser`, `BinaryParser`, `RepRap` and `Tasks::AllocPermanent`
 stand-ins. `GCodeBuffer::overflowed` is what the firmware reports as "GCode command too long": `StringParser::CheckMetaCommand` for text,
-`GCodes::ActOnCode` for binary.
+`GCodes::ActOnCode` for binary. `GCodeBuffer::malformed` is what `GCodes::ActOnCode` reports as "GCode command malformed". The test's
+`DataType`, `CodeHeader` and `CodeParameter` are copies of those in `src/SBC/SbcMessageFormats.h`.
 
 Up to 3.7-dev de1bfe598, two cases fail:
 - "first code text: binary codes up to MaxGCodeBinaryLength bytes are stored";

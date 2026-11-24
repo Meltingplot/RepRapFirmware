@@ -1,4 +1,5 @@
-# expect: AddressSanitizer: SEGV at BinaryParser.cpp:603 in BinaryParser::GetDriverIdArray
+# expect: clean
+# Fixed: BinaryParser::Put refuses the code, its parameters do not fit in it (ParametersFit). Before the fix: AddressSanitizer: SEGV at BinaryParser.cpp:603 in BinaryParser::GetDriverIdArray
 # B2: driver ID array after a parameter with a huge intValue; GetDriverIdArray reads at a wild address (BinaryParser.cpp:603)
 # seed 1 input 15777: AddressSanitizer: SEGV at BinaryParser.cpp:603 in BinaryParser::GetDriverIdArray
 # AddressSanitizer:DEADLYSIGNAL

@@ -158,7 +158,7 @@ void GCodeBuffer::Init() noexcept
 	binaryParser.Init();
 #endif
 	stringParser.Init();
-	overflowed = timerRunning = false;
+	overflowed = malformed = timerRunning = false;
 #if SUPPORT_ASYNC_MOVES
 	syncState = SyncState::running;
 #endif

@@ -120,6 +120,11 @@ bool GCodes::ActOnCode(GCodeBuffer& gb, const StringRef& reply) noexcept
 			// Too long G-codes in SBC mode are not stored to avoid access to invalid memory regions, so there are no details available here
 			throw GCodeException("GCode command too long");
 		}
+		if (gb.IsBinary() && gb.WasMalformed())
+		{
+			// Binary G-codes whose parameters don't fit in them are not stored either
+			throw GCodeException("GCode command malformed");
+		}
 #endif
 		if (   triggerActionRunning && &gb == TriggerGCode()					// the line of a trigger action can hold more commands than M581.1 checked
 			&& !TriggerItem::IsAllowedInAction(gb.GetCommandLetter(), (gb.HasCommandNumber()) ? gb.GetCommandNumber() : -1)

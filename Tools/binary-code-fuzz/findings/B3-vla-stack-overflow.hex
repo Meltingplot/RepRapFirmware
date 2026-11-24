@@ -1,3 +1,4 @@
-# expect: AddressSanitizer: stack-overflow at BinaryParser.cpp:911 in BinaryParser::WriteParameters
+# expect: clean
+# Fixed: BinaryParser::Put refuses the code, its parameters do not fit in it (ParametersFit). Before the fix: AddressSanitizer: stack-overflow at BinaryParser.cpp:911 in BinaryParser::WriteParameters
 # B3: Bad command reply of a code with a string of intValue 0x01000000; WriteParameters puts a 16 MB VLA on the stack (BinaryParser.cpp:911-912)
 02000041 0801014d e7030000 ffffffff 00000000 00000000 53060000 00000001 61626300

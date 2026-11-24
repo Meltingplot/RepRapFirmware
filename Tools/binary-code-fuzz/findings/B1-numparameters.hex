@@ -1,3 +1,4 @@
-# expect: AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:97 in BinaryParser::DecodeCommand
+# expect: clean
+# Fixed: BinaryParser::Put refuses the code, its parameters do not fit in it (ParametersFit). Before the fix: AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:97 in BinaryParser::DecodeCommand
 # B1: a 20-byte code with numParameters 255; DecodeCommand reads 2040 bytes of parameter table from a 384-byte buffer (BinaryParser.cpp:91-97)
 00000041 0801ff4d e7030000 ffffffff 00000000 00000000

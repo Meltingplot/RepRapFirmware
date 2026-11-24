@@ -36,6 +36,7 @@ public:
 	size_t bufferLength = 0;
 	GCodeBufferState bufferState = GCodeBufferState::parseNotStarted;
 	bool overflowed = false;
+	bool malformed = false;
 
 	BinaryParser binaryParser;
 };

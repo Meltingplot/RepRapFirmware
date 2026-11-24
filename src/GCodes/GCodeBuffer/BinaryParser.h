@@ -79,6 +79,7 @@ private:
 	size_t AddPadding(size_t bytesRead) const noexcept { return (bytesRead + 3u) & (~3u); }
 	template<typename T> void GetArray(T arr[], size_t& length) THROWS(GCodeException) SPEED_CRITICAL;
 	void WriteParameters(const StringRef& s, bool quoteStrings) const noexcept;
+	bool ParametersFit(size_t codeLength) const noexcept;
 
 	size_t bufferLength;
 	CodeHeader *header;

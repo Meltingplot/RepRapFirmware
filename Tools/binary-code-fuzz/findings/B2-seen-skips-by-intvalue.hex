@@ -1,3 +1,4 @@
-# expect: AddressSanitizer: SEGV at BinaryParser.cpp:502 in BinaryParser::GetPossiblyQuotedString
+# expect: clean
+# Fixed: BinaryParser::Put refuses the code, its parameters do not fit in it (ParametersFit). Before the fix: AddressSanitizer: SEGV at BinaryParser.cpp:502 in BinaryParser::GetPossiblyQuotedString
 # B2: string parameter B with intValue 0x10000000; Seen('C') skips AddPadding(intValue) and GetPossiblyQuotedString reads 256 MB further on (BinaryParser.cpp:145, 502)
 00050000 0801024d e7030000 ffffffff 00000000 00000000 42060000 00000010 43060000 04000000 61626364
