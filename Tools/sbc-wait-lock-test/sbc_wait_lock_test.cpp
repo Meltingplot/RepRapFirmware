@@ -1246,14 +1246,14 @@ public:
 
 	void SetCommand(unsigned int start, unsigned int end) noexcept { commandStart = start; commandEnd = end; }
 
-	bool CallsFileFunction() const noexcept { return CallsFileFunction(commandStart, commandEnd); }	// as in StringParser.h
+	bool CallsFileFunction() const noexcept;
+	static bool CallsFileFunction(const char *_ecv_array text, size_t length) noexcept;
 	bool ProcessConditionalGCode(const StringRef& reply, BlockType skippedBlockType, bool doingFile) THROWS(GCodeException);
 
 	std::string processed;
 	unsigned int commandStart, commandEnd, gcodeLineEnd;
 
 private:
-	bool CallsFileFunction(unsigned int start, unsigned int end) const noexcept;
 	bool SendGlobalAssignmentToSbc(bool isSet) noexcept;
 
 	void ProcessIfCommand() noexcept { processed = "if"; }
@@ -1350,6 +1350,55 @@ static void TestCommandsCallingFileFunctions() noexcept
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------
+// 6. Trigger actions (M581.1 U). An action runs in RRF alone, so M581.1 rejects one that calls fileexists() or fileread() anywhere on its
+// line: in SBC mode DSF evaluates them
+
+static inline bool isDigit(char c) noexcept
+{
+	return isdigit((int)c) != 0;
+}
+
+static uint32_t StrToU32(const char *s, const char **endptr) noexcept		// RRFLibraries src/General/SafeStrtod.h
+{
+	char *end;
+	const uint32_t rslt = (uint32_t)std::strtoul(s, &end, 10);
+	*endptr = end;
+	return rslt;
+}
+
+// TriggerItem as far as the extracted functions use it (src/GCodes/TriggerItem.h)
+class TriggerItem
+{
+public:
+	static bool IsAllowedInAction(char letter, int number) noexcept;
+	static bool IsAllowedAction(const char *_ecv_array s) noexcept;
+};
+
+#include "TriggerItem.inc"
+
+static void TestAction(const char *action, bool expected) noexcept
+{
+	failures.clear();
+	const bool allowed = TriggerItem::IsAllowedAction(action);
+	Report(std::string("trigger action: '") + action + "' is " + ((expected) ? "allowed" : "rejected"),
+			allowed == expected, std::string("IsAllowedAction returned ") + ((allowed) ? "true" : "false"));
+}
+
+static void TestTriggerActions() noexcept
+{
+	TestAction("set global.x = fileexists(\"0:/sys/a.g\")", false);
+	TestAction("set global.x = {fileread(\"0:/sys/a.csv\", 0, 1, ',')}", false);
+	TestAction("M118 S{fileexists(\"0:/sys/a.g\")}", false);
+	TestAction("M118 S\"a\" M117 {fileexists(\"0:/sys/a.g\")}", false);		// a later command on the line
+	TestAction("set global.x = global.y + 1", true);
+	TestAction("set global.x = \"fileexists(a)\"", true);					// in a quoted string
+	TestAction("M42 P1 S1 ; fileexists(\"a\")", true);					// in a comment
+	TestAction("echo global.x", true);
+	TestAction("M98 P\"a.g\"", false);									// runs a macro, rejected before as well
+	TestAction("echo >\"a.txt\" 1", false);								// writes a file, rejected before as well
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
 
 int main()
 {
@@ -1378,6 +1427,8 @@ int main()
 	TestFileExistsOfHeapString(true);
 
 	TestCommandsCallingFileFunctions();
+
+	TestTriggerActions();
 
 	std::printf("%u passed, %u failed\n", passed, failed);
 	return (failed == 0) ? 0 : 1;

@@ -459,9 +459,14 @@ bool TriggerItem::IsAllowedInAction(char letter, int number) noexcept
 }
 
 // Check how an action starts. Besides the commands of IsAllowedInAction it may be set, echo without redirection to a file, or a comment.
-// Further commands on the line are checked when they run.
+// Further commands on the line are checked when they run. No part of the line may call fileexists() or fileread(), because DSF evaluates
+// them in SBC mode, so the action would depend on DSF.
 bool TriggerItem::IsAllowedAction(const char *_ecv_array s) noexcept
 {
+	if (StringParser::CallsFileFunction(s, strlen(s)))
+	{
+		return false;
+	}
 	s += strspn(s, " \t");
 	if (*s == 0 || *s == ';' || *s == '(')
 	{

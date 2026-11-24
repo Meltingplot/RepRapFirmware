@@ -30,6 +30,8 @@ and `GCodeBuffer::RequestMacroFile` report an internal error when the caller hol
    other codes that DSF handles. The test covers the scanner (`StringParser::CallsFileFunction`) and the hand-over of `global` and
    `set global.` in `StringParser::ProcessConditionalGCode`. The hand-over of G, M and T commands in `GCodes::ActOnCode` and the check in
    `GCodeBuffer::RequestMacroFile` are not covered here.
+6. Trigger actions (`M581.1 U`) run in RRF alone, so `TriggerItem::IsAllowedAction` rejects an action that calls `fileexists()` or
+   `fileread()` anywhere on its line, including a later command; quoted strings and comments do not count.
 
 ## What the test compiles
 
@@ -40,7 +42,8 @@ the real lines):
 - `src/SBC/SbcInterface.cpp`: `FileExists`, `TruncateFile`, `CloseFile`, `WaitForFileSlot`, `PostFileOperation`, `DoFileOperation`;
 - `src/CAN/ExpansionManager.cpp`: `ProcessAnnouncement`; `src/Accelerometers/Accelerometers.cpp`: `RemoteBoardRestarted`;
 - `src/Platform/Platform.cpp`: both `SysFileExists`;
-- `src/GCodes/GCodeBuffer/StringParser.cpp`: `ProcessConditionalGCode`, `CallsFileFunction`, `SendGlobalAssignmentToSbc`.
+- `src/GCodes/GCodeBuffer/StringParser.cpp`: `ProcessConditionalGCode`, both `CallsFileFunction`, `SendGlobalAssignmentToSbc`;
+- `src/GCodes/TriggerItem.cpp`: `IsAllowedInAction`, `IsAllowedAction`.
 
 `sbc_wait_lock_test.cpp` gives them stand-ins. The tasks run on one simulated processor, as in `Tools/object-lifetime-test`: each task
 is a thread, only one runs at a time, and a task runs until it blocks unless a task with a higher priority becomes ready (priorities from
@@ -56,5 +59,5 @@ builds the test plain and with AddressSanitizer and UBSan and runs both (g++ 13,
 `../RRFLibraries` next to this repository.
 
 Without the fixes the test fails: without the count in RRFLibraries 8 cases, without the check in `WaitForFileSlot` 2, with
-`RemoteBoardRestarted` back under `boardsLock` 4, with the heap lock held across the check 1, and without the hand-over of `global` and
-`set global.` 3.
+`RemoteBoardRestarted` back under `boardsLock` 4, with the heap lock held across the check 1, without the hand-over of `global` and
+`set global.` 3, and without the file function check of trigger actions 4.
