@@ -275,6 +275,7 @@ public:
 
 	bool IsSendRequested() const noexcept { return sendToSbc; }				// Is this code supposed to be sent to the SBC
 	void SendToSbc() noexcept { sendToSbc = true; }							// Send this code to the attached SBC
+	bool CallsFileFunction() const noexcept;								// Is the current command text that calls fileexists() or fileread()?
 	void SentToSbc() noexcept;												// Code has been sent to the SBC, wait for it to finish
 	bool IsExecutingOnSbc() const noexcept { return bufferState == GCodeBufferState::executingOnSbc; }
 #endif

@@ -87,6 +87,9 @@ public:
 
 	const char *_ecv_array DataStart() const noexcept;						// Get the start of the current command
 	size_t DataLength() const noexcept;										// Get the length of the current command
+#if HAS_SBC_INTERFACE
+	bool CallsFileFunction() const noexcept { return CallsFileFunction(commandStart, commandEnd); }	// Does the current command call fileexists() or fileread()?
+#endif
 
 	void PrintCommand(const StringRef& s) const noexcept;
 	void AppendFullCommand(const StringRef &s) const noexcept;
@@ -126,6 +129,10 @@ private:
 	void ProcessContinueCommand() THROWS(GCodeException);
 	void ProcessVarOrGlobalCommand(bool isGlobal) THROWS(GCodeException);
 	void ProcessSetCommand() THROWS(GCodeException);
+#if HAS_SBC_INTERFACE
+	bool CallsFileFunction(unsigned int start, unsigned int end) const noexcept;
+	bool SendGlobalAssignmentToSbc(bool isSet) noexcept;
+#endif
 	void ProcessAbortCommand(const StringRef& reply) noexcept;
 	void ProcessEchoCommand(const StringRef& reply) THROWS(GCodeException);
 
