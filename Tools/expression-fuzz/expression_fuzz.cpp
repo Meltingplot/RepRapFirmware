@@ -848,6 +848,17 @@ namespace
 		CheckDriverIdArray("{move.axes[2].drivers}", 3, 3);
 		CheckDriverIdArray("{move.axes[0].drivers}", 1, 1);
 
+		// Float to int32 range of floor, ceil, round and pow (finding E3): (float)INT32_MAX is 2^31, which must stay a float. Compared
+		// with == so that no INT_MIN is printed (B6 of ../binary-code-fuzz, RRFLibraries)
+		CheckSameValue("floor(2147483648.0) == 2147483648.0", "true");
+		CheckSameValue("ceil(2147483647.5) == 2147483648.0", "true");
+		CheckSameValue("round(2147483648.0) == 2147483648.0", "true");
+		CheckSameValue("pow(2, 31) == 2147483648.0", "true");
+		CheckSameValue("floor(2147483520.0)", "2147483520");					// the largest float below 2^31 is still an int
+		CheckSameValue("pow(2, 30)", "1073741824");
+		CheckSameValue("round(-2147483648.0) == -2147483647 - 1", "true");
+		CheckSameValue("pow(-2, 31) == -2147483647 - 1", "true");
+
 		printf("%u failed\n", takeDropFailures);
 		return (takeDropFailures == 0) ? 0 : 1;
 	}

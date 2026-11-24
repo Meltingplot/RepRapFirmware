@@ -2035,7 +2035,7 @@ void ExpressionParser::ParseIdentifierExpression(ExpressionValue& rslt, bool eva
 				{
 					ConvertToFloat(rslt, evaluate);
 					const float f = ((func.RawValue() == Function::floor) ? floorf : (func.RawValue() == Function::ceil) ? ceilf : rintf)(rslt.fVal);
-					if (f <= (float)std::numeric_limits<int32_t>::max() && f >= (float)std::numeric_limits<int32_t>::min())
+					if (f < (float)std::numeric_limits<int32_t>::max() && f >= (float)std::numeric_limits<int32_t>::min())		// (float)INT32_MAX is 2^31, which does not fit
 					{
 						rslt.SetInt((int32_t)f);
 					}
@@ -2294,7 +2294,7 @@ void ExpressionParser::ParseIdentifierExpression(ExpressionValue& rslt, bool eva
 					ConvertToFloat(rslt, evaluate);
 					ConvertToFloat(nextOperand, evaluate);
 					const float fres = powf(rslt.fVal, nextOperand.fVal);
-					if (integerResult && fabsf(fres) <= (float)std::numeric_limits<int32_t>::max())
+					if (integerResult && fres < (float)std::numeric_limits<int32_t>::max() && fres >= (float)std::numeric_limits<int32_t>::min())	// (float)INT32_MAX is 2^31
 					{
 						rslt.SetInt(lrintf(fres));
 					}
