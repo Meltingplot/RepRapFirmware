@@ -1,0 +1,21 @@
+# expect: AddressSanitizer: SEGV at BinaryParser.cpp:603 in BinaryParser::GetDriverIdArray
+# B2: driver ID array after a parameter with a huge intValue; GetDriverIdArray reads at a wild address (BinaryParser.cpp:603)
+# seed 1 input 15777: AddressSanitizer: SEGV at BinaryParser.cpp:603 in BinaryParser::GetDriverIdArray
+# AddressSanitizer:DEADLYSIGNAL
+# =================================================================
+# ==387539==ERROR: AddressSanitizer: SEGV on unknown address 0x5130040011e8 (pc 0x5b65be62196d bp 0x7ffdffd6f360 sp 0x7ffdffd6f2b0 T0)
+# ==387539==The signal is caused by a READ memory access.
+#     #0 0x5b65be62196d in BinaryParser::GetDriverIdArray(DriverId*, unsigned long&) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/GCodes/GCodeBuffer/BinaryParser.cpp:603
+#     #1 0x5b65be62a3c1 in ArrayGetter<DriverId> /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/binary_code_fuzz.cpp:205
+#     #2 0x5b65be62a3c1 in CallGetter /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/binary_code_fuzz.cpp:223
+#     #3 0x5b65be62a3c1 in LLVMFuzzerTestOneInput /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/binary_code_fuzz.cpp:305
+#     #4 0x5b65be6370e5 in FuzzDriver::Run(int, char**, std::vector<std::vector<unsigned char, std::allocator<unsigned char> >, std::allocator<std::vector<unsigned char, std::allocator<unsigned char> > > > const&, unsigned long) ../sbc-packet-fuzz/fuzz_driver.inc:362
+#     #5 0x5b65be63f7b5 in main ../sbc-packet-fuzz/fuzz_driver.inc:445
+#     #6 0x733df9a2a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #7 0x733df9a2a28a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #8 0x5b65be615084 in _start (/tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/build/asan-binary-code-fuzz+0x59084) (BuildId: 8c47886c257210ed2f09717568440f34d39bd487)
+# 
+# AddressSanitizer can not provide additional info.
+# SUMMARY: AddressSanitizer: SEGV /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/GCodes/GCodeBuffer/BinaryParser.cpp:603 in BinaryParser::GetDriverIdArray(DriverId*, unsigned long&)
+# ==387539==ABORTING
+fce604410801034d5c000000ffffffff671200002a000000450500f0ffffff00490300000300000055040000020000000000c8430000d243ffffff0001000800030000000700000008000000

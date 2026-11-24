@@ -1,0 +1,4 @@
+# expect: FUZZ: unterminated-heap-string at BinaryParser.cpp:1026 in BinaryParser::AddParameters
+# B5: macro call with string parameter intValue -1; SafeStrncpy with length 0 writes dst[-1] and leaves the heap string without its text and null (StringHandle.cpp:70)
+# M98 S"abc" with intValue 0xffffffff, AddParameters
+20000041 0801014d 62000000 ffffffff 67120000 2a000000 53060000ffffffff 61626300 00000000

@@ -1,0 +1,44 @@
+# expect: AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:444 in BinaryParser::GetMacAddress
+# B8: MAC address string at the end of the code buffer; StrHexToU32 reads on beyond intValue and the buffer (BinaryParser.cpp:444)
+# seed 1 input 327: AddressSanitizer: heap-buffer-overflow at BinaryParser.cpp:444 in BinaryParser::GetMacAddress
+# =================================================================
+# ==384601==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x513000000700 at pc 0x5b65be65f05f bp 0x7ffdffd6f050 sp 0x7ffdffd6f040
+# READ of size 1 at 0x513000000700 thread T0
+#     #0 0x5b65be65f05e in operator() ../../../RRFLibraries/src/General/SafeStrtod.cpp:69
+#     #1 0x5b65be65f05e in callback_fn<StrToU32Opt(c_string, char const**, NumericConverter::OptionsType)::<lambda()> > ../../../RRFLibraries/src/General/function_ref.h:68
+#     #2 0x5b65be660c46 in function_ref_noexcept<char () noexcept>::operator()() const ../../../RRFLibraries/src/General/function_ref.h:89
+#     #3 0x5b65be660c46 in NumericConverter::Accumulate(char, unsigned char, function_ref_noexcept<char () noexcept>) ../../../RRFLibraries/src/General/NumericConverter.cpp:235
+#     #4 0x5b65be65f2f2 in StrToU32Opt ../../../RRFLibraries/src/General/SafeStrtod.cpp:69
+#     #5 0x5b65be65f79f in StrHexToU32(char const*, char const**) ../../../RRFLibraries/src/General/SafeStrtod.cpp:93
+#     #6 0x5b65be61e5e4 in BinaryParser::GetMacAddress(MacAddress&) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/GCodes/GCodeBuffer/BinaryParser.cpp:444
+#     #7 0x5b65be629c9b in CallGetter /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/binary_code_fuzz.cpp:218
+#     #8 0x5b65be629c9b in LLVMFuzzerTestOneInput /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/binary_code_fuzz.cpp:305
+#     #9 0x5b65be6370e5 in FuzzDriver::Run(int, char**, std::vector<std::vector<unsigned char, std::allocator<unsigned char> >, std::allocator<std::vector<unsigned char, std::allocator<unsigned char> > > > const&, unsigned long) ../sbc-packet-fuzz/fuzz_driver.inc:362
+#     #10 0x5b65be63f7b5 in main ../sbc-packet-fuzz/fuzz_driver.inc:445
+#     #11 0x733df9a2a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #12 0x733df9a2a28a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #13 0x5b65be615084 in _start (/tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/build/asan-binary-code-fuzz+0x59084) (BuildId: 8c47886c257210ed2f09717568440f34d39bd487)
+# 
+# 0x513000000700 is located 0 bytes after 384-byte region [0x513000000580,0x513000000700)
+# allocated by thread T0 here:
+#     #0 0x733dfaafeaf8 in operator new(unsigned long, std::align_val_t) ../../../../src/libsanitizer/asan/asan_new_delete.cpp:107
+#     #1 0x5b65be625978 in Tasks::AllocPermanent(unsigned long, std::align_val_t) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/binary_code_fuzz.cpp:77
+#     #2 0x5b65be61879e in BinaryParser::AllocateBuffer() /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/GCodes/GCodeBuffer/BinaryParser.cpp:37
+#     #3 0x5b65be6199d2 in BinaryParser::Put(unsigned int const*, unsigned long) /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/src/GCodes/GCodeBuffer/BinaryParser.cpp:50
+#     #4 0x5b65be628e50 in LLVMFuzzerTestOneInput /tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/binary_code_fuzz.cpp:262
+#     #5 0x5b65be6370e5 in FuzzDriver::Run(int, char**, std::vector<std::vector<unsigned char, std::allocator<unsigned char> >, std::allocator<std::vector<unsigned char, std::allocator<unsigned char> > > > const&, unsigned long) ../sbc-packet-fuzz/fuzz_driver.inc:362
+#     #6 0x5b65be63f7b5 in main ../sbc-packet-fuzz/fuzz_driver.inc:445
+#     #7 0x733df9a2a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #8 0x733df9a2a28a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a) (BuildId: 8cebda42d140fc2b09639f8b13a5d5f2e617ef09)
+#     #9 0x5b65be615084 in _start (/tmp/claude-1000/-home-tim-dwc-DuetSoftwareFramework/8040af8b-508f-4328-a1a0-58e3f28f24e2/scratchpad/fw/rrf-fuzz/Tools/binary-code-fuzz/build/asan-binary-code-fuzz+0x59084) (BuildId: 8c47886c257210ed2f09717568440f34d39bd487)
+# 
+# SUMMARY: AddressSanitizer: heap-buffer-overflow ../../../RRFLibraries/src/General/SafeStrtod.cpp:69 in operator()
+# Shadow bytes around the buggy address:
+#   0x513000000480: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+#   0x513000000500: fd fd fd fd fd fd fd fd fa fa fa fa fa fa fa fa
+#   0x513000000580: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#   0x513000000600: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#   0x513000000680: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+# =>0x513000000700:[fa]fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+#   0x513000000780: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+bf0404410801074d4b020000ffffffff671200002a00000053060000040000005006000008000000490600000c0000007373696470617373776f72643139322e3136382e312e3130

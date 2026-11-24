@@ -1,0 +1,3 @@
+# expect: AddressSanitizer: heap-buffer-overflow at DataTransfer.cpp:659 in DataTransfer::ReadGetObjectModel
+# P1: GetObjectModel with keyLength 0x1FF4 in a 4-byte packet; flags.copy reads at rxBuffer+8192 (DataTransfer.cpp:656-659)
+000000 01 0c00  0300 0100 0400 0000  f41f 1400
