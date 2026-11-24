@@ -182,7 +182,7 @@ const char *_ecv_array _ecv_null SafeStrptime(const char *_ecv_array buf, const 
 				{
 					const char *_ecv_array s;
 					const int ret = strtol_l (buf, &s, 10, locale);
-					if (s == buf) { return nullptr; }
+					if (s == buf || ret < tm_year_base - 10000 || ret > tm_year_base + 10000) { return nullptr; }	// mktime refuses a tm_year beyond +/- 10000, and first_day loops once per year
 					timeptr->tm_year = ret - tm_year_base;
 					buf = s;
 					ymd |= SET_YEAR;
