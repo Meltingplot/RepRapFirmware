@@ -1,6 +1,6 @@
 // Host test of RRF's SafeStrptime (src/libc/strptime.cpp, compiled unchanged): the month of %m indexes _DAYS_BEFORE_MONTH, so a month
-// outside 1 to 12 must be refused. datetime() in expressions and M905 P pass user text to it (ExpressionParser.cpp, GCodes3.cpp). See
-// README.md.
+// outside 1 to 12 must be refused; first_day loops once per year since 1970, so a year that mktime refuses anyway must be refused too.
+// datetime() in expressions and M905 P pass user text to it (ExpressionParser.cpp, GCodes3.cpp). See README.md.
 
 #include <climits>
 #include <cstdio>
@@ -27,7 +27,7 @@ static void Report(const std::string& name, const std::string& why) noexcept
 }
 
 // A date that must be parsed, with the fields that SafeStrptime fills in
-static void Valid(const char *text, const char *format, int year, int mon, int mday, int yday) noexcept
+static void Valid(const char *text, const char *format, int year, int mon, int mday, int yday, int wday) noexcept
 {
 	tm t = {};
 	std::string why;
@@ -43,16 +43,18 @@ static void Valid(const char *text, const char *format, int year, int mon, int m
 		if (t.tm_mon != mon) { why += " tm_mon " + std::to_string(t.tm_mon); }
 		if (t.tm_mday != mday) { why += " tm_mday " + std::to_string(t.tm_mday); }
 		if (t.tm_yday != yday) { why += " tm_yday " + std::to_string(t.tm_yday); }
+		if (t.tm_wday != wday) { why += " tm_wday " + std::to_string(t.tm_wday); }
 	}
 	Report(std::string("\"") + text + "\" is parsed", why);
 }
 
-// A date whose month is outside 1 to 12 must be refused
+// A date whose month is outside 1 to 12, or whose year is outside the range of mktime, must be refused
 static void Refused(const char *text, const char *format) noexcept
 {
 	tm t = {};
 	const char *const end = SafeStrptime(text, format, &t);
-	Report(std::string("\"") + text + "\" is refused", (end == nullptr) ? "" : " parsed, tm_mon " + std::to_string(t.tm_mon));
+	Report(std::string("\"") + text + "\" is refused",
+			(end == nullptr) ? "" : " parsed, tm_year " + std::to_string(t.tm_year) + " tm_mon " + std::to_string(t.tm_mon));
 }
 
 int main()
@@ -60,11 +62,13 @@ int main()
 	const char *const dateTime = "%Y-%m-%dT%H:%M:%S";		// datetime() and the HTTP time (ExpressionParser.cpp, HttpResponder.cpp)
 	const char *const date = "%Y-%m-%d";					// M905 P (GCodes3.cpp)
 
-	Valid("2026-11-24T01:02:03", dateTime, 2026, 10, 24, 327);
-	Valid("2026-01-01", date, 2026, 0, 1, 0);
-	Valid("2026-12-31", date, 2026, 11, 31, 364);
-	Valid("2024-12-31", date, 2024, 11, 31, 365);			// leap year
-	Valid("2024-03-01", date, 2024, 2, 1, 60);
+	Valid("2026-11-24T01:02:03", dateTime, 2026, 10, 24, 327, 2);
+	Valid("2026-01-01", date, 2026, 0, 1, 0, 4);
+	Valid("2026-12-31", date, 2026, 11, 31, 364, 4);
+	Valid("2024-12-31", date, 2024, 11, 31, 365, 2);		// leap year
+	Valid("2024-03-01", date, 2024, 2, 1, 60, 5);
+	Valid("11900-01-01", date, 11900, 0, 1, 0, 1);			// tm_year 10000, the last year that mktime accepts
+	Valid("-8100-01-01T00:00:00", dateTime, -8100, 0, 1, 0, 4);	// tm_year -10000, the first one; tm_wday 4 as for every year before 1970 (first_day counts from 1970)
 
 	Refused("2026-00-01", date);
 	Refused("2026-13-01", date);							// the first month beyond _DAYS_BEFORE_MONTH
@@ -72,6 +76,12 @@ int main()
 	Refused("2026--1-01", date);
 	Refused("2026-2147483647-01", date);
 	Refused("2026--2147483648-01", date);					// ret - 1 overflows
+
+	Refused("11901-01-01", date);							// tm_year 10001
+	Refused("-8101-01-01", date);							// tm_year -10001
+	Refused("100000000-01-01T00:00:00", dateTime);			// first_day looped 1e8 times
+	Refused("2147483647-01-01T00:00:00", dateTime);			// and here 2.1e9 times
+	Refused("-2147483648-01-01", date);						// ret - 1900 overflows
 
 	printf("%u passed, %u failed\n", passed, failed);
 	return (failed == 0) ? 0 : 1;

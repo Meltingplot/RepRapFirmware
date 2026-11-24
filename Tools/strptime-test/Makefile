@@ -1,5 +1,5 @@
 # Host test of RRF's SafeStrptime (src/libc/strptime.cpp), compiled unchanged with the RRFLibraries number code it uses: valid dates
-# and months outside 1 to 12. Run with make in WSL (g++ 13).
+# and months outside 1 to 12 or years outside the range of mktime. Run with make in WSL (g++ 13).
 #
 #   make              build build/strptime-test
 #   make asan         the same with AddressSanitizer and UBSan, which stop at the first report, build/asan-strptime-test
