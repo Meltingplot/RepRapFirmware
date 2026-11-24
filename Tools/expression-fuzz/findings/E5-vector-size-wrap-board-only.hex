@@ -1,0 +1,4 @@
+# expect: clean
+# E5 (board only, 32-bit size_t): ArrayHandle::Allocate (ArrayHandle.cpp:29-42) computes 4 + 536870912 * 8 = 2^32 + 4, which wraps to 4 on the board; the space check passes and the loop constructs 2^29 elements beyond the heap block. On the 64-bit host there is no wrap and Allocate throws "Array too large", so this input is clean here
+# expression: vector(536870912, 0)
+0007766563746f72283533363837303931322c203029

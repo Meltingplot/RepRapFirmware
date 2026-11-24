@@ -1,0 +1,4 @@
+# expect: UBSan: strptime.cpp:285:28: signed integer overflow: N + N cannot be represented in type 'int' (at strptime.cpp:285 in SafeStrptime)
+# E7: SafeStrptime %d of INT_MAX: the day of year sum overflows (strptime.cpp:237, 285)
+# expression: datetime("2026-01-2147483647T00:00:00")
+00076461746574696d652822323032362d30312d323134373438333634375430303a30303a30302229

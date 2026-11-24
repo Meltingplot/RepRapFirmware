@@ -1,0 +1,4 @@
+# expect: UBSan: ExpressionParser.cpp:567:17: signed integer overflow: N - N cannot be represented in type 'int' (at ExpressionParser.cpp:567 in ExpressionParser::ParseInternal)
+# E1: signed overflow of -, ExpressionParser.cpp:567
+# expression: 2147483647 - -1
+000732313437343833363437202d202d31

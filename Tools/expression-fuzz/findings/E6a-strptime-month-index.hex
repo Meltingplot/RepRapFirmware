@@ -1,0 +1,4 @@
+# expect: UBSan: strptime.cpp:237:57: index N out of bounds for type 'short int [N]' (at strptime.cpp:237 in SafeStrptime)
+# E6: SafeStrptime takes %m without a range check (strptime.cpp:144) and indexes _DAYS_BEFORE_MONTH[12] with it (strptime.cpp:237)
+# expression: datetime("2026-99-01T00:00:00")
+00076461746574696d652822323032362d39392d30315430303a30303a30302229
