@@ -22,6 +22,20 @@ Arrays are copied the same way, by `ExpressionValue(const ExpressionValue&)`. `A
 the array before the slot itself, so the test also runs the other task at each release of an element. A copy must see the
 whole array or none of it.
 
+## Array size
+
+`ArrayHandle::Allocate` computes the size of an array as `sizeof(ArrayStorageSpace) + numElements * sizeof(ExpressionValue)`
+(`src/Platform/ArrayHandle.cpp`). On the board, with a 32-bit `size_t` and an 8-byte `ExpressionValue`, `vector(536870912, 0)` makes
+that 4. The check of the space then passes, and the loop that constructs the elements writes 2^29 of them beyond a space of 4 bytes
+(finding E5 of `Tools/expression-fuzz`; plain G-code is enough, e.g. `echo {vector(536870912, 0)}`). `Allocate` now refuses a count
+whose size would wrap around with "Array too large", before it touches the heap.
+
+With the 64-bit `size_t` of the host the same wrap needs 2^64 / `sizeof(ExpressionValue)` elements (2^60 with the 16-byte stand-in), so
+the test asks `Allocate` for that count, for 536870912 and for `SIZE_MAX`, and expects "Array too large" for each. Against the source
+without the fix, the AddressSanitizer build reports a heap-buffer-overflow at `ArrayHandle.cpp:41` (the construction of the elements),
+and the plain build ends with SIGSEGV. The 32-bit wrap itself cannot run on the host (no 32-bit multilib in WSL); that it happens on
+the board is from the MB6HC disassembly (`Tools/expression-fuzz/README.md`), not from a board.
+
 The AddressSanitizer build leaves out `-fsanitize=alignment`. The heap rounds every allocation to 4 bytes, which is the
 alignment of `ExpressionValue` on the target, but on a 64-bit host the handles in the array elements would need 8.
 

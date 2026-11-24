@@ -25,6 +25,12 @@ void ArrayHandle::Allocate(size_t numElements) THROWS(GCodeException)
 #if CHECK_HEAP_LOCKED
 	Heap::heapLock.CheckHasWriteLock();
 #endif
+	// The size below must not wrap around (e.g. vector(536870912, 0) with a 32-bit size_t), else the check of the space passes for a tiny one
+	if (numElements > (SIZE_MAX - sizeof(ArrayStorageSpace)) / sizeof(ExpressionValue))
+	{
+		throw GCodeException("Array too large");
+	}
+
 	Heap::IndexSlot * const slot = Heap::AllocateHandle();
 	Heap::StorageSpace * const space = Heap::AllocateSpace(sizeof(ArrayStorageSpace) + numElements * sizeof(ExpressionValue));
 	slot->storage = space;

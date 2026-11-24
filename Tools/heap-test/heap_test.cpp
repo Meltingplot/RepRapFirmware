@@ -23,6 +23,8 @@
 #include <Platform/Heap.h>
 #include <ObjectModel/ObjectModel.h>
 
+#include <cstdint>
+#include <cstring>
 #include <string>
 #include <functional>
 #include <vector>
@@ -372,8 +374,35 @@ static void ArrayReadDuringTheRelease(const ArrayDeletion& d, Moment when) noexc
 	Report(ok, std::string("array read ") + ((when == Moment::callingDeleteSlot) ? "as a release starts: " : "as a release returns: ") + d.name, why);
 }
 
+// ArrayHandle::Allocate computes the size of the array as sizeof(ArrayStorageSpace) + numElements * sizeof(ExpressionValue). On the board
+// (32-bit size_t, 8-byte ExpressionValue) vector(536870912, 0) makes that 4, the check of the space passes, and the loop writes 2^29
+// elements beyond a space of 4 bytes. With the 64-bit size_t of the host the same wrap needs 2^64 / sizeof(ExpressionValue) elements.
+// Allocate must refuse both counts with "Array too large" before it touches the heap
+static void ArrayWhoseSizeWrapsAroundIsRefused(size_t numElements, const char *what) noexcept
+{
+	std::string why;
+	{
+		AutoArrayHandle array;
+		WriteLocker locker(Heap::heapLock);
+		try
+		{
+			array.Allocate(numElements);
+			why = "the array was allocated";
+		}
+		catch (const GCodeException& e)
+		{
+			if (strcmp(e.GetMessage(), "Array too large") != 0) { why = std::string("exception \"") + e.GetMessage() + "\""; }
+		}
+	}
+	Report(why.empty(), std::string("an array of ") + std::to_string(numElements) + " elements (" + what + ") is refused", why);
+}
+
 int main() noexcept
 {
+	ArrayWhoseSizeWrapsAroundIsRefused(SIZE_MAX / sizeof(ExpressionValue) + 1, "its size wraps around to 4 on the host");
+	ArrayWhoseSizeWrapsAroundIsRefused(536870912, "the count that wraps around on the board");
+	ArrayWhoseSizeWrapsAroundIsRefused(SIZE_MAX, "the largest count");
+
 	for (const Deletion& d : deletions)
 	{
 		HandleIsClearedBeforeItsSlotIsReleased(d);
