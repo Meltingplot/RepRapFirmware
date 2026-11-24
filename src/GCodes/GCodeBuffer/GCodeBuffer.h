@@ -422,8 +422,9 @@ private:
 
 	char *_ecv_array _ecv_null buffer;					// if allocated must be aligned because in SBC binary mode we do dword fetches from it
 	size_t bufferLength;								// length of the allocated buffer in bytes
-	bool overflowed;									// true if the buffer overflowed
-	bool malformed;										// true if the parameters of the binary G-code in the buffer did not fit in it
+	uint8_t
+		overflowed : 1,									// true if the buffer overflowed
+		malformed : 1;									// true if the parameters of the binary G-code in the buffer did not fit in it
 
 #if HAS_SBC_INTERFACE
 	// Accessed by both the Main and SBC tasks
