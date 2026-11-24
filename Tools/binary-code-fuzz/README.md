@@ -48,6 +48,9 @@ further letter takes the next). Byte 2: the array length GCodes passes to the ar
 Byte 3: the fill byte of the code buffer. Then the code, 20 to 384 bytes in a multiple of 4; other lengths do not run, because
 `SbcInterface` refuses them. The 325 seeds are codes as DSF's `Writer.WriteCode` encodes them (`Writer.cs`), with several configurations.
 
+The firmware builds do not use this folder: make and CMake only read `src/`, and the `*-fuzz` resource filter in `.project` hides it
+from Eclipse.
+
 ## Build and run (WSL, g++ 13, clang 18 for libFuzzer)
 
     make              # build/binary-code-fuzz and build/asan-binary-code-fuzz (deterministic driver, ../sbc-packet-fuzz/fuzz_driver.inc)

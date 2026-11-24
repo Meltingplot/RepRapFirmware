@@ -46,6 +46,9 @@ runs (the SBC task), then `FillBuffer` for every channel (the main task). Inputs
 The 93 seeds (`FuzzSeeds`) are well-formed transfers with every request of `SbcRequest` on SPI and on USB, several packets per transfer,
 and two transfers in one input.
 
+The firmware builds do not use this folder: make and CMake only read `src/`, and the `*-fuzz` resource filter in `.project` hides it
+from Eclipse.
+
 ## Build and run (WSL, g++ 13, clang 18 for libFuzzer)
 
     make              # build/sbc-packet-fuzz and build/asan-sbc-packet-fuzz (deterministic driver, fuzz_driver.inc)
