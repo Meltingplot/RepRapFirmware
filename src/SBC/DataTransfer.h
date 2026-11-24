@@ -93,6 +93,8 @@ public:
 	bool WriteDoCode(GCodeChannel channel, const char *code, size_t length, uint16_t tag) noexcept;
 	bool WriteWaitForAcknowledgement(GCodeChannel channel, uint16_t tag) noexcept;
 	bool WriteMessageAcknowledged(GCodeChannel channel, uint16_t tag) noexcept;
+	bool CanWriteSetVariableResult(const char *varName, const ExpressionValue& value) const noexcept;	// Check if the result of a SetVariable request fits into this transfer
+	bool CanWriteSetVariableResult(const char *varName, const OutputBuffer *json) const noexcept;
 	bool WriteSetVariableResult(GCodeChannel channel, const char *varName, const ExpressionValue& value, uint16_t tag) noexcept;
 	bool WriteSetVariableResult(GCodeChannel channel,const char *varName, OutputBuffer *json, uint16_t tag) noexcept;
 	bool WriteSetVariableError(GCodeChannel channel,const char *varName, const char *errorMessage, uint16_t tag) noexcept;
@@ -204,6 +206,7 @@ private:
 	uint8_t GetRxNumPackets() const noexcept;
 
 	bool CanWritePacket(size_t dataLength = 0) const noexcept;
+	static size_t GetSetVariableResultLength(const char *varName, const ExpressionValue& value, const StringRef& rslt) noexcept;
 	PacketHeader *WritePacketHeader(FirmwareRequest request, size_t dataLength = 0, uint16_t resendPacketIdOrTag = 0) noexcept;
 	void WriteData(const char *data, size_t length) noexcept;
 	template<typename T> T *WriteDataHeader() noexcept;

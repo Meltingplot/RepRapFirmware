@@ -50,6 +50,11 @@ constexpr uint32_t SbcBootArmDelay = 10;			// time between DataTransfer::Init dr
 constexpr size_t MinimumBuffersForSbcJson = RESERVED_OUTPUT_BUFFERS + (SbcTransferBufferSize + OUTPUT_BUFFER_SIZE - 1)/OUTPUT_BUFFER_SIZE;
 static_assert(MinimumBuffersForSbcJson <= OUTPUT_BUFFER_COUNT);
 
+// Longest data of a packet that answers a request of the SBC. The answer needs its packet header, and a transfer keeps the space of one packet header for a resend
+// request of every packet that the SBC sent in it (DataTransfer::FreeTxSpace), which include the request
+constexpr size_t MaxSbcAnswerDataLength = SbcTransferBufferSize - 2 * sizeof(PacketHeader);
+constexpr const char *_ecv_array ValueTooLongForSbc = "value too long to send to the SBC";
+
 static Task<SBCTaskStackWords> *sbcTask;
 
 extern "C" [[noreturn]] void SBCTaskStart(void * pvParameters) noexcept
@@ -815,35 +820,21 @@ void SbcInterface::ExchangeData() noexcept
 						ExpressionParser parser(gb, expression.c_str());
 						const ExpressionValue val = parser.Parse();
 						parser.CheckForExtraCharacters();
-						if (val.GetType() == TypeCode::HeapArray)
+						if (val.GetType() == TypeCode::HeapArray || val.GetType() == TypeCode::ObjectModelArray)
 						{
-							// Write heap arrays as JSON
+							// Write arrays as JSON
 							OutputBuffer *json;
-							if (OutputBuffer::Allocate(json))
-							{
-								ObjectExplorationContext context;
-								ReportHeapArrayAsJson(json, context, nullptr, val.ahVal, "");
-								packetAcknowledged = transfer.WriteEvaluationResult(channel, expression.c_str(), json, answerTag);
-							}
-							else
+							if (!MakeJsonAnswer(json, val, sizeof(EvaluationResultHeader) + expression.strlen()))
 							{
 								packetAcknowledged = false;
 							}
-						}
-						else if (val.GetType() == TypeCode::ObjectModelArray)
-						{
-							// Object model arrays need to be output differently
-							OutputBuffer *json;
-							if (OutputBuffer::Allocate(json))
+							else if (json == nullptr)
 							{
-								ObjectExplorationContext context;
-								context.AddIndex(val.param >> 8);
-								val.omVal->ReportItemAsJsonFull(json, context, nullptr, val, "");
-								packetAcknowledged = transfer.WriteEvaluationResult(channel, expression.c_str(), json, answerTag);
+								packetAcknowledged = transfer.WriteEvaluationError(channel, expression.c_str(), ValueTooLongForSbc, answerTag);
 							}
 							else
 							{
-								packetAcknowledged = false;
+								packetAcknowledged = transfer.WriteEvaluationResult(channel, expression.c_str(), json, answerTag);
 							}
 						}
 						else
@@ -1169,11 +1160,34 @@ void SbcInterface::ExchangeData() noexcept
 				break;
 			}
 
-			// Evaluate the expression and assign it
+			// Evaluate the expression, make the answer and assign the value. The answer comes first, because the SBC sends a request that is not acknowledged
+			// again: a value whose answer can never be sent is refused, and a value is assigned only when its answer fits into this transfer, so that it is assigned once
+			OutputBuffer *json = nullptr;
 			try
 			{
 				ExpressionParser parser(gb, expression.c_str());
 				ExpressionValue ev = parser.Parse();
+				if (ev.GetType() == TypeCode::HeapArray || ev.GetType() == TypeCode::ObjectModelArray)
+				{
+					// Write arrays as JSON
+					if (!MakeJsonAnswer(json, ev, sizeof(EvaluationResultHeader) + varName.strlen()))
+					{
+						packetAcknowledged = false;
+						break;
+					}
+					if (json == nullptr)
+					{
+						packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), ValueTooLongForSbc, answerTag);
+						break;
+					}
+				}
+				if (!((json != nullptr) ? transfer.CanWriteSetVariableResult(varName.c_str(), json) : transfer.CanWriteSetVariableResult(varName.c_str(), ev)))
+				{
+					OutputBuffer::ReleaseAll(json);
+					packetAcknowledged = false;
+					break;
+				}
+
 				if (v == nullptr)
 				{
 					// DSF doesn't provide indent values but instructs RRF to delete local variables when the current block ends
@@ -1188,42 +1202,11 @@ void SbcInterface::ExchangeData() noexcept
 					v->AssignIndexed(ev, numIndices, indices);
 				}
 
-				if (ev.GetType() == TypeCode::HeapArray)
-				{
-					// Write heap arrays as JSON
-					OutputBuffer *json;
-					if (OutputBuffer::Allocate(json))
-					{
-						ObjectExplorationContext context;
-						ReportHeapArrayAsJson(json, context, nullptr, ev.ahVal, "");
-						packetAcknowledged = transfer.WriteSetVariableResult(channel, varName.c_str(), json, answerTag);
-					}
-					else
-					{
-						packetAcknowledged = false;
-					}
-				}
-				else if (ev.GetType() == TypeCode::ObjectModelArray)
-				{
-					// Object model arrays need to be output differently
-					OutputBuffer *json;
-					if (OutputBuffer::Allocate(json))
-					{
-						ObjectExplorationContext context;
-						context.AddIndex(ev.param >> 8);
-						ev.omVal->ReportItemAsJsonFull(json, context, nullptr, ev, "");
-						packetAcknowledged = transfer.WriteSetVariableResult(channel, varName.c_str(), json, answerTag);
-					}
-					else
-					{
-						packetAcknowledged = false;
-					}
-				}
-				else
-				{
-					// Write plain result
-					packetAcknowledged = transfer.WriteSetVariableResult(channel, varName.c_str(), ev, answerTag);
-				}
+				// Write the answer, which fits
+				OutputBuffer * const answer = json;
+				json = nullptr;
+				packetAcknowledged = (answer != nullptr) ? transfer.WriteSetVariableResult(channel, varName.c_str(), answer, answerTag)
+										: transfer.WriteSetVariableResult(channel, varName.c_str(), ev, answerTag);
 
 				if (isGlobal)
 				{
@@ -1234,6 +1217,7 @@ void SbcInterface::ExchangeData() noexcept
 			{
 				// Get the error message and send it back to DSF
 				// Save memory by re-using 'expression' to capture the error message
+				OutputBuffer::ReleaseAll(json);
 				e.GetMessage(expression.GetRef(), nullptr);
 				packetAcknowledged = transfer.WriteSetVariableError(channel, varName.c_str(), expression.c_str(), answerTag);
 			}
@@ -2024,6 +2008,44 @@ void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 	{
 		gcodes.UnlockAll(gb);
 	}
+}
+
+// Write an array value as JSON for an answer to the SBC whose other data is otherDataLength bytes long. Return false if fewer output buffers are free
+// than an answer as long as a transfer needs, so the request must wait. Else return true, with the JSON in json, or null if the answer is too long for a transfer
+bool SbcInterface::MakeJsonAnswer(OutputBuffer *_ecv_null &json, const ExpressionValue& val, size_t otherDataLength) THROWS(GCodeException)
+{
+	if (OutputBuffer::GetFreeBuffers() < MinimumBuffersForSbcJson || !OutputBuffer::Allocate(json))
+	{
+		json = nullptr;
+		return false;
+	}
+
+	try
+	{
+		ObjectExplorationContext context;
+		if (val.GetType() == TypeCode::HeapArray)
+		{
+			ReportHeapArrayAsJson(json, context, nullptr, val.ahVal, "");
+		}
+		else
+		{
+			// Object model arrays need to be output differently
+			context.AddIndex(val.param >> 8);
+			val.omVal->ReportItemAsJsonFull(json, context, nullptr, val, "");
+		}
+	}
+	catch (const GCodeException&)
+	{
+		OutputBuffer::ReleaseAll(json);
+		throw;
+	}
+
+	// With MinimumBuffersForSbcJson buffers free, the JSON overflows them only if it is longer than a transfer
+	if (json->HadOverflow() || otherDataLength + json->Length() > MaxSbcAnswerDataLength)
+	{
+		OutputBuffer::ReleaseAll(json);
+	}
+	return true;
 }
 
 // Apply the channel epoch to a packet of the SBC that belongs to the work of a channel, before anything of the packet is done. While the epoch
