@@ -115,7 +115,7 @@ gen/clang/ArrayHandle.cpp: $(SRC)/Platform/ArrayHandle.cpp Makefile
 gen/clang/ExpressionParser.cpp: $(SRC)/GCodes/GCodeBuffer/ExpressionParser.cpp Makefile
 	@mkdir -p gen/clang
 	(echo '#line 1 "$<"'; sed -e 's/^\tstatic_assert(ARRAY_SIZE(priorities) == strlen(operators));/\t\/\/ &/') < $< > $@.tmp && mv $@.tmp $@
-	test "$$(grep -c '^	// static_assert(ARRAY_SIZE(priorities)' $@)" -eq 1
+	test "$$(grep -c '^	// 	static_assert(ARRAY_SIZE(priorities)' $@)" -eq 1
 
 build/libfuzzer/Heap.o: gen/clang/Heap.cpp gen/clang/Config/Configuration.h $(GEN) $(HEADERS)
 	@mkdir -p build/libfuzzer
