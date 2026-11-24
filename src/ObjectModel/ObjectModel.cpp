@@ -1151,6 +1151,12 @@ void ObjectModel::ReportHeapArrayAsJson(OutputBuffer *buf, ObjectExplorationCont
 	const size_t startElement = (isRootArray) ? context.GetStartElement() : 0;
 	for (size_t i = startElement; i < count; ++i)
 	{
+		// Stop once the buffers have overflowed. The response is incomplete then, and the rest of a large nested array would only cost time
+		if (buf->HadOverflow())
+		{
+			break;
+		}
+
 		// Support retrieving just part of the array in case it is too large to write all of it to the buffer
 		if (i != startElement)
 		{
