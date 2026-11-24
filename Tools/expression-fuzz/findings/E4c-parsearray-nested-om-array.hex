@@ -1,4 +1,5 @@
-# expect: FUZZ: internal-error at ObjectModel.cpp:614 in ObjectExplorationContext::GetLastIndex
+# expect: clean
+# Fixed: ParseArray, EvaluateTake and EvaluateDrop put the parent index into the context, as ApplyObjectModelArrayIndex does. Before the fix: FUZZ: internal-error at ObjectModel.cpp:614 in ObjectExplorationContext::GetLastIndex
 # E4: the same in ParseArray (ExpressionParser.cpp:917-937), the array parameter parsers (entry 7, ParseFloatArray)
 # expression: {move.axes[0].drivers}
 07077b6d6f76652e617865735b305d2e647269766572737d
