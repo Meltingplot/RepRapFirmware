@@ -63,6 +63,7 @@ public:
 	const char *ReadData(size_t packetLength) noexcept;										// Read the packet data and advance to the next packet (if any)
 	bool ReadBoolean() noexcept;															// Read a boolean value
 	void ReadGetObjectModel(size_t packetLength, const StringRef &key, const StringRef &flags) noexcept;		// Read an object model request
+	void ReadObjectModelKeyChanged(size_t packetLength, const StringRef& key) noexcept;							// Read the key of an object model key that DSF changed
 	void ReadPrintStartedInfo(size_t packetLength, const StringRef& filename, GCodeFileInfo &info) noexcept;	// Read info about the started file print
 	PrintStoppedReason ReadPrintStoppedInfo() noexcept;										// Read info about why the print has been stopped
 	GCodeChannel ReadMacroCompleteInfo(bool &error) noexcept;								// Read info about a completed macro file
