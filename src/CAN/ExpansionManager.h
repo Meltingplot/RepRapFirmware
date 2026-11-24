@@ -29,6 +29,7 @@ struct ExpansionBoardData
 	ExpansionBoardData() noexcept;
 
 	bool HasDrivers() const noexcept { return numDrivers != 0 && driverData != nullptr; }
+	bool HasDriver(size_t driver) const noexcept { return driver < numDrivers && driverData != nullptr; }
 
 	const char *_ecv_array _ecv_null typeName;
 	int32_t neverUsedRam;
