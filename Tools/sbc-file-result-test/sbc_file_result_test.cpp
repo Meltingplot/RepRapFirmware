@@ -204,9 +204,11 @@ public:
 		return reply.handle;
 	}
 
-	// Copies at most length bytes, as DataTransfer::ReadFileData does
-	int ReadFileData(char *buffer, size_t length) noexcept
+	// Copies at most length bytes, as DataTransfer::ReadFileData does. The packet of the test holds exactly the reply data (see
+	// Reply), so the cut at the packet end that DataTransfer::ReadFileData and ReadFileList also make is not played
+	int ReadFileData(size_t packetLength, char *buffer, size_t length) noexcept
 	{
+		(void)packetLength;
 		if (!reply.success)
 		{
 			return -1;
@@ -216,8 +218,9 @@ public:
 		return (int)bytesToRead;
 	}
 
-	size_t ReadFileList(char *buffer, size_t length, bool& endOfList) noexcept
+	size_t ReadFileList(size_t packetLength, char *buffer, size_t length, bool& endOfList) noexcept
 	{
+		(void)packetLength;
 		endOfList = reply.endOfList;
 		const size_t bytesToRead = std::min(reply.data.size(), length);
 		memcpy(buffer, reply.data.data(), bytesToRead);
