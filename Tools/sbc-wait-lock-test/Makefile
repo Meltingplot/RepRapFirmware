@@ -18,7 +18,7 @@ ASANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 EXTRACT = @mkdir -p gen && awk -v f="$(abspath $<)" -v names="$(1)" -f extract.awk $< > $@.tmp && mv $@.tmp $@
 
 GEN := gen/RTOSIfaceClasses.inc gen/RTOSIface.inc gen/SbcInterface.inc gen/ProcessAnnouncement.inc gen/RemoteBoardRestarted.inc \
-	gen/SysFileExists.inc gen/StringParser.inc
+	gen/SysFileExists.inc gen/StringParser.inc gen/TriggerItem.inc
 
 .PHONY: all asan check clean
 all: build/sbc-wait-lock-test
@@ -44,6 +44,9 @@ gen/SysFileExists.inc: $(SRC)/Platform/Platform.cpp extract.awk Makefile
 
 gen/StringParser.inc: $(SRC)/GCodes/GCodeBuffer/StringParser.cpp extract.awk Makefile
 	$(call EXTRACT,StringParser::ProcessConditionalGCode StringParser::CallsFileFunction StringParser::SendGlobalAssignmentToSbc)
+
+gen/TriggerItem.inc: $(SRC)/GCodes/TriggerItem.cpp extract.awk Makefile
+	$(call EXTRACT,TriggerItem::IsAllowedInAction TriggerItem::IsAllowedAction)
 
 build/sbc-wait-lock-test: sbc_wait_lock_test.cpp $(GEN) Makefile
 	@mkdir -p build
