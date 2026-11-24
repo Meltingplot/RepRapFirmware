@@ -427,7 +427,7 @@ void ExpansionManager::StoreDriverDirection(DriverId did, bool direction) noexce
 {
 	ReadLocker lock(boardsLock);
 	ExpansionBoardData& board = boards[did.boardAddress];
-	if (board.HasDrivers())
+	if (board.HasDriver(did.localDriver))
 	{
 		board.driverData[did.localDriver].StoreDirection(direction);
 	}
@@ -437,7 +437,7 @@ void ExpansionManager::StoreDriverMode(DriverId did, uint32_t mode) noexcept
 {
 	ReadLocker lock(boardsLock);
 	ExpansionBoardData& board = boards[did.boardAddress];
-	if (board.HasDrivers())
+	if (board.HasDriver(did.localDriver))
 	{
 		board.driverData[did.localDriver].StoreMode(mode);
 	}
@@ -447,14 +447,14 @@ bool ExpansionManager::GetDriverDirection(DriverId did) const noexcept
 {
 	ReadLocker lock(boardsLock);
 	const ExpansionBoardData& board = boards[did.boardAddress];
-	return !board.HasDrivers() || board.driverData[did.localDriver].GetDirection();
+	return !board.HasDriver(did.localDriver) || board.driverData[did.localDriver].GetDirection();
 }
 
 DriverMode ExpansionManager::GetDriverMode(DriverId did) const noexcept
 {
 	ReadLocker lock(boardsLock);
 	const ExpansionBoardData& board = boards[did.boardAddress];
-	return (!board.HasDrivers()) ? DriverMode::unknown : board.driverData[did.localDriver].GetMode();
+	return (!board.HasDriver(did.localDriver)) ? DriverMode::unknown : board.driverData[did.localDriver].GetMode();
 }
 
 // Return a pointer to the expansion board, if it is present
