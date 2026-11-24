@@ -115,7 +115,7 @@ RRF) was not checked here. Line numbers are those of 6c45e07a7.
 |----|--------|--------|---------------------|
 | E1 | signed overflow of the int32 operators in `ParseInternal`: unary minus (`ExpressionParser.cpp:210`, "TODO overflow check" in the code), `+` 531, `-` 567, `*` 581 | UBSan signed overflow / negation at 210, 531, 567, 581 | undefined behaviour; the result on the board was not checked (expected: it wraps). Low |
 | E2 | `mod(INT_MIN, -1)`: the check before `rslt.iVal %= nextOperand.iVal` (`ExpressionParser.cpp:2060`) only excludes 0 | UBSan division overflow at 2060 | undefined behaviour; on x86 it traps (SIGFPE), on the Cortex-M7 not checked. Low to medium |
-| E3 | the float to int32 range checks of `floor`, `ceil`, `round` (`ExpressionParser.cpp:2034-2036`) and `pow` (2293-2295) are inclusive, `f <= (float)INT32_MAX` admits 2^31 | UBSan float-cast-overflow at 2036; `pow(2, 31)` gives INT_MIN, which then reaches RRFLibraries `SafeVsnprintf.cpp:368` (B6 of `../binary-code-fuzz`) | undefined behaviour, wrong value. Low |
+| E3 | **Fixed, see "E3 fixed" below.** The float to int32 range checks of `floor`, `ceil`, `round` (`ExpressionParser.cpp:2034-2036`) and `pow` (2293-2295) are inclusive, `f <= (float)INT32_MAX` admits 2^31 | UBSan float-cast-overflow at 2036; `pow(2, 31)` gives INT_MIN, which then reaches RRFLibraries `SafeVsnprintf.cpp:368` (B6 of `../binary-code-fuzz`) | undefined behaviour, wrong value. Low |
 | E4 | **Fixed, see "E4 fixed" below.** Nested object model arrays lost the parent index: `ParseArray` (`ExpressionParser.cpp:917-937`), `EvaluateTake` (1067-1083) and `EvaluateDrop` (1133-1157) build an `ObjectExplorationContext` without the indices of the enclosing arrays, unlike `ApplyObjectModelArrayIndex` (149), the `#` operator and `AppendAsString`. The array functions (`Move.cpp:104-105, 112`) then ask for `GetLastIndex()` / `GetIndex(1)` with too few indices | `internal-error` at `ObjectModel.cpp:603` (GetIndex) and 614 (GetLastIndex) | `REPORT_INTERNAL_ERROR`, and the function goes on with index 0: `take(move.axes[1].drivers, 1)` returns elements of axis 0. Wrong data, no memory error. Low. `(move.axes[1].drivers)[1]` is correct |
 | E5 | **`vector(n, v)` with n >= 2^29, board only**: `ArrayHandle::Allocate` (`ArrayHandle.cpp:29-42`) computes `4 + n * 8` in the 32-bit `size_t`, which wraps (2^29 * 8 + 4 = 4); the space check passes, the uint16 `count` is truncated, and the loop constructs n elements from the start of a 2 KB heap block (`HeapBlockSize`, `Heap.cpp:20`). Reached from `vector` at `ExpressionParser.cpp:2239-2261` | none on the host (64-bit `size_t`: "Array too large") | a write of 2^29 * 8 bytes beyond a heap block, i.e. over the whole RAM: memory corruption, then a fault. Confirmed in the MB6HC ELF disassembly (0x4839dc-0x483a0a: `lsls r5,r4,#3; adds r5,#4`, `strh r4,[r0,#2]`, loop while `r3 < r4`); not run on a board. **High** |
 | E6 | `SafeStrptime` takes `%m` without a range check (`strptime.cpp:144`, `tm_mon = ret - 1`) and indexes `_DAYS_BEFORE_MONTH[12]` with it (237, also 273). Reached by `datetime("2026-99-01T00:00:00")` (`ParseDateTime`, `ExpressionParser.cpp:2439`) | UBSan index out of bounds at 237; signed overflow at 144 for month INT_MIN | a read outside a static table of flash/RAM: wrong date. For a large month the address can lie outside memory; not checked. Low to medium |
@@ -197,6 +197,23 @@ of `EvaluateTake` (128) and `EvaluateDrop` (200) in the MB6HC ELF are unchanged.
 `{move.axes[2].workplaceOffsets}` and `ParseDriverIdArray` of `{move.axes[2].drivers}` and `{move.axes[0].drivers}` with the values of
 the stand-in object model. Without the fix the run stops at the first of them with `internal-error GetLastIndex` (`ObjectModel.cpp:614`).
 The four E4 inputs in `findings/` expect `clean` now, and the two internal-error keys are no longer in `findings/known.txt`.
+
+## E3 fixed: the float to int32 range of floor, ceil, round and pow
+
+`(float)INT32_MAX` is 2^31, so the test `f <= (float)INT32_MAX` let 2^31 through to the int32 conversion. On the host that conversion
+gives INT_MIN. On the MB6HC, `vcvt.s32.f32` and newlib `lrintf` (which uses it for an exponent above 30) saturate to 2147483647. Either
+way the value was wrong. `floor`, `ceil` and `round` now convert only `f < (float)INT32_MAX`. `pow` converts a result from `-2^31` to
+below `2^31`; it used `fabsf(fres) <= (float)INT32_MAX`, so `pow(-2, 31)` stays the int INT_MIN. The lower bound was already right.
+Both changes keep the line count, so no key moves.
+
+Behaviour change: `floor(2147483648.0)`, `ceil`, `round` and `pow(2, 31)` give the float 2147483648 instead of an int.
+
+`make take-drop` has eight more cases, compared with `==` so that no INT_MIN is printed (B6): `floor`, `ceil`, `round` and `pow(2, 31)`
+of 2^31 equal the float 2147483648, `floor(2147483520.0)` (the largest float below 2^31) and `pow(2, 30)` stay ints, and `round` and
+`pow(-2, 31)` of -2^31 equal INT_MIN. Without the fix the run stops at the first case with UBSan float-cast-overflow at
+`ExpressionParser.cpp:2040`, and `make findings` reports CHANGED for E3a and E3b. The two E3 inputs in `findings/` expect `clean` now.
+The key of the floor conversion is no longer in `findings/known.txt`. The key `SafeVsnprintf.cpp:368` stays, because other expressions
+can still make INT_MIN until RRFLibraries #3 is in.
 
 ## What was fuzzed (2026-11-24, RRF 3.7-dev 6c45e07a7)
 

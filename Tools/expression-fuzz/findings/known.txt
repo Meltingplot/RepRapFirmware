@@ -1,5 +1,4 @@
 # Keys of the open findings (see README.md and the inputs in findings/). make check fails on a report whose key is not listed here
-UBSan: ExpressionParser.cpp:2040:28: N+N is outside the range of representable values of type 'int' (at ExpressionParser.cpp:2040 in ExpressionParser::ParseIdentifierExpression)
 UBSan: ExpressionParser.cpp:2064:17: division of N by N cannot be represented in type 'int' (at ExpressionParser.cpp:2064 in ExpressionParser::ParseIdentifierExpression)
 UBSan: ExpressionParser.cpp:213:15: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at ExpressionParser.cpp:213 in ExpressionParser::ParseInternal)
 UBSan: ExpressionParser.cpp:534:17: signed integer overflow: N + N cannot be represented in type 'int' (at ExpressionParser.cpp:534 in ExpressionParser::ParseInternal)
