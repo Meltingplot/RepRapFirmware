@@ -126,6 +126,28 @@ size_t StringHandle::GetLength() const noexcept
 	return strlen(slotPtr->storage->data);
 }
 
+// Build a handle from 'len' characters of the string of another handle, starting at 'offset'. The caller must have checked that they lie within that string.
+// The source is read through its handle after the space has been allocated, because the allocation may garbage-collect and so move the source string.
+StringHandle::StringHandle(const StringHandle& source, size_t offset, size_t len) noexcept
+{
+	if (len == 0)
+	{
+		slotPtr = nullptr;
+	}
+	else
+	{
+		WriteLocker locker(Heap::heapLock);						// prevent other tasks modifying the heap
+		Heap::IndexSlot * const slot = Heap::AllocateHandle();
+		Heap::StorageSpace * const space = Heap::AllocateSpace(sizeof(Heap::StorageSpace) + len + 1);
+#if CHECK_HANDLES
+		Heap::CheckSlotGood(source.slotPtr);
+#endif
+		SafeStrncpy(space->data, source.slotPtr->storage->data + offset, min<size_t>(len + 1, space->length - sizeof(Heap::StorageSpace)));
+		slot->storage = space;
+		slotPtr = slot;
+	}
+}
+
 // AutoStringHandle members
 
 AutoStringHandle::AutoStringHandle(const AutoStringHandle& other) noexcept

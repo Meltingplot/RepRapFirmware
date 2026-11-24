@@ -621,7 +621,133 @@ const char *const FuzzKeyFiles[] = { "ExpressionParser.cpp", "ObjectModel.cpp", 
 static void FuzzDescribeAddress(uintptr_t) { }
 #endif
 
-#ifndef FUZZ_LIBFUZZER
+#ifdef FUZZ_TAKE_DROP_CHECK
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Fixed cases of take() and drop() of a heap string (make take-drop, build/asan-take-drop-check): the allocation of the result
+// garbage-collects when no heap block has room for it and enough space is waiting to be recycled (Heap::AllocateSpace), and the
+// collection moves the strings down with memmove (Heap::GarbageCollectInternal). Each case lays out one heap block so that the
+// allocation of the result collects and moves the operand, evaluates the expression with the real parser, and checks the text of the
+// result and that a collection ran.
+
+namespace
+{
+	constexpr size_t HeapBlockSize = 2048;										// as in Heap.cpp
+
+	// The space of a string of 'len' characters in the heap: StringHandle::InternalAssign asks for the StorageSpace, the characters and
+	// the null, and Heap::AllocateSpace rounds it up to a multiple of 4
+	size_t SpaceOf(size_t len) noexcept { return (sizeof(Heap::StorageSpace) + len + 1 + 3u) & ~(size_t)3u; }
+
+	struct HeapState { unsigned int allocated = 0, used = 0, recyclable = 0, gcCycles = 0; };
+
+	HeapState GetHeapState() noexcept
+	{
+		String<StringLength256> s;
+		Platform platform;
+		Heap::Diagnostics(s.GetRef(), platform);
+		HeapState h;
+		const char *const p = strstr(s.c_str(), "allocated/used/recyclable ");
+		const char *const q = strstr(s.c_str(), "gc cycles ");
+		if (p == nullptr || q == nullptr
+			|| sscanf(p, "allocated/used/recyclable %u/%u/%u", &h.allocated, &h.used, &h.recyclable) != 3
+			|| sscanf(q, "gc cycles %u", &h.gcCycles) != 1)
+		{
+			fprintf(stderr, "cannot read the heap diagnostics: %s\n", s.c_str());
+			abort();
+		}
+		return h;
+	}
+
+	unsigned int takeDropFailures = 0;
+
+	// Lay out the heap block as [garbage][operand][name of var.op][filler to the end of the block], release the garbage, evaluate
+	// 'expression' and compare the result with 'expected'. The heap block must be empty before.
+	void CheckTakeDrop(const char *expression, const std::string& operand, const std::string& expected) noexcept
+	{
+		std::string why;
+		const HeapState before = GetHeapState();
+		if (before.used != 0 || before.allocated > HeapBlockSize)
+		{
+			why = " the heap is not empty before the case (used " + std::to_string(before.used) + ", allocated " + std::to_string(before.allocated) + ")";
+		}
+		else
+		{
+			const size_t garbageLength = 1000;
+			AutoStringHandle *garbage = new AutoStringHandle(std::string(garbageLength, 'g').c_str());
+			fuzzGb.variables.Clear();
+			Insert(fuzzGb.variables, "op", ExpressionValue(StringHandle(operand.c_str())), 0);
+			const size_t filled = SpaceOf(garbageLength) + SpaceOf(operand.size()) + SpaceOf(strlen("op"));
+			const AutoStringHandle filler(std::string(HeapBlockSize - filled - sizeof(Heap::StorageSpace) - 1, 'x').c_str());
+			const HeapState full = GetHeapState();
+			delete garbage;												// its space waits to be recycled
+			const HeapState laidOut = GetHeapState();
+			if (full.allocated != HeapBlockSize || full.used != HeapBlockSize || laidOut.recyclable != SpaceOf(garbageLength))
+			{
+				why = " the heap is not laid out as intended (allocated " + std::to_string(full.allocated) + ", used " + std::to_string(full.used)
+						+ ", recyclable " + std::to_string(laidOut.recyclable) + ")";
+			}
+			else
+			{
+				std::string result;
+				FuzzStack::Begin(stackBytes);
+				try
+				{
+					ExpressionParser parser(&fuzzGb, expression, expression + strlen(expression), 5);
+					const ExpressionValue val = parser.Parse(true);
+					if (val.GetType() == TypeCode::HeapString)
+					{
+						result = val.shVal.Get().Ptr();
+					}
+					else
+					{
+						why = " the result is not a heap string";
+					}
+				}
+				catch (const GCodeException& e)
+				{
+					String<StringLength256> reply;
+					e.GetMessage(reply.GetRef(), &fuzzGb);
+					why = std::string(" exception: ") + reply.c_str();
+				}
+				FuzzStack::Begin(0);
+				const HeapState after = GetHeapState();
+				if (why.empty() && result != expected) { why = " result \"" + result + "\" instead of \"" + expected + "\""; }
+				if (after.gcCycles != laidOut.gcCycles + 1)
+				{
+					why += " " + std::to_string(after.gcCycles - laidOut.gcCycles) + " garbage collections instead of 1 while the result was allocated";
+				}
+			}
+		}
+
+		// Release everything and collect, so that the next case finds the heap block empty
+		fuzzGb.variables.Clear();
+		Heap::GarbageCollect();
+		if (why.empty())
+		{
+			printf("PASS %s\n", expression);
+		}
+		else
+		{
+			++takeDropFailures;
+			printf("FAIL %s:%s\n", expression, why.c_str());
+		}
+	}
+
+	int RunTakeDropChecks() noexcept
+	{
+		const std::string operand = "0123456789abcdefghijklmnopqrstuvwxyzABCD";
+		CheckTakeDrop("take(var.op, 5)", operand, operand.substr(0, 5));
+		CheckTakeDrop("take(var.op, 100)", operand, operand);					// as long as the operand
+		CheckTakeDrop("drop(var.op, 30)", operand, operand.substr(30));
+		CheckTakeDrop("drop(var.op, 1)", operand, operand.substr(1));
+		printf("%u failed\n", takeDropFailures);
+		return (takeDropFailures == 0) ? 0 : 1;
+	}
+}
+
+int main() { return RunTakeDropChecks(); }
+
+#elif !defined(FUZZ_LIBFUZZER)
 # include "../sbc-packet-fuzz/fuzz_driver.inc"
 #endif
 

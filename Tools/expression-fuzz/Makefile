@@ -6,7 +6,9 @@
 #   make              build/expression-fuzz (g++, plain) and build/asan-expression-fuzz (g++, AddressSanitizer + UBSan), both with the
 #                     deterministic driver of ../sbc-packet-fuzz/fuzz_driver.inc
 #   make libfuzzer    build/libfuzzer-expression-fuzz (clang, libFuzzer + AddressSanitizer + UBSan)
-#   make check        run the seeds, and a short deterministic run in which every report must be one of findings/known.txt
+#   make check        run the seeds, and a short deterministic run in which every report must be one of findings/known.txt, and
+#                     make take-drop
+#   make take-drop    build/asan-take-drop-check: fixed cases of take() and drop() whose result allocation garbage-collects
 #   make findings     check that every input in findings/ still reports its finding
 #   make coverage     gcov line coverage of the real RRF files after the seeds and a deterministic run (RUNS=<n>, default 50000)
 #   make stack-table  regenerate board-stack-usage.tsv from the MB6HC firmware ELF (ELF=<path>; needs llvm-dwarfdump-18, llvm-nm-18)
@@ -49,7 +51,7 @@ HEADERS := $(wildcard shim/*.h shim/*/*.h shim/*/*/*.h) $(SRC)/GCodes/GCodeBuffe
 	gen/ObjectModel/ObjectModel.h gen/RrfTypes.inc Makefile
 GEN := $(GENSOURCES) gen/ObjectModel/ObjectModel.h gen/GCodeException.inc gen/RrfTypes.inc gen/RrfFunctions.inc gen/board-stack-usage.inc
 
-.PHONY: all asan libfuzzer check findings coverage stack-table clean
+.PHONY: all asan libfuzzer check findings coverage stack-table take-drop clean
 all: build/expression-fuzz build/asan-expression-fuzz
 asan: build/asan-expression-fuzz
 libfuzzer: build/libfuzzer-expression-fuzz
@@ -182,10 +184,20 @@ build/libfuzzer-expression-fuzz: $(OBJECTS_libfuzzer)
 build/coverage-expression-fuzz: $(OBJECTS_coverage)
 	$(CXX) --coverage $(LDWRAP) $^ -o $@
 
+# The same objects with a main of fixed take() and drop() cases instead of the fuzz driver
+build/asan/take_drop_check.o: expression_fuzz.cpp $(GEN) $(HEADERS) $(PACKET)/fuzz_driver.inc
+	@mkdir -p build/asan
+	$(CXX) $(BASEFLAGS) $(CXXFLAGS) $(ASANFLAGS) -DFUZZ_TAKE_DROP_CHECK $(INC) -c $< -o $@
+build/asan-take-drop-check: $(filter-out build/asan/expression_fuzz.o,$(OBJECTS_asan)) build/asan/take_drop_check.o
+	$(CXX) $(ASANFLAGS) $(LDWRAP) $^ -o $@
+
 # Every run is bounded in memory: WSL has run out of memory before
 RUNENV := ASAN_OPTIONS=hard_rss_limit_mb=2048:allocator_may_return_null=1:detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1
 
-check: all
+take-drop: build/asan-take-drop-check
+	$(RUNENV) build/asan-take-drop-check
+
+check: all take-drop
 	$(RUNENV) build/expression-fuzz -seeds
 	$(RUNENV) build/asan-expression-fuzz -seeds
 	$(RUNENV) build/asan-expression-fuzz -known findings/known.txt -seed 1 -runs 20000
