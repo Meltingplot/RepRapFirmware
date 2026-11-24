@@ -62,6 +62,7 @@ from Eclipse.
     make findings     # every input in findings/ must still report the key on its "# expect:" line
     make coverage     # gcov line coverage of BinaryParser and StringHandle (../sbc-packet-fuzz/coverage.py)
     make libfuzzer    # build/libfuzzer-binary-code-fuzz
+    make addresses    # build/asan-address-check: fixed cases of GetIPAddress and GetMacAddress (also run by make check)
     FUZZ_POISON_STALE=1 build/asan-binary-code-fuzz ...    # also report reads of the code buffer beyond the code (rest of earlier codes)
 
 ## Findings
@@ -79,7 +80,16 @@ is not parsed, and GCodes replies with the error "GCode command malformed" (`GCo
 3.7-dev 6c45e07a7, before the fix.
 
 B8 and B9 are fixed as well: `GetIPAddress` and `GetMacAddress` parse a null-terminated copy of the value (`String<StringLength20>`,
-as `StringParser` does), and `StringHandle::InternalAssign` reads no more than `len` characters before it adds the null.
+as `StringParser` does), and `StringHandle::InternalAssign` reads no more than `len` characters before it adds the null. A value of more
+than 20 characters is refused with "invalid IP address" or "invalid MAC address", as `StringParser` refuses a quoted one that does not
+fit in its copy ("string too long", `StringParser::InternalGetQuotedString`); parsing only its first 20 characters would accept
+`0001.0002.0003.00004.5` as 1.2.3.4.
+
+`make addresses` checks 12 fixed cases in M552 and M540 codes as DSF writes them: valid and invalid addresses, one of 8 characters (no
+null after it), 19 and 20 characters (parsed) and 21 to 23 characters (refused). Against the tree before the fix of B8, 3 fail: the
+MAC address of 23 characters is accepted, an IP address of 21 characters is accepted, and `10.0.0.1` is refused because the parse reads
+on into what the previous case, `192.168.1.10`, left in the buffer after it. So before the fix, a correct DSF could get "invalid IP
+address" for an address whose length is a multiple of 4, depending on the code before it; this is from the host, not seen on a board.
 
 | ID | Defect | Report | Effect on the board |
 |----|--------|--------|---------------------|

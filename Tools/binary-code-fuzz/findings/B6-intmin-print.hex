@@ -1,3 +1,3 @@
-# expect: UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:845 in BinaryParser::AppendFullCommand)
+# expect: UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at BinaryParser.cpp:853 in BinaryParser::AppendFullCommand)
 # B6: G-code number 0x80000000 printed with %d; RRFLibraries SafeVsnprintf negates INT_MIN (SafeVsnprintf.cpp:368)
 02000041 08010047 00000080 ffffffff 00000000 00000000

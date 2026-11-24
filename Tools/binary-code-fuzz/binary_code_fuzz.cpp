@@ -514,6 +514,75 @@ static void FuzzDescribeAddress(uintptr_t a) noexcept
 	}
 }
 
+#ifdef FUZZ_ADDRESS_CHECK
+// build/asan-address-check: fixed cases of GetIPAddress and GetMacAddress, each in an M552 or M540 code as DSF writes it (Writer.cs).
+// A value of up to 20 characters is parsed. A longer one is refused, as StringParser refuses a quoted one that does not fit in its
+// String<StringLength20> ("string too long", StringParser::InternalGetQuotedString), instead of parsing the first 20 characters
+static int RunAddressChecks() noexcept
+{
+	struct Case { bool mac; const char *text; bool accepted; uint8_t bytes[6]; };
+	static const Case cases[] =
+	{
+		{ false, "192.168.1.10",			true,	{ 192, 168, 1, 10 } },
+		{ false, "10.0.0.1",				true,	{ 10, 0, 0, 1 } },					// 8 characters: no null after the value
+		{ false, "000000000192.168.1.1",	true,	{ 192, 168, 1, 1 } },				// 20 characters
+		{ false, "0000000000192.168.1.1",	false,	{ } },								// 21 characters
+		{ false, "0001.0002.0003.00004.5",	false,	{ } },								// 22 characters, the first 20 are an address
+		{ false, "1.2.3",					false,	{ } },
+		{ false, "1.2.3.4.5",				false,	{ } },
+		{ false, "1.2.3.256",				false,	{ } },
+		{ true,  "BE:EF:DE:AD:FE:ED",		true,	{ 0xBE, 0xEF, 0xDE, 0xAD, 0xFE, 0xED } },
+		{ true,  "00BE:EF:DE:AD:FE:ED",		true,	{ 0xBE, 0xEF, 0xDE, 0xAD, 0xFE, 0xED } },	// 19 characters
+		{ true,  "001:002:003:004:005:006",	false,	{ } },								// 23 characters
+		{ true,  "BE:EF:DE:AD:FE",			false,	{ } },
+	};
+
+	gb = new GCodeBuffer(GCodeChannel::SBC);
+	gb->binaryParser.Init();
+	gb->binaryParser.AllocateBuffer();
+	unsigned int failed = 0;
+	for (const Case& c : cases)
+	{
+		const Bytes b = Code(0, 0, 4, 'M', (c.mac) ? 540 : 552, -1, 0, { StringParam('P', c.text) });
+		std::vector<uint32_t> words((b.size() - ConfigBytes) / sizeof(uint32_t));
+		memcpy(words.data(), b.data() + ConfigBytes, b.size() - ConfigBytes);
+		gb->binaryParser.Put(words.data(), words.size());
+		gb->binaryParser.DecodeCommand();
+		BinaryParser& bp = gb->binaryParser;
+
+		bool accepted = false;
+		uint8_t got[6] = { };
+		if (bp.Seen('P'))
+		{
+			try
+			{
+				if (c.mac)
+				{
+					MacAddress mac;
+					bp.GetMacAddress(mac);
+					memcpy(got, mac.bytes, sizeof(mac.bytes));
+				}
+				else
+				{
+					IPAddress ip;
+					bp.GetIPAddress(ip);
+					for (unsigned int i = 0; i < 4; ++i) { got[i] = ip.GetQuad(i); }
+				}
+				accepted = true;
+			}
+			catch (const GCodeException& e) { ReportException(e); }
+		}
+		bp.SetFinished();
+
+		const bool ok = (accepted == c.accepted) && (!accepted || memcmp(got, c.bytes, (c.mac) ? 6 : 4) == 0);
+		printf("%s %s \"%s\": %s\n", (ok) ? "PASS" : "FAIL", (c.mac) ? "MAC" : "IP", c.text, (accepted) ? "accepted" : "refused");
+		if (!ok) { ++failed; }
+	}
+	printf("%u cases, %u failed\n", (unsigned int)(sizeof(cases) / sizeof(cases[0])), failed);
+	return (failed == 0) ? 0 : 1;
+}
+#endif
+
 #ifdef FUZZ_LIBFUZZER
 static void FuzzDeathCallback()
 {
@@ -523,6 +592,11 @@ extern "C" int LLVMFuzzerInitialize(int *, char ***)
 {
 	__sanitizer_set_death_callback(FuzzDeathCallback);
 	return 0;
+}
+#elif defined(FUZZ_ADDRESS_CHECK)
+int main()
+{
+	return RunAddressChecks();
 }
 #else
 # include "../sbc-packet-fuzz/fuzz_driver.inc"
