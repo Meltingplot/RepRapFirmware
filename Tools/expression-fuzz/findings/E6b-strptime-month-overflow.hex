@@ -1,0 +1,4 @@
+# expect: UBSan: strptime.cpp:144:28: signed integer overflow: N - N cannot be represented in type 'int' (at strptime.cpp:144 in SafeStrptime)
+# E6: SafeStrptime %m of INT_MIN: tm_mon = ret - 1 overflows (strptime.cpp:144); the same missing range check as E6a
+# expression: datetime("2026--2147483648-01T00:00:00")
+00076461746574696d652822323032362d2d323134373438333634382d30315430303a30303a30302229

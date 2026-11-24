@@ -1,0 +1,4 @@
+# expect: UBSan: strptime.cpp:186:29: signed integer overflow: N - N cannot be represented in type 'int' (at strptime.cpp:186 in SafeStrptime)
+# E7: SafeStrptime %Y of INT_MIN: ret - tm_year_base overflows (strptime.cpp:186)
+# expression: datetime("-2147483648-01-01T00:00:00")
+00076461746574696d6528222d323134373438333634382d30312d30315430303a30303a30302229

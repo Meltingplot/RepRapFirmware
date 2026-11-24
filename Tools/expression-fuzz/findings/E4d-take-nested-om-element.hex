@@ -1,0 +1,4 @@
+# expect: FUZZ: internal-error at ObjectModel.cpp:603 in ObjectExplorationContext::GetIndex
+# E4: EvaluateTake on a nested array whose element function uses GetIndex(1) (as Move.cpp:111)
+# expression: take(move.axes[1].workplaceOffsets, 2)
+000774616b65286d6f76652e617865735b315d2e776f726b706c6163654f6666736574732c203229

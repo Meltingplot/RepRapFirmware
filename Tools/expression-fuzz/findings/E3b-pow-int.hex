@@ -1,0 +1,4 @@
+# expect: UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at SafeVsnprintf.cpp:368 in FormattedPrinter::PrintI)
+# E3: pow(2, 31) passes the same inclusive check (ExpressionParser.cpp:2293-2295); on the 64-bit host lrintf gives 2^31 and SetInt makes it INT_MIN, which reaches B6 of ../binary-code-fuzz (SafeVsnprintf.cpp:368)
+# expression: pow(2, 31)
+0007706f7728322c20333129

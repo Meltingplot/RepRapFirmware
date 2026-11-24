@@ -1,0 +1,15 @@
+# Keys of the open findings (see README.md and the inputs in findings/). make check fails on a report whose key is not listed here
+FUZZ: internal-error at ObjectModel.cpp:603 in ObjectExplorationContext::GetIndex
+FUZZ: internal-error at ObjectModel.cpp:614 in ObjectExplorationContext::GetLastIndex
+FUZZ: no-stack-to-throw at ExpressionParser.cpp:2639 in ExpressionParser::ThrowParseException
+UBSan: ExpressionParser.cpp:2036:28: N+N is outside the range of representable values of type 'int' (at ExpressionParser.cpp:2036 in ExpressionParser::ParseIdentifierExpression)
+UBSan: ExpressionParser.cpp:2060:17: division of N by N cannot be represented in type 'int' (at ExpressionParser.cpp:2060 in ExpressionParser::ParseIdentifierExpression)
+UBSan: ExpressionParser.cpp:210:15: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at ExpressionParser.cpp:210 in ExpressionParser::ParseInternal)
+UBSan: ExpressionParser.cpp:531:17: signed integer overflow: N + N cannot be represented in type 'int' (at ExpressionParser.cpp:531 in ExpressionParser::ParseInternal)
+UBSan: ExpressionParser.cpp:567:17: signed integer overflow: N - N cannot be represented in type 'int' (at ExpressionParser.cpp:567 in ExpressionParser::ParseInternal)
+UBSan: ExpressionParser.cpp:581:16: signed integer overflow: N * N cannot be represented in type 'int' (at ExpressionParser.cpp:581 in ExpressionParser::ParseInternal)
+UBSan: SafeVsnprintf.cpp:368:7: negation of N cannot be represented in type 'int'; cast to an unsigned type to negate this value to itself (at SafeVsnprintf.cpp:368 in FormattedPrinter::PrintI)
+UBSan: strptime.cpp:144:28: signed integer overflow: N - N cannot be represented in type 'int' (at strptime.cpp:144 in SafeStrptime)
+UBSan: strptime.cpp:186:29: signed integer overflow: N - N cannot be represented in type 'int' (at strptime.cpp:186 in SafeStrptime)
+UBSan: strptime.cpp:237:57: index N out of bounds for type 'short int [N]' (at strptime.cpp:237 in SafeStrptime)
+UBSan: strptime.cpp:285:28: signed integer overflow: N + N cannot be represented in type 'int' (at strptime.cpp:285 in SafeStrptime)

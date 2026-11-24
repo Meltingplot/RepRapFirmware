@@ -1,0 +1,4 @@
+# expect: UBSan: ExpressionParser.cpp:581:16: signed integer overflow: N * N cannot be represented in type 'int' (at ExpressionParser.cpp:581 in ExpressionParser::ParseInternal)
+# E1: signed overflow of *, ExpressionParser.cpp:581
+# expression: 65536 * 65536
+00073635353336202a203635353336
