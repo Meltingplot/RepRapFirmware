@@ -461,9 +461,13 @@ void BinaryParser::GetIPAddress(IPAddress& returnedIp) THROWS(GCodeException)
 	{
 	case DataType::String:
 		{
-			// Parse a copy, as StringParser does: the value is not null-terminated if its length is a multiple of 4
+			// Parse a copy, as StringParser does: the value is not null-terminated if its length is a multiple of 4. StringParser refuses
+			// a quoted value that does not fit in the copy, so do the same instead of parsing the part that fits
 			String<StringLength20> ipStr;
-			ipStr.copy(seenParameterValue, seenParameter->intValue);
+			if (ipStr.copy(seenParameterValue, seenParameter->intValue))
+			{
+				throw ConstructParseException("invalid IP address");
+			}
 			const char* p = ipStr.c_str();
 			uint8_t ip[4];
 			unsigned int n = 0;
@@ -518,9 +522,13 @@ void BinaryParser::GetMacAddress(MacAddress& mac) THROWS(GCodeException)
 	{
 	case DataType::String:
 		{
-			// Parse a copy, as StringParser does: the value is not null-terminated if its length is a multiple of 4
+			// Parse a copy, as StringParser does: the value is not null-terminated if its length is a multiple of 4. StringParser refuses
+			// a quoted value that does not fit in the copy, so do the same instead of parsing the part that fits
 			String<StringLength20> macStr;
-			macStr.copy(seenParameterValue, seenParameter->intValue);
+			if (macStr.copy(seenParameterValue, seenParameter->intValue))
+			{
+				throw ConstructParseException("invalid MAC address");
+			}
 			const char* p = macStr.c_str();
 			unsigned int n = 0;
 			for (;;)
