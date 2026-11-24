@@ -136,7 +136,8 @@ Observations without a sanitizer report:
 ## take() and drop() across a garbage collection (RV-2)
 
 `take(s, n)` and `drop(s, n)` of a heap string held `p.Ptr()`, a raw pointer into the heap, and passed it to `StringHandle(s, len)`
-(`EvaluateTake` and `EvaluateDrop`, `ExpressionParser.cpp:1111-1117` and `:1190-1196` in 6c45e07a7, there since dc42 65f8c54c9).
+(`EvaluateTake` and `EvaluateDrop`, `ExpressionParser.cpp:1111-1117` and `:1190-1196` in 6c45e07a7; there since 441bd498b, David
+Crocker 2025-02-02, "Implemented take and drop for string values"; 65f8c54c9 only moved it).
 `StringHandle::InternalAssign` first calls `Heap::AllocateSpace`, which garbage-collects when no heap block has room and enough space
 waits to be recycled (`Heap.cpp:314-337`). The collection moves the strings down with `memmove` and adjusts only the handles
 (`Heap.cpp:133-135`), so the copy then read from where the operand had been: wrong text, within the heap block. Found by the review
