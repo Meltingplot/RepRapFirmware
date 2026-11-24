@@ -1,6 +1,6 @@
 // Host test of the code length limits of a G-code buffer in SBC mode, compiled from the real text of StringParser::Put,
 // StringParser::AddToChecksum and StringParser::StoreAndAddToChecksum (src/GCodes/GCodeBuffer/StringParser.cpp), of BinaryParser::Put
-// (src/GCodes/GCodeBuffer/BinaryParser.cpp) and of MaxGCodeStringLength (src/Config/Configuration.h) and MaxGCodeBinaryLength
+// and BinaryParser::ParametersFit (src/GCodes/GCodeBuffer/BinaryParser.cpp) and of MaxGCodeStringLength (src/Config/Configuration.h) and MaxGCodeBinaryLength
 // (src/SBC/SbcMessageFormats.h), which the Makefile extracts.
 //
 // A G-code buffer allocates its buffer once, for its first code. Text codes may hold MaxGCodeStringLength characters including the
@@ -11,7 +11,9 @@
 //
 // The test plays the G-code buffer, RepRap and Tasks::AllocPermanent with stand-ins, puts text with StringParser::Put character by
 // character and binary codes with BinaryParser::Put, and checks which codes are stored and which are marked as too long
-// (GCodeBuffer::overflowed, which becomes "GCode command too long" in StringParser::CheckMetaCommand and GCodes::ActOnCode).
+// (GCodeBuffer::overflowed, which becomes "GCode command too long" in StringParser::CheckMetaCommand and GCodes::ActOnCode). It also
+// checks that a binary code whose parameters do not fit in it is marked as malformed instead of stored (GCodeBuffer::malformed, which
+// becomes "GCode command malformed" in GCodes::ActOnCode).
 
 #include <algorithm>
 #include <cstddef>
@@ -50,6 +52,30 @@ enum CodeFlags : uint8_t
 	HasExplicitLineNumber = 16
 };
 
+enum class DataType : uint8_t
+{
+    Int = 0,				// int32_t
+    UInt = 1,				// uint32_t
+    Float = 2,				// float
+    IntArray = 3,			// int32_t[]
+    UIntArray = 4,			// uint32_t[]
+    FloatArray = 5,			// float[]
+    String = 6,				// char[]
+    Expression = 7,			// char[] but containing '{'...'}'
+	DriverId_dt = 8,		// two sequential uint16_t representing board and port of a driver
+	DriverIdArray = 9,		// array of driver ids
+	Boolean = 10,			// bool (int32_t)
+	BoolArray = 11,			// bool[] (uint8_t[])
+	ULong = 12,				// uint64_t
+	DateTime = 13,			// datetime string in ISO-conform formatting
+	Null = 14,				// null value
+	Char = 15,				// char value (int32_t)
+	Bitmap16 = 16,			// 16-bit bitmap
+	Bitmap32 = 17,			// 32-bit bitmap
+	Bitmap64 = 18,			// 64-bit bitmap
+	FloatWithDigits = 19	// float with a specified number of digits (from RRF to SBC only when returning expression values)
+};
+
 struct CodeHeader
 {
 	uint8_t channel;
@@ -60,6 +86,19 @@ struct CodeHeader
 	int32_t minorCode;
 	uint32_t filePosition;
 	int32_t lineNumber;
+};
+
+struct CodeParameter
+{
+	char letter;
+	DataType type;
+	uint16_t padding;
+	union
+	{
+		int32_t intValue;
+		uint32_t uintValue;
+		float floatValue;
+	};
 };
 
 enum class MachineType : uint8_t { fff, laser, cnc };
@@ -136,6 +175,7 @@ public:
 	size_t bufferLength = 0;
 	GCodeBufferState bufferState = GCodeBufferState::parseNotStarted;
 	bool overflowed = false;
+	bool malformed = false;
 
 private:
 	MachineState machineState;
@@ -204,6 +244,8 @@ public:
 
 private:
 	FilePosition GetFilePosition() const noexcept { return 0; }
+	bool ParametersFit(size_t codeLength) const noexcept;
+	size_t AddPadding(size_t bytesRead) const noexcept { return (bytesRead + 3u) & (~3u); }	// as in BinaryParser.h
 
 	GCodeBuffer& gb;
 	size_t bufferLength = 0;
@@ -242,7 +284,31 @@ struct Channel
 		header.majorCode = 98;
 		memcpy(code.data(), &header, sizeof(header));
 		binaryParser.Put(code.data(), code.size());
-		return !gb.overflowed && binaryParser.HasCode() && memcmp(gb.buffer, code.data(), length) == 0;
+		return !gb.overflowed && !gb.malformed && binaryParser.HasCode() && memcmp(gb.buffer, code.data(), length) == 0;
+	}
+
+	// Put a binary code of the given length in bytes with one parameter of the given type and intValue, whose value starts right after
+	// the parameter table. Return true if it was stored
+	bool PutBinaryWithParameter(size_t length, DataType type, uint32_t value) noexcept
+	{
+		std::vector<uint32_t> code(length / sizeof(uint32_t), 0x5A5A5A5Au);
+		CodeHeader header;
+		memset(&header, 0, sizeof(header));
+		header.letter = 'M';
+		header.majorCode = 98;
+		header.numParameters = 1;
+		memcpy(code.data(), &header, sizeof(header));
+		if (length >= sizeof(CodeHeader) + sizeof(CodeParameter))
+		{
+			CodeParameter param;
+			memset(&param, 0, sizeof(param));
+			param.letter = 'P';
+			param.type = type;
+			param.uintValue = value;
+			memcpy(reinterpret_cast<char *>(code.data()) + sizeof(CodeHeader), &param, sizeof(param));
+		}
+		binaryParser.Put(code.data(), code.size());
+		return !gb.overflowed && !gb.malformed && binaryParser.HasCode() && memcmp(gb.buffer, code.data(), length) == 0;
 	}
 };
 
@@ -334,6 +400,65 @@ int main()
 		if (allocations.size() != 1 || allocations[0] != MaxGCodeStringLength) { why += " the buffer was not allocated with MaxGCodeStringLength bytes"; }
 		if (ch.PutText(Line(MaxTextLine + 1))) { why += " a text line of " + std::to_string(MaxTextLine + 1) + " characters was stored"; }
 		Report("standalone mode: the buffer has MaxGCodeStringLength bytes and text lines their limit", why);
+	}
+
+	{
+		reprap.usingSbcInterface = true;
+		Channel ch;
+		std::string why;
+		constexpr size_t LongestString = MaxBinary - sizeof(CodeHeader) - sizeof(CodeParameter);
+		if (!ch.PutBinaryWithParameter(MaxBinary, DataType::String, LongestString))
+		{
+			why += " a code of " + std::to_string(MaxBinary) + " bytes whose string ends at its last byte was refused";
+		}
+		if (!ch.PutBinaryWithParameter(MaxBinary, DataType::IntArray, LongestString / sizeof(uint32_t)))
+		{
+			why += " a code of " + std::to_string(MaxBinary) + " bytes whose array ends at its last byte was refused";
+		}
+		if (!ch.PutBinaryWithParameter(sizeof(CodeHeader) + sizeof(CodeParameter), DataType::Int, 0xFFFFFFFFu))
+		{
+			why += " a code whose only parameter holds its value itself was refused";
+		}
+		Report("SBC mode: binary codes whose parameters end at the end of the code are stored", why);
+	}
+
+	{
+		reprap.usingSbcInterface = true;
+		Channel ch;
+		std::string why;
+		constexpr size_t LongestString = MaxBinary - sizeof(CodeHeader) - sizeof(CodeParameter);
+		struct { const char *what; size_t length; DataType type; uint32_t value; } cases[] =
+		{
+			{ "a parameter table beyond the code", sizeof(CodeHeader), DataType::Int, 0 },
+			{ "a string one byte beyond the code", MaxBinary, DataType::String, LongestString + 1 },
+			{ "an array one element beyond the code", MaxBinary, DataType::IntArray, LongestString / sizeof(uint32_t) + 1 },
+			{ "a negative string length", MaxBinary, DataType::String, 0xFFFFFFFFu },
+			{ "a negative array length", MaxBinary, DataType::FloatArray, 0x80000000u },
+		};
+		for (const auto& c : cases)
+		{
+			if (ch.PutBinaryWithParameter(c.length, c.type, c.value))
+			{
+				why += std::string(" a code with ") + c.what + " was stored";
+			}
+			else if (!ch.gb.malformed || ch.gb.overflowed || ch.binaryParser.HasCode() || ch.gb.bufferState != GCodeBufferState::executing)
+			{
+				why += std::string(" a code with ") + c.what + " was not marked as malformed only";
+			}
+		}
+		Report("SBC mode: binary codes whose parameters do not fit in them are marked as malformed", why);
+	}
+
+	{
+		reprap.usingSbcInterface = true;
+		Channel ch;
+		std::string why;
+		(void)ch.PutBinaryWithParameter(sizeof(CodeHeader), DataType::Int, 0);
+		if (!ch.PutBinary(MaxBinary)) { why += " a good code after a malformed one was refused or still marked as malformed"; }
+		(void)ch.PutBinaryWithParameter(sizeof(CodeHeader), DataType::Int, 0);
+		(void)ch.PutBinary(MaxBinary + 4);
+		if (!ch.gb.overflowed || ch.gb.malformed) { why += " a code that is too long after a malformed one was not marked as too long only"; }
+		Report("SBC mode: the next binary code clears the malformed mark", why);
 	}
 
 	printf("%u passed, %u failed\n", passed, failed);

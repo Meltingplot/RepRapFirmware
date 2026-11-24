@@ -28,13 +28,13 @@ gen/Lengths.inc: $(SRC)/Config/Configuration.h $(SRC)/SBC/SbcMessageFormats.h Ma
 	grep -hE '^constexpr size_t (MaxGCodeStringLength|MaxGCodeBinaryLength) = ' $(SRC)/Config/Configuration.h $(SRC)/SBC/SbcMessageFormats.h | tr -d '\r' > $@.tmp
 	test "$$(wc -l < $@.tmp)" -eq 2 && mv $@.tmp $@
 
-gen/StringParser.inc: $(SRC)/GCodes/GCodeBuffer/StringParser.cpp $(EXTRACT)
+gen/StringParser.inc: $(SRC)/GCodes/GCodeBuffer/StringParser.cpp $(EXTRACT) Makefile
 	@mkdir -p gen
 	awk -v f="$(abspath $<)" -v names="StringParser::AddToChecksum StringParser::StoreAndAddToChecksum StringParser::Put" -f $(EXTRACT) $< > $@.tmp && mv $@.tmp $@
 
-gen/BinaryParser.inc: $(SRC)/GCodes/GCodeBuffer/BinaryParser.cpp $(EXTRACT)
+gen/BinaryParser.inc: $(SRC)/GCodes/GCodeBuffer/BinaryParser.cpp $(EXTRACT) Makefile
 	@mkdir -p gen
-	awk -v f="$(abspath $<)" -v names="BinaryParser::AllocateBuffer BinaryParser::Put" -f $(EXTRACT) $< > $@.tmp && mv $@.tmp $@
+	awk -v f="$(abspath $<)" -v names="BinaryParser::AllocateBuffer BinaryParser::Put BinaryParser::ParametersFit" -f $(EXTRACT) $< > $@.tmp && mv $@.tmp $@
 
 build/sbc-code-length-test: sbc_code_length_test.cpp $(GEN) Makefile
 	@mkdir -p build
