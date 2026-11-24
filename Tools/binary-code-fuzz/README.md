@@ -76,6 +76,13 @@ from a correct DSF.
 | B7 | array getters: `CheckArrayLength` limits the count to the caller's array, so nothing is written beyond it, but the elements are read from beyond the code (`GetArray`, `BinaryParser.cpp:775-829`; `GetDriverIdArray`, 597-605; `CheckArrayLength`, 832-838) | heap-buffer-overflow at 558 | wrong data |
 | B8 | `GetIPAddress` / `GetMacAddress` parse with `StrToU32` / `StrHexToU32` first and check the end against `intValue` afterwards (`BinaryParser.cpp:388-392`, 441-445) | heap-buffer-overflow at 444 | reads digits beyond the code: wrong data or an error |
 
+What was fuzzed (2026-11-24, RRF 3.7-dev 6c45e07a7): the seeds; seed 1 and seed 3, 50000 inputs each; seed 2, 50000 inputs with
+`FUZZ_POISON_STALE=1` (also reports reads of the rest of earlier codes in the buffer, the same functions as above); libFuzzer 360 s with
+3 workers (173440 inputs, 2652 crash artifacts: 2427 with the keys of B1-B8, the other 225 report nothing in a new g++ process). Line
+coverage after seed 1 with 50000 inputs (`make coverage RUNS=50000`): `BinaryParser.cpp` 554 of 582 lines; not reached are `DataStart`
+and `DataLength` (the target does not call them), `ConstructParseException(..., const char *)` and single lines in the getters.
+`StringHandle::InternalAssign`, `Delete`, `IncreaseRefCount` and `Get` 100 %.
+
 Not found: no write beyond the array of an array getter, no write beyond a `String<N>` (`StringRef::copy` limits both), no report in
 `Heap.cpp` itself. Observation without a sanitizer report: `WriteParameters` steps over the values of `BoolArray`, `ULong`, `Bitmap64`
 and `DateTime` parameters, `Seen` and `AddParameters` do not, so a code with one of them before a string or array finds the wrong value;

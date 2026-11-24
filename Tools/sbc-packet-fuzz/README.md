@@ -82,6 +82,12 @@ that reaches RRF, since RRF checks no CRC there. The common cause: `ReadPacket` 
 | P6 | every request with a data header | the `Read*` functions read their header and data beyond the received data but inside `rxBuffer` | use-after-poison with `FUZZ_POISON_STALE=1` | stale bytes of an earlier transfer: wrong data, no memory error |
 | P7 | every request with a bool field | `ReadBoolean` (`DataTransfer.cpp:645`) and the others load a packet byte other than 0 or 1 as bool | UBSan load of invalid bool (`UBSAN_BOOL=1`) | undefined behaviour; what the firmware build makes of such a byte was not checked |
 
-What was fuzzed: the seeds; seed 1 and seed 3, 50000 inputs each; seed 2, 50000 inputs with `FUZZ_POISON_STALE=1`; libFuzzer 600 s with
-4 workers (2.06 million inputs, 5589 crash artifacts, all of them with the keys above or reproducing only in the libFuzzer process). Line
-coverage: see the class 3 report.
+What was fuzzed (2026-11-24, RRF 3.7-dev 6c45e07a7): the seeds; seed 1 and seed 3, 50000 inputs each; seed 2, 50000 inputs with
+`FUZZ_POISON_STALE=1`; libFuzzer 600 s with 4 workers (2.06 million inputs, 5589 crash artifacts: 5454 with the keys above, the other 135
+report nothing in a new g++ process; the 20 of them that the libFuzzer build reproduces on its own are P1, P2 and P4, in part with the
+frame of `ReadGetObjectModel` dropped by a tail call).
+
+Line coverage after seed 1 with 50000 inputs (`make coverage RUNS=50000`): the read side of `DataTransfer.cpp` (`ReadPacket` to
+`ReadSetLastCodeResult`) 107 of 109 lines, `SwitchToUsb` 10/10, `DoTransferUsb` 18/21; `DataTransfer.cpp` as a whole 337/914, the rest
+being the SPI and DMA code, diagnostics and the `Write*` functions of requests that the packet loop does not answer. The extracted
+`SbcInterface` functions 112/127, each of the 29 cases of the packet loop at least 57 % (`FileTruncateResult`), 23 of them above 85 %.
