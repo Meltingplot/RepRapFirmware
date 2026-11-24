@@ -45,6 +45,11 @@ constexpr size_t SBCTaskStackWords = 1400;
 constexpr uint32_t SbcYieldTimeout = 10;
 constexpr uint32_t SbcBootArmDelay = 10;			// time between DataTransfer::Init driving TfrRdy low and arming the first header (in ms)
 
+// Free output buffers needed before building a JSON response to the SBC. A response may use all buffers except the reserved ones (OutputBuffer::Allocate),
+// so with this many free one that overflows them is longer than a transfer and can never be sent
+constexpr size_t MinimumBuffersForSbcJson = RESERVED_OUTPUT_BUFFERS + (SbcTransferBufferSize + OUTPUT_BUFFER_SIZE - 1)/OUTPUT_BUFFER_SIZE;
+static_assert(MinimumBuffersForSbcJson <= OUTPUT_BUFFER_COUNT);
+
 static Task<SBCTaskStackWords> *sbcTask;
 
 extern "C" [[noreturn]] void SBCTaskStart(void * pvParameters) noexcept
@@ -483,15 +488,32 @@ void SbcInterface::ExchangeData() noexcept
 			String<StringLength20> flags;
 			transfer.ReadGetObjectModel(packet->length, key.GetRef(), flags.GetRef());
 
+			// Like M409, rr_model and the PanelDue status report, keep the other object model reports out and wait only while other output holds the buffers.
+			// Then GetModelResponse returns null only for a response that is longer than a transfer. Such a response can never be sent, and asking DSF to
+			// resend the request would only build it again and again.
+			MutexLocker lock(reprap.GetObjectModelReportMutex(), SbcYieldTimeout);
+			if (!lock.IsAcquired() || OutputBuffer::GetFreeBuffers() < MinimumBuffersForSbcJson)
+			{
+				packetAcknowledged = false;
+				break;
+			}
+
 			try
 			{
 				OutputBuffer *outBuf = reprap.GetModelResponse(nullptr, key.c_str(), flags.c_str());
-				if (outBuf != nullptr && outBuf->Length() > SbcTransferBufferSize - sizeof(PacketHeader) - sizeof(StringHeader))
+				if (outBuf == nullptr || outBuf->Length() > SbcTransferBufferSize - sizeof(PacketHeader) - sizeof(StringHeader))
 				{
 					if (transfer.WriteObjectModel(nullptr))
 					{
 						// Cannot store this object model response even if we wanted to
-						reprap.GetPlatform().MessageF(ErrorMessage, "Cannot store excessively long object model response, discarding request (total length %u, key %s, flags %s)", outBuf->Length(), key.c_str(), flags.c_str());
+						if (outBuf == nullptr)
+						{
+							reprap.GetPlatform().MessageF(ErrorMessage, "Cannot store excessively long object model response, discarding request (output buffers full, key %s, flags %s)", key.c_str(), flags.c_str());
+						}
+						else
+						{
+							reprap.GetPlatform().MessageF(ErrorMessage, "Cannot store excessively long object model response, discarding request (total length %u, key %s, flags %s)", outBuf->Length(), key.c_str(), flags.c_str());
+						}
 					}
 					else
 					{
@@ -500,7 +522,7 @@ void SbcInterface::ExchangeData() noexcept
 					}
 					OutputBuffer::ReleaseAll(outBuf);
 				}
-				else if (outBuf == nullptr || !transfer.WriteObjectModel(outBuf))
+				else if (!transfer.WriteObjectModel(outBuf))
 				{
 					// Failed to write the whole object model, try again later
 					packetAcknowledged = false;
