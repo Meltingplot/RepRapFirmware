@@ -665,6 +665,17 @@ void DataTransfer::ReadGetObjectModel(size_t packetLength, const StringRef &key,
 	flags.copy(data, min<size_t>(header->flagsLength, dataLength - keyLength));
 }
 
+void DataTransfer::ReadObjectModelKeyChanged(size_t packetLength, const StringRef& key) noexcept
+{
+	// Read header
+	const StringHeader *header = ReadDataHeader<StringHeader>();
+	const size_t dataLength = (packetLength > sizeof(StringHeader)) ? packetLength - sizeof(StringHeader) : 0;
+	const char *data = ReadData(dataLength);
+
+	// Read key, as far as it lies within the packet
+	key.copy(data, min<size_t>(header->length, dataLength));
+}
+
 void DataTransfer::ReadPrintStartedInfo(size_t packetLength, const StringRef& filename, GCodeFileInfo& info) noexcept
 {
 	// Read header

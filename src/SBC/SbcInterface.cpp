@@ -1451,12 +1451,13 @@ void SbcInterface::ExchangeData() noexcept
 		// Called when keys provided exclusively by DSF in SBC mode have changed
 		case SbcRequest::ObjectModelKeyChanged:
 		{
-			const char *key = transfer.ReadData(packet->length);
-			if (StringEqualsIgnoreCase(key, "network"))
+			String<StringLength20> key;
+			transfer.ReadObjectModelKeyChanged(packet->length, key.GetRef());
+			if (StringEqualsIgnoreCase(key.c_str(), "network"))
 			{
 				reprap.NetworkUpdated();
 			}
-			else if (StringEqualsIgnoreCase(key, "volumes"))
+			else if (StringEqualsIgnoreCase(key.c_str(), "volumes"))
 			{
 				reprap.VolumesUpdated();
 			}
