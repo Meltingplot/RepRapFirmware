@@ -91,7 +91,8 @@ from Eclipse.
 ## Build and run (WSL, g++ 13, clang 18 for libFuzzer)
 
     make              # build/expression-fuzz and build/asan-expression-fuzz (deterministic driver, ../sbc-packet-fuzz/fuzz_driver.inc)
-    make check        # the seeds (both builds), then 20000 mutated inputs whose reports must all be in findings/known.txt
+    make check        # the seeds (both builds), then 20000 mutated inputs whose reports must all be in findings/known.txt, and make take-drop
+    make take-drop    # build/asan-take-drop-check: fixed cases of take() and drop() whose result allocation garbage-collects (see below)
     make findings     # every input in findings/ must still report the key on its "# expect:" line
     make coverage     # gcov line coverage of the real RRF files after the seeds and RUNS (default 50000) mutated inputs
     make libfuzzer CLANGXX=clang++-18
@@ -131,6 +132,30 @@ Observations without a sanitizer report:
   send such a parameter was not checked
 - `labs(INT_MIN)` at `ExpressionParser.cpp:1937` is undefined only where `long` is 32 bits (the board); the 64-bit host cannot show it,
   and there is no 32-bit multilib in this WSL
+
+## take() and drop() across a garbage collection (RV-2)
+
+`take(s, n)` and `drop(s, n)` of a heap string held `p.Ptr()`, a raw pointer into the heap, and passed it to `StringHandle(s, len)`
+(`EvaluateTake` and `EvaluateDrop`, `ExpressionParser.cpp:1111-1117` and `:1190-1196` in 6c45e07a7; there since 441bd498b, David
+Crocker 2025-02-02, "Implemented take and drop for string values"; 65f8c54c9 only moved it).
+`StringHandle::InternalAssign` first calls `Heap::AllocateSpace`, which garbage-collects when no heap block has room and enough space
+waits to be recycled (`Heap.cpp:314-337`). The collection moves the strings down with `memmove` and adjusts only the handles
+(`Heap.cpp:133-135`), so the copy then read from where the operand had been: wrong text, within the heap block. Found by the review
+of RRF #97, #99 and #100; upstream `3.7-dev` and `3.7-ch` have the same code. Not seen on a board.
+
+The fix copies from the handle: the new `StringHandle(const StringHandle& source, size_t offset, size_t len)` allocates first and then
+reads the source through its handle, which the collection has adjusted. `take` and `drop` take the length with
+`StringHandle::GetLength` and hold no pointer into the heap. The result is the same text as before whenever no collection runs.
+
+`make take-drop` builds the target objects with a `main` of four fixed cases instead of the fuzz driver (`FUZZ_TAKE_DROP_CHECK`). Each
+case lays out one heap block as garbage (1000 characters), the operand `var.op` (40 characters), the name of the variable and a filler
+up to the end of the block, releases the garbage, and evaluates `take(var.op, 5)`, `take(var.op, 100)`, `drop(var.op, 30)` or
+`drop(var.op, 1)` with the real parser. It checks the text of the result, and that exactly one garbage collection ran while the result
+was allocated (`Heap::Diagnostics`), so a change of the heap that stops the case from collecting shows as a failure. Without the fix all
+four cases fail: the result is filler text ("xxxxx" instead of "01234").
+
+The fix removes four lines of `ExpressionParser.cpp` before the lines of E2, E3 and E8, so their keys in `findings/known.txt` and on the
+`# expect:` lines are 2056, 2032 and 2635 now. The table above keeps the line numbers of 6c45e07a7.
 
 ## What was fuzzed (2026-11-24, RRF 3.7-dev 6c45e07a7)
 
