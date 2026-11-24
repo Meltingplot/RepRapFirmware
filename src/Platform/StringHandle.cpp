@@ -67,7 +67,9 @@ void StringHandle::InternalAssign(const char *_ecv_array s, size_t len) noexcept
 {
 	Heap::IndexSlot * const slot = Heap::AllocateHandle();
 	Heap::StorageSpace * const space = Heap::AllocateSpace(sizeof(Heap::StorageSpace) + len + 1);
-	SafeStrncpy(space->data, s, min<size_t>(len + 1, space->length - sizeof(Heap::StorageSpace)));
+	const size_t textLength = min<size_t>(len, space->length - sizeof(Heap::StorageSpace) - 1);	// leave room for the null
+	strncpy(space->data, s, textLength);											// read no more than len characters, s needn't be null-terminated
+	space->data[textLength] = 0;
 	slot->storage = space;
 	slotPtr = slot;
 }
