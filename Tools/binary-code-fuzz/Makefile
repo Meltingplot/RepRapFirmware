@@ -9,6 +9,7 @@
 #   make check        run the seeds, and a short deterministic run in which every report must be one of findings/known.txt
 #   make findings     check that every input in findings/ still reports its finding
 #   make coverage     line coverage of BinaryParser and StringHandle after a deterministic run (gcov)
+#   make addresses    build/asan-address-check: fixed cases of GetIPAddress and GetMacAddress (part of make check)
 
 RRF ?= ../..
 SRC := $(abspath $(RRF))/src
@@ -38,7 +39,7 @@ HEADERS := $(wildcard shim/*.h shim/*/*.h) $(SRC)/GCodes/GCodeBuffer/BinaryParse
 	$(SRC)/GCodes/GCodeException.h $(SRC)/Platform/Heap.h $(SRC)/Platform/StringHandle.h $(PACKET)/fuzz_driver.inc gen/RrfTypes.inc Makefile
 GEN := gen/BinaryParser.cpp gen/GCodeException.inc gen/RrfTypes.inc
 
-.PHONY: all asan libfuzzer check findings coverage clean
+.PHONY: all asan libfuzzer check findings coverage addresses clean
 all: build/binary-code-fuzz build/asan-binary-code-fuzz
 asan: build/asan-binary-code-fuzz
 libfuzzer: build/libfuzzer-binary-code-fuzz
@@ -113,10 +114,20 @@ build/libfuzzer-binary-code-fuzz: $(OBJECTS_libfuzzer)
 build/coverage-binary-code-fuzz: $(OBJECTS_coverage)
 	$(CXX) --coverage $^ -o $@
 
+# The same objects with a main of fixed address cases instead of the fuzz driver
+build/asan/address_check.o: binary_code_fuzz.cpp $(GEN) $(HEADERS)
+	@mkdir -p build/asan
+	$(CXX) $(BASEFLAGS) $(CXXFLAGS) $(ASANFLAGS) -DFUZZ_ADDRESS_CHECK $(INC) -c $< -o $@
+build/asan-address-check: $(filter-out build/asan/binary_code_fuzz.o,$(OBJECTS_asan)) build/asan/address_check.o
+	$(CXX) $(ASANFLAGS) $^ -o $@
+
 # Every run is bounded in memory: WSL has run out of memory before
 RUNENV := ASAN_OPTIONS=hard_rss_limit_mb=2048:allocator_may_return_null=1:detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1
 
-check: all
+addresses: build/asan-address-check
+	$(RUNENV) build/asan-address-check
+
+check: all addresses
 	$(RUNENV) build/binary-code-fuzz -seeds
 	$(RUNENV) build/asan-binary-code-fuzz -seeds
 	$(RUNENV) build/asan-binary-code-fuzz -known findings/known.txt -seed 1 -runs 20000

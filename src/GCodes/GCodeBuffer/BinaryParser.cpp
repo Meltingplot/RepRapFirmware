@@ -461,14 +461,21 @@ void BinaryParser::GetIPAddress(IPAddress& returnedIp) THROWS(GCodeException)
 	{
 	case DataType::String:
 		{
-			const char* p = seenParameterValue;
+			// Parse a copy, as StringParser does: the value is not null-terminated if its length is a multiple of 4. StringParser refuses
+			// a quoted value that does not fit in the copy, so do the same instead of parsing the part that fits
+			String<StringLength20> ipStr;
+			if (ipStr.copy(seenParameterValue, seenParameter->intValue))
+			{
+				throw ConstructParseException("invalid IP address");
+			}
+			const char* p = ipStr.c_str();
 			uint8_t ip[4];
 			unsigned int n = 0;
 			for (;;)
 			{
 				const char *pp;
 				const uint32_t v = StrToU32(p, &pp);
-				if (pp == p || pp > seenParameterValue + seenParameter->intValue || v > 255)
+				if (pp == p || v > 255)
 				{
 					throw ConstructParseException("invalid IP address");
 				}
@@ -515,13 +522,20 @@ void BinaryParser::GetMacAddress(MacAddress& mac) THROWS(GCodeException)
 	{
 	case DataType::String:
 		{
-			const char* p = seenParameterValue;
+			// Parse a copy, as StringParser does: the value is not null-terminated if its length is a multiple of 4. StringParser refuses
+			// a quoted value that does not fit in the copy, so do the same instead of parsing the part that fits
+			String<StringLength20> macStr;
+			if (macStr.copy(seenParameterValue, seenParameter->intValue))
+			{
+				throw ConstructParseException("invalid MAC address");
+			}
+			const char* p = macStr.c_str();
 			unsigned int n = 0;
 			for (;;)
 			{
 				const char *pp;
 				const uint32_t v = StrHexToU32(p, &pp);
-				if (pp == p || pp > seenParameterValue + seenParameter->intValue || v > 255)
+				if (pp == p || v > 255)
 				{
 					throw ConstructParseException("invalid MAC address");
 				}
