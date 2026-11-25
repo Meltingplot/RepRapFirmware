@@ -9,9 +9,10 @@ The object model holds the lock of a table only while it fetches one value (`Obj
 reads the array through that pointer later, when no lock is held any more. Two kinds of task do that while the main task may delete
 object model objects:
 - the SBC task (`SbcPriority`, above `SpinPriority` of the main task, `src/Platform/TaskPriorities.h`), for the `EvaluateExpression`
-  and `SetVariable` requests of DSF (`SbcInterface::ExchangeData` in `src/SBC/SbcInterface.cpp`). `SetVariable` stores the value in
-  a new variable, which needs `malloc` (`VariableSet::InsertNew`, `Variable::CopyObjectModelArray` in `src/ObjectModel/Variable.cpp`),
-  and then reports it as JSON. If the main task holds the malloc mutex at that moment, e.g. while M669 allocates the new kinematics in
+  and `SetVariable` requests of DSF (`SbcInterface::ExchangeData` in `src/SBC/SbcInterface.cpp`). `SetVariable` writes the value as
+  JSON for the answer (`SbcInterface::MakeJsonAnswer`) and then stores it in a new variable, which needs `malloc`
+  (`VariableSet::InsertNew`, `Variable::CopyObjectModelArray` in `src/ObjectModel/Variable.cpp`). If the main task holds the malloc
+  mutex at that moment, e.g. while M669 allocates the new kinematics in
   `Move::SetKinematics`, the SBC task waits, the main task inherits its priority, keeps it because it still holds the mutex of its
   G-code channel, and goes on to delete the old kinematics before the SBC task runs again. `EvaluateExpression` needs no `malloc`, but
   the same happens when a task with a higher priority waits for the malloc mutex while the main task holds it: the CAN receiver
@@ -34,8 +35,8 @@ the real lines):
 - from RRFLibraries `src/RTOSIface/RTOSIface.h` and `RTOSIface.cpp`: `ReadWriteLock` with `LockForReading`, `ReleaseReader`,
   `LockForWriting`, `ReleaseWriter` and its `LockRecord`, and `ReadLocker`, `WriteLocker` and `WriteLockedPointer`;
 - `Move::SetKinematics` (`src/Movement/Move.cpp`) and `Tool::DeleteTool` (`src/Tools/Tool.cpp`), the deleting commands;
-- the `EvaluateExpression` and `SetVariable` cases of `SbcInterface::ExchangeData` and `FileInfoParser::ProcessCustomInfo`, the
-  readers.
+- the `EvaluateExpression` and `SetVariable` cases of `SbcInterface::ExchangeData` with `SbcInterface::MakeJsonAnswer`, which
+  writes their JSON answer, and `FileInfoParser::ProcessCustomInfo`, the readers.
 
 `object_lifetime_test.cpp` gives them stand-ins:
 - one processor for the tasks. Each task is a thread, and only one runs at a time. A task runs until it blocks, unless a task with a

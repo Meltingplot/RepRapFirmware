@@ -114,6 +114,7 @@ public:
 	const char *const name;
 	const unsigned int basePriority;
 	unsigned int priority;						// the base priority, or one that it inherited through a mutex
+	unsigned int writeLocksHeld = 0;			// RTOSIface.h: the write locks on ReadWriteLock objects that this task holds, which the lock code counts
 	unsigned int mutexesHeld = 0;
 	State state = State::ready;
 	bool waitingForNotification = false;
@@ -499,12 +500,22 @@ public:
 	ArrayHandle ahVal;
 };
 
+// src/Config/Configuration.h, for the MB6HC (SAME70)
+constexpr size_t OUTPUT_BUFFER_SIZE = 256;
+constexpr size_t OUTPUT_BUFFER_COUNT = 40;
+constexpr size_t RESERVED_OUTPUT_BUFFERS = 4;
+
+// src/Platform/OutputMemory.h. The stand-in holds text of any length in one buffer, so it never overflows, and all buffers are free.
 class OutputBuffer
 {
 public:
 	// src/Platform/OutputMemory.cpp: takes a free buffer without waiting
 	static bool Allocate(OutputBuffer *_ecv_null &buf) noexcept { buf = new OutputBuffer; return true; }
+	static void ReleaseAll(OutputBuffer *_ecv_null volatile &buf) noexcept { delete buf; buf = nullptr; }
+	static unsigned int GetFreeBuffers() noexcept { return OUTPUT_BUFFER_COUNT; }
 	void cat(const char *s) noexcept { text += s; }
+	size_t Length() const noexcept { return text.size(); }
+	bool HadOverflow() const noexcept { return false; }
 	std::string text;
 };
 
@@ -944,18 +955,42 @@ static RepRap reprap;
 
 enum class SbcRequest : uint16_t { EvaluateExpression, SetVariable };
 
+// src/SBC/SbcMessageFormats.h
+constexpr size_t SbcTransferBufferSize = 8192;
+
 struct PacketHeader
 {
 	uint16_t request;
+	uint16_t id;
 	uint16_t length;
 	uint16_t resendPacketId;
+};
+
+enum class DataType : uint8_t;
+
+struct EvaluationResultHeader
+{
+	DataType dataType;
+	uint8_t channel;
+	uint16_t expressionLength;
+	union
+	{
+		int32_t intValue;
+		uint32_t uintValue;
+		float floatValue;
+	};
 };
 
 static uint16_t ChannelEpochOf(uint16_t id) noexcept { return 0; }
 static uint16_t ChannelEpochTag(uint16_t epoch) noexcept { return 0; }
 static bool StringStartsWith(const char *_ecv_array string, const char *_ecv_array starting) noexcept { return std::strncmp(string, starting, std::strlen(starting)) == 0; }
 static uint32_t millis() noexcept { return 0; }
-constexpr uint32_t SbcYieldTimeout = 10;			// src/SBC/SbcInterface.cpp
+
+// src/SBC/SbcInterface.cpp
+constexpr uint32_t SbcYieldTimeout = 10;
+constexpr size_t MinimumBuffersForSbcJson = RESERVED_OUTPUT_BUFFERS + (SbcTransferBufferSize + OUTPUT_BUFFER_SIZE - 1)/OUTPUT_BUFFER_SIZE;
+constexpr size_t MaxSbcAnswerDataLength = SbcTransferBufferSize - 2 * sizeof(PacketHeader);
+constexpr const char *_ecv_array ValueTooLongForSbc = "value too long to send to the SBC";
 
 // What DSF sent and what RRF sent back
 struct SbcExchange
@@ -991,6 +1026,10 @@ public:
 	bool WriteSetVariableResult(GCodeChannel channel, const char *varName, const ExpressionValue& value, uint16_t tag) noexcept { return Answer("plain value"); }
 	bool WriteSetVariableError(GCodeChannel channel, const char *varName, const char *errorMessage, uint16_t tag) noexcept { return Answer(std::string("error: ") + errorMessage); }
 
+	// src/SBC/DataTransfer.h: the transfer of this test has room for every answer
+	bool CanWriteSetVariableResult(const char *varName, const ExpressionValue& value) const noexcept { return true; }
+	bool CanWriteSetVariableResult(const char *varName, const OutputBuffer *json) const noexcept { return true; }
+
 private:
 	static bool Answer(OutputBuffer *json) noexcept { const bool ok = Answer(json->text); delete json; return ok; }
 	static bool Answer(const std::string& s) noexcept { sbcExchange.result = s; sbcExchange.answered = true; return true; }
@@ -1003,6 +1042,7 @@ public:
 
 private:
 	bool IsDroppedByEpoch(GCodeBuffer&, const PacketHeader&) noexcept { return false; }
+	bool MakeJsonAnswer(OutputBuffer *_ecv_null &json, const ExpressionValue& val, size_t otherDataLength) THROWS(GCodeException);	// the real text
 	void ReportHeapArrayAsJson(OutputBuffer *buf, ObjectExplorationContext& context, const void *_ecv_null classDescriptor, ArrayHandle ah,
 								const char *_ecv_array filter) const noexcept { }
 
@@ -1022,6 +1062,8 @@ bool SbcInterface::HandlePacket(const PacketHeader *packet) noexcept
 	}
 	return packetAcknowledged;
 }
+
+#include "MakeJsonAnswer.inc"
 
 // ---------------------------------------------------------------------------------------------------------------------------------------
 // The network task: file info for rr_fileinfo, which stores ;CustomInfo values in a set of variables
@@ -1166,7 +1208,7 @@ static unsigned int RunKinematicsChange(SbcRequest request, bool announcement, u
 	SbcInterface sbcInterface;
 	sbc.body = [&]
 	{
-		const PacketHeader packet = { (uint16_t)request, 0, 0 };
+		const PacketHeader packet = { (uint16_t)request, 0, 0, 0 };
 		(void)sbcInterface.HandlePacket(&packet);
 	};
 	canReceiver.body = []
@@ -1206,7 +1248,8 @@ static unsigned int RunKinematicsChange(SbcRequest request, bool announcement, u
 		}
 		if (ok && request == SbcRequest::SetVariable)
 		{
-			Variable *const v = reprap.GetGlobalVariablesForWriting()->Lookup("k", false);
+			// The tasks have finished, so read the variables without the lock: outside a task the lock code has no task to count its write locks on
+			Variable *const v = reprap.globalVariables.GetVariables().Lookup("k", false);
 			const std::vector<float> expected = { (oldValues) ? OldMatrix : NewMatrix, ((oldValues) ? OldMatrix : NewMatrix) + 1, ((oldValues) ? OldMatrix : NewMatrix) + 2 };
 			if (v == nullptr || v->value != expected)
 			{
@@ -1271,7 +1314,7 @@ static unsigned int RunToolDeletion(bool networkFirst, unsigned int slicePoint, 
 		std::string why;
 		bool ok = Tool::toolList == nullptr && Tool::toolsDeleted == 1;
 		if (!ok) { why = "M563 did not delete tool 0 exactly once"; }
-		Variable *const v = customInfo.GetForWriting()->Lookup("t0", false);
+		Variable *const v = customInfo.GetVariables().Lookup("t0", false);		// without the lock, as in RunKinematicsChange
 		const std::vector<float> expected = { ToolOffsets, ToolOffsets + 1, ToolOffsets + 2 };
 		// The parse finds tool 0 if it fetches tools[0] before M563 has taken the tool out of the list, and then the variable must hold its
 		// offsets. Otherwise the parse fails, and ProcessCustomInfo stores nothing.
