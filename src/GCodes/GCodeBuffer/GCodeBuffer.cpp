@@ -1221,8 +1221,8 @@ void GCodeBuffer::AbortFile(bool abortAll) noexcept
 		// Notify the SBC about the file(s) being closed
 		if (reprap.UsingSbcInterface())
 		{
+			abortAllFiles = abortAll;		// set this one first, because the SBC task acts on abortFile as soon as it is set
 			abortFile = true;
-			abortAllFiles = abortAll;
 			macroJustStarted = false;		// a macro that has just been started is closed too, so the next reply of the code below it is not a push message
 		}
 #endif
@@ -1485,10 +1485,7 @@ bool GCodeBuffer::OpenFileToWrite(const char *_ecv_array directory, const char *
 	if (NOT_BINARY_AND(stringParser.OpenFileToWrite(directory, fileName, size, binaryWrite, fileCRC32)))
 	{
 		normalInput->SetWritingFile(true);
-		if (binaryWrite)
-		{
-			normalInput->NoteBinaryUpload(directory, fileName);
-		}
+		normalInput->NoteFileUpload(directory, fileName);
 		return true;
 	}
 	return false;
@@ -1542,15 +1539,15 @@ FilePosition GCodeBuffer::GetBinaryBytesRemaining() const noexcept
 	return NOT_BINARY_AND(true) ? stringParser.GetBinaryBytesRemaining() : 0;
 }
 
-void GCodeBuffer::AbortBinaryUpload() noexcept
-{
-	IF_NOT_BINARY(stringParser.AbortBinaryUpload());
-	normalInput->SetWritingFile(false);							// re-enable urgent command scanning on this input
-}
-
 void GCodeBuffer::FinishWritingBinary() noexcept
 {
 	IF_NOT_BINARY(stringParser.FinishWritingBinary());
+	normalInput->SetWritingFile(false);
+}
+
+void GCodeBuffer::AbortFileWrite() noexcept
+{
+	IF_NOT_BINARY(stringParser.AbortFileWrite());
 	normalInput->SetWritingFile(false);
 }
 

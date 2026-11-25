@@ -761,7 +761,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeEx
 	if (   reprap.UsingSbcInterface() && reprap.GetSbcInterface().IsConnected() && !gb.IsBinary()
 		&& (code != 112 || gb.GetChannel() != GCodeChannel::Trigger)		// an M112 in a trigger action stops the machine here, without DSF
 		&& (   (code >=  0 && code <= 2)
-			|| (code >= 20 && code <= 24) || (code >= 26 && code <= 30)
+			|| (code >= 20 && code <= 24) || (code >= 26 && code <= 27) || code == 30
 			||  code == 32 || (code >= 36 && code <= 39)
 			|| (code == 98 && gb.Seen('R'))
 			||  code == 112
@@ -5111,7 +5111,7 @@ bool GCodes::HandleResult(GCodeBuffer& gb, GCodeResult rslt, const StringRef& re
 	}
 
 	// The other results that are converted to errors or warnings below print the command themselves
-	const bool addCommandPrefix = rslt == GCodeResult::error || rslt == GCodeResult::warning || rslt == GCodeResult::noCanBuffer || rslt == GCodeResult::canResponseTimeout;
+	const bool addCommandPrefix = rslt == GCodeResult::error || rslt == GCodeResult::warning || rslt == GCodeResult::noCanBuffer || rslt == GCodeResult::canResponseTimeout || rslt == GCodeResult::unknownCanBoard;
 	switch (rslt)
 	{
 	case GCodeResult::notFinished:
@@ -5184,6 +5184,12 @@ bool GCodes::HandleResult(GCodeBuffer& gb, GCodeResult rslt, const StringRef& re
 	case GCodeResult::canResponseTimeout:
 		// Usually we have a more detailed message in 'reply' already, but if not then add a standard message
 		if (reply.IsEmpty()) { reply.copy("CAN response timeout"); }
+		rslt = GCodeResult::error;
+		break;
+
+	case GCodeResult::unknownCanBoard:
+		// We may have a more detailed message in 'reply' already, but if not then add a standard message
+		if (reply.IsEmpty()) { reply.copy("unknown CAN expansion board"); }
 		rslt = GCodeResult::error;
 		break;
 #endif

@@ -197,7 +197,7 @@ void HangprinterKinematics::Recalc() noexcept
 		move.SetDriveStepsPerMm(i, stepsPerMmThisAxis, 0);
 	}
 
-#if DUAL_CAN
+#if HANGPRINTER_DUAL_CAN
 	// Setting and reading of forces.
 	ReadODrive3AxisForce({}, StringRef(nullptr, 0), torqueConstants, mechanicalAdvantage, spoolGearTeeth, motorGearTeeth, spoolRadii);
 	SetODrive3TorqueMode({}, 0.0F, StringRef(nullptr, 0), mechanicalAdvantage, spoolGearTeeth, motorGearTeeth, spoolRadii);
@@ -884,7 +884,7 @@ bool HangprinterKinematics::WriteCalibrationParameters(FileStore *f) const noexc
 	ok = f->Write(scratchString.c_str());
 	if (!ok) return false;
 
-	scratchString.printf("N%zu", numAnchors);
+	scratchString.printf("N%u", (unsigned int)numAnchors);
 	for (size_t i = 0; i < numAnchors; ++i)
 	{
 		scratchString.catf("%c%.3f:%.3f:%.3f ", ANCHOR_CHARS[i], (double)anchors[i][X_AXIS], (double)anchors[i][Y_AXIS], (double)anchors[i][Z_AXIS]);
@@ -1009,7 +1009,7 @@ void HangprinterKinematics::PrintParameters(const StringRef& reply) const noexce
 	reply.cat("\n");
 }
 
-#if DUAL_CAN
+#if HANGPRINTER_DUAL_CAN
 HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3MotorCurrent(DriverId driver, const StringRef& reply) THROWS(GCodeException)
 {
 	const uint8_t cmd = CANSimple::MSG_GET_IQ;
@@ -1034,7 +1034,7 @@ HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3MotorCurren
 		}
 		else
 		{
-			reply.printf("Unexpected response length: %zu", buf->dataLength);
+			reply.printf("Unexpected response length: %u", (unsigned int)buf->dataLength);
 		}
 	}
 	CanMessageBuffer::Free(buf);
@@ -1044,9 +1044,9 @@ HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3MotorCurren
 	}
 	return {};
 }
-#endif // DUAL_CAN
+#endif // HANGPRINTER_DUAL_CAN
 
-#if DUAL_CAN
+#if HANGPRINTER_DUAL_CAN
 HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3EncoderEstimate(DriverId const driver, bool const makeReference, const StringRef& reply, bool const subtractReference) THROWS(GCodeException)
 {
 	const uint8_t cmd = CANSimple::MSG_GET_ENCODER_ESTIMATES;
@@ -1069,7 +1069,7 @@ HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3EncoderEsti
 		}
 		else // we don't have space for a new one
 		{
-			reply.printf("Max CAN addresses we can reference is %zu. Can't reference board %d.", numAnchors, driver.boardAddress);
+			reply.printf("Max CAN addresses we can reference is %u. Can't reference board %d.", (unsigned int)numAnchors, driver.boardAddress);
 			numSeenDrives = numAnchors;
 			return {};
 		}
@@ -1078,6 +1078,11 @@ HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3EncoderEsti
 	CanMessageBuffer * buf = CanInterface::ODrive::PrepareSimpleMessage(driver, reply);
 	if (buf == nullptr)
 	{
+		if (newOne)
+		{
+			seenDrives[thisDriveIdx] = 0;
+			numSeenDrives--;
+		}
 		return {};
 	}
 
@@ -1108,7 +1113,7 @@ HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3EncoderEsti
 		}
 		else
 		{
-			reply.printf("Unexpected response length: %zu", buf->dataLength);
+			reply.printf("Unexpected response length: %u", (unsigned int)buf->dataLength);
 		}
 	}
 	CanMessageBuffer::Free(buf);
@@ -1126,7 +1131,7 @@ HangprinterKinematics::ODriveAnswer HangprinterKinematics::GetODrive3EncoderEsti
 
 	return {};
 }
-#endif // DUAL_CAN
+#endif // HANGPRINTER_DUAL_CAN
 
 namespace
 {
@@ -1142,7 +1147,7 @@ bool TryGetDriverDirectionForwards(DriverId driver, bool& forwards) noexcept
 }
 }
 
-#if DUAL_CAN
+#if HANGPRINTER_DUAL_CAN
 GCodeResult HangprinterKinematics::ReadODrive3AxisForce(DriverId const driver, const StringRef& reply, float setTorqueConstants[], uint32_t setMechanicalAdvantage[], uint32_t setSpoolGearTeeth[], uint32_t setMotorGearTeeth[], float setSpoolRadii[]) THROWS(GCodeException)
 {
 	static float torqueConstants_[HANGPRINTER_MAX_ANCHORS] = { 0.0 };
@@ -1166,8 +1171,8 @@ GCodeResult HangprinterKinematics::ReadODrive3AxisForce(DriverId const driver, c
 	if (motorCurrent.valid)
 	{
 		size_t const boardIndex = driver.boardAddress - 40;
-		if (boardIndex < 0 or boardIndex > 9) {
-			reply.catf("Board address not between 40 and 49: %d", driver.boardAddress);
+		if (boardIndex >= numAnchors) {
+			reply.catf("Board address not between 40 and %u: %d", (unsigned int)(39 + numAnchors), driver.boardAddress);
 			return GCodeResult::error;
 		}
 		// This force calculation if very rough, assuming perfect data from ODrive,
@@ -1180,16 +1185,16 @@ GCodeResult HangprinterKinematics::ReadODrive3AxisForce(DriverId const driver, c
 		{
 			motorTorque_Nm = -motorTorque_Nm;
 		}
-		float const lineTension = 1000.0 * (motorTorque_Nm * (spoolGearTeeth_[boardIndex]/motorGearTeeth_[boardIndex])) / spoolRadii_[boardIndex];
+		float const lineTension = 1000.0 * (motorTorque_Nm * ((float)spoolGearTeeth_[boardIndex] / motorGearTeeth_[boardIndex])) / spoolRadii_[boardIndex];
 		float const force = lineTension * mechanicalAdvantage_[boardIndex];
 		reply.catf("%.2f, ", (double)(force));
 		return GCodeResult::ok;
 	}
 	return GCodeResult::error;
 }
-#endif // DUAL_CAN
+#endif // HANGPRINTER_DUAL_CAN
 
-#if DUAL_CAN
+#if HANGPRINTER_DUAL_CAN
 GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId const driver, GCodeBuffer& gb, const StringRef& reply) THROWS(GCodeException)
 {
 	HangprinterKinematics::ODriveAnswer const estimate = GetODrive3EncoderEstimate(driver, gb.Seen('S'), reply, true);
@@ -1206,11 +1211,11 @@ GCodeResult HangprinterKinematics::ReadODrive3Encoder(DriverId const driver, GCo
 	}
 	return GCodeResult::error;
 }
-#endif // DUAL_CAN
+#endif // HANGPRINTER_DUAL_CAN
 
 namespace {
 GCodeResult ComputeODrive3TorqueFromForceInternal(
-	DriverId const driver, float const force_Newton,
+	DriverId const driver, float const force_Newton, size_t const numAnchors,
 	uint32_t const mechanicalAdvantage[], uint32_t const spoolGearTeeth[], uint32_t const motorGearTeeth[],
 	float const spoolRadii[], float& motorTorque_Nm, bool& positionMode, const StringRef& reply) noexcept
 {
@@ -1224,9 +1229,9 @@ GCodeResult ComputeODrive3TorqueFromForceInternal(
 	}
 
 	const int boardIndex = (int)driver.boardAddress - 40;
-	if (boardIndex < 0 || boardIndex > 9)
+	if (boardIndex < 0 || boardIndex >= (int)numAnchors)
 	{
-		reply.catf("Board address not between 40 and 49: %d", driver.boardAddress);
+		reply.catf("Board address not between 40 and %u: %d", (unsigned int)(39 + numAnchors), driver.boardAddress);
 		return GCodeResult::error;
 	}
 
@@ -1249,19 +1254,19 @@ GCodeResult HangprinterKinematics::ComputeODrive3TorqueFromForce(DriverId const 
 																																	const StringRef& reply) const noexcept
 {
 	return ComputeODrive3TorqueFromForceInternal(
-		driver, force_Newton,
+		driver, force_Newton, numAnchors,
 		mechanicalAdvantage, spoolGearTeeth, motorGearTeeth, spoolRadii,
 		motorTorque_Nm, positionMode, reply);
 }
 
-#if DUAL_CAN
+#if HANGPRINTER_DUAL_CAN
 GCodeResult HangprinterKinematics::SetODrive3TorqueModeInner(DriverId const driver, float const torque_Nm, const StringRef& reply) noexcept
 {
 	// Get a buffer
 	CanMessageBuffer * buf = CanInterface::ODrive::PrepareSimpleMessage(driver, reply);
 	if (buf == nullptr)
 	{
-		return GCodeResult::noCanBuffer;
+		return GCodeResult::error;
 	}
 
 	// Set the right target torque
@@ -1282,9 +1287,9 @@ GCodeResult HangprinterKinematics::SetODrive3TorqueModeInner(DriverId const driv
 	CanMessageBuffer::Free(buf);
 	return GCodeResult::ok;
 }
-#endif // DUAL_CAN
+#endif // HANGPRINTER_DUAL_CAN
 
-#if DUAL_CAN
+#if HANGPRINTER_DUAL_CAN
 GCodeResult HangprinterKinematics::SetODrive3PosMode(DriverId const driver, const StringRef& reply) noexcept
 {
 	HangprinterKinematics::ODriveAnswer const estimate = GetODrive3EncoderEstimate(driver, false, reply, false);
@@ -1294,7 +1299,7 @@ GCodeResult HangprinterKinematics::SetODrive3PosMode(DriverId const driver, cons
 		CanMessageBuffer* buf = CanInterface::ODrive::PrepareSimpleMessage(driver, reply);
 		if (buf == nullptr)
 		{
-			return GCodeResult::noCanBuffer;
+			return GCodeResult::error;
 		}
 		buf->id = CanInterface::ODrive::ArbitrationId(driver, CANSimple::MSG_SET_INPUT_POS);
 		buf->dataLength = 8;
@@ -1316,9 +1321,9 @@ GCodeResult HangprinterKinematics::SetODrive3PosMode(DriverId const driver, cons
 	}
 	return GCodeResult::error;
 }
-#endif // DUAL_CAN
+#endif // HANGPRINTER_DUAL_CAN
 
-#if DUAL_CAN
+#if HANGPRINTER_DUAL_CAN
 GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, float force_Newton, const StringRef& reply,
 																												uint32_t setMechanicalAdvantage[], uint32_t setSpoolGearTeeth[],
 																												uint32_t setMotorGearTeeth[], float setSpoolRadii[]) noexcept
@@ -1341,7 +1346,7 @@ GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, f
 	float motorTorque_Nm = 0.0F;
 	bool positionMode = false;
 	GCodeResult res = ComputeODrive3TorqueFromForceInternal(
-		driver, force_Newton,
+		driver, force_Newton, numAnchors,
 		mechanicalAdvantage_, spoolGearTeeth_, motorGearTeeth_, spoolRadii_,
 		motorTorque_Nm, positionMode, reply);
 	if (res != GCodeResult::ok)
@@ -1366,7 +1371,7 @@ GCodeResult HangprinterKinematics::SetODrive3TorqueMode(DriverId const driver, f
 	}
 	return res;
 }
-#endif // DUAL_CAN
+#endif // HANGPRINTER_DUAL_CAN
 
 
 float HangprinterKinematics::SpringK(float const springLength) const noexcept {

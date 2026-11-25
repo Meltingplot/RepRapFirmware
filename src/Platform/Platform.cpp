@@ -2128,18 +2128,18 @@ GCodeResult Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, Ou
 			{
 				AtomicCriticalSectionLocker lock;
 				startClocks = StepTimer::GetTimerTicksWhenInterruptsDisabled();
-				startTimeStamp = CanInterface::GetTimeStampCounter();
+				startTimeStamp = CanInterface::GetTimeStampCounter(0);
 			}
 			delay(2);
 			{
 				AtomicCriticalSectionLocker lock;
 				endClocks = StepTimer::GetTimerTicksWhenInterruptsDisabled();
-				endTimeStamp = CanInterface::GetTimeStampCounter();
+				endTimeStamp = CanInterface::GetTimeStampCounter(0);
 			}
 # if EXTERNAL_CAN_TIMESTAMP_COUNTER
 			const uint32_t tsDiff = (endTimeStamp - startTimeStamp) & 0xFFFF;
 # else
-			const uint32_t tsDiff = (((endTimeStamp - startTimeStamp) & 0xFFFF) * CanInterface::GetTimeStampPeriod()) >> 6;
+			const uint32_t tsDiff = (((endTimeStamp - startTimeStamp) & 0xFFFF) * CanInterface::GetTimeStampPeriod(0)) >> 6;
 # endif
 			reply.lcatf("Clock diff %" PRIu32 ", ts diff %" PRIu32, endClocks - startClocks, tsDiff);
 		}
@@ -2351,7 +2351,7 @@ GCodeResult Platform::HandleM575(GCodeBuffer& gb, const StringRef& reply) THROWS
 		   )
 		{
 			gbp->Enable(val);						// enable I/O and set the CRC and checksum requirements
-			if (auxModes[chan] == AuxMode::panelDue)
+			if (newMode == AuxMode::panelDue)
 			{
 				gbp->LatestMachineState().compatibility.Assign(Compatibility::RepRapFirmware);
 			}

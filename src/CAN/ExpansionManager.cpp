@@ -47,9 +47,16 @@ constexpr ObjectModelArrayTableEntry ExpansionManager::objectModelArrayTable[] =
 
 DEFINE_GET_OBJECT_MODEL_ARRAY_TABLE(ExpansionManager)
 
+// A board can be listed from its status reports before its announcement has set its bus
+static ExpressionValue GetCanInterfaceValue(size_t busPlusOne) noexcept
+{
+	return (busPlusOne == 0) ? ExpressionValue(nullptr) : ExpressionValue((int32_t)CanInterface::GetCanInterfaceNumberFromBusNumber(busPlusOne - 1));
+}
+
 constexpr ObjectModelTableEntry ExpansionManager::objectModelTable[] =
 {
 	// 0. boards[] members
+	{ "bootloaderVersion",	OBJECT_MODEL_FUNC(self->FindIndexedBoard(context.GetLastIndex()).typeName, ExpansionDetail::bootloaderVersion),	ObjectModelEntryFlags::none },
 	{ "canAddress",			OBJECT_MODEL_FUNC((int32_t)(&(self->FindIndexedBoard(context.GetLastIndex())) - self->boards)),					ObjectModelEntryFlags::none },
 	{ "closedLoop",			OBJECT_MODEL_FUNC_IF(self->FindIndexedBoard(context.GetLastIndex()).hasClosedLoop, self, 4),					ObjectModelEntryFlags::none },
 	{ "drivers",			OBJECT_MODEL_FUNC_ARRAY_IF(self->FindIndexedBoard(context.GetLastIndex()).HasDrivers(), 0),						ObjectModelEntryFlags::liveNotPanelDue },
@@ -61,6 +68,7 @@ constexpr ObjectModelTableEntry ExpansionManager::objectModelTable[] =
 	{ "firmwareVersion",	OBJECT_MODEL_FUNC(self->FindIndexedBoard(context.GetLastIndex()).typeName, ExpansionDetail::firmwareVersion),	ObjectModelEntryFlags::none },
 	{ "freeRam",			OBJECT_MODEL_FUNC((int32_t)self->FindIndexedBoard(context.GetLastIndex()).neverUsedRam),						ObjectModelEntryFlags::liveNotPanelDue },
 	{ "inductiveSensor",	OBJECT_MODEL_FUNC_IF(self->FindIndexedBoard(context.GetLastIndex()).hasInductiveSensor, self, 5),				ObjectModelEntryFlags::none },
+	{ "interface",			OBJECT_MODEL_FUNC(GetCanInterfaceValue(self->FindIndexedBoard(context.GetLastIndex()).busPlusOne)),				ObjectModelEntryFlags::none },
 	{ "maxMotors",			OBJECT_MODEL_FUNC((int32_t)self->FindIndexedBoard(context.GetLastIndex()).numDrivers),							ObjectModelEntryFlags::none },
 	{ "mcuTemp",			OBJECT_MODEL_FUNC_IF(self->FindIndexedBoard(context.GetLastIndex()).hasMcuTemp, self, 1),						ObjectModelEntryFlags::liveNotPanelDue },
 	{ "name",				OBJECT_MODEL_FUNC(self->FindIndexedBoard(context.GetLastIndex()).typeName, ExpansionDetail::longName),			ObjectModelEntryFlags::none },
@@ -97,7 +105,7 @@ constexpr ObjectModelTableEntry ExpansionManager::objectModelTable[] =
 constexpr uint8_t ExpansionManager::objectModelTableDescriptor[] =
 {
 	6,				// number of sections
-	17,				// section 0: boards[]
+	19,				// section 0: boards[]
 	3,				// section 1: mcuTemp
 	3,				// section 2: vIn
 	3,				// section 3: v12
@@ -114,7 +122,7 @@ ExpansionBoardData::ExpansionBoardData() noexcept
 	  driverData(nullptr),
 	  closedLoopRuns(0),
 	  connectionTimeoutSeconds(DefaultConnectionTimeoutSeconds),
-	  hasMcuTemp(false), hasVin(false), hasV12(false), hasAccelerometer(false),
+	  busPlusOne(0), hasMcuTemp(false), hasVin(false), hasV12(false), hasAccelerometer(false),
 	  state(BoardState::unknown), numDrivers(0)
 {
 }
@@ -176,6 +184,7 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 		{
 			WriteLocker lock(boardsLock);
 
+			board.busPlusOne = buf->bus + 1;
 			board.neverUsedRam = 0;
 			board.whenLastStatusReportReceived = millis();
 			if (isNewFormat && buf->msg.announceV1.isReconnect)
@@ -206,7 +215,7 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 			UpdateBoardState(src, BoardState::unknown);
 			if (board.typeName == nullptr || strcmp(board.typeName, boardTypeAndFirmwareVersion.c_str()) != 0)
 			{
-				// To save memory, see if we already have another board with the same type name
+				// To save memory, see if we already have another board with the same type name, firmware version and bootloader version
 				const char *_ecv_array _ecv_null newTypeName = nullptr;
 				for (const ExpansionBoardData& data : boards)
 				{
@@ -260,6 +269,7 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 
 		// Tell the sending board that we don't need any more announcements from it
 		buf->SetupRequestMessageNoRid<CanMessageAcknowledgeAnnounce>(CanInterface::GetCanAddress(), src);
+		buf->useBrs = false;
 		CanInterface::SendMessageNoReplyNoFree(buf);
 	}
 }
@@ -469,9 +479,14 @@ DriverMode ExpansionManager::GetDriverMode(DriverId did) const noexcept
 }
 
 // Return a pointer to the expansion board, if it is present
-const ExpansionBoardData *_ecv_null ExpansionManager::GetBoardDetails(uint8_t address) const noexcept
+const ExpansionBoardData *_ecv_null ExpansionManager::GetBoardDetails(CanAddress address) const noexcept
 {
 	return (address < ARRAY_SIZE(boards) && boards[address].state == BoardState::running) ? &boards[address] : nullptr;
+}
+
+size_t ExpansionManager::GetBusNumberPlusOneFor(CanAddress address) const noexcept
+{
+	return (address < ARRAY_SIZE(boards)) ? boards[address].busPlusOne : 0;
 }
 
 // Tell an expansion board to update
