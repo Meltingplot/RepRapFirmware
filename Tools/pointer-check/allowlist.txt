@@ -31,8 +31,8 @@ BufferedStreamGCodeInput::directTail                                  # uint8_t 
 ButtonMenuItem::command                                               # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer or a literal, item freed before buffer reuse
 ButtonMenuItem::m_acFile                                              # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer, or nullptr for message box buttons
 ButtonMenuItem::text                                                  # char const *; SAFE-ONE-TASK: MAIN only; points into Menu::commandBuffer or a literal
-CAN/CanInterface.cpp: can0dev                                         # CanDevice *; SAFE-PERMANENT: points to static CanDevice; nulled only in emergency-stop Shutdown, never freed
-CAN/CanInterface.cpp: can1dev                                         # CanDevice *; SAFE-PERMANENT: set once in Init to a static CanDevice, never cleared or freed
+CAN/CanInterface.cpp: canDevices                                      # CanDevice * [], upstream 7552c71c6, replaces can0dev and can1dev; SAFE-PERMANENT: CanInterface::Init sets each entry once to a static CanDevice (CoreN2G CanDevice.cpp:210); nulled only in the emergency-stop Shutdown, never freed
+CAN/CanInterface.cpp: canReceiverTasks                                # Task * [], upstream 7552c71c6; SUSPECT: InitBus (MAIN: Init, M953) creates a bus task once, the emergency-stop Shutdown (MAIN or the SBC task, EndConnection) terminates and deletes it, with no lock in common; only an SBC emergency stop during an M953 could reach a deleted task (upstream report candidate)
 CAN/CanInterface.cpp: lastMotionBuffer                                # CanMessageBuffer * volatile; SAFE-LOCKED: tail of motion queue; used only under task critical section with a non-null head
 CAN/CanInterface.cpp: pendingMotionBuffers                            # CanMessageBuffer * volatile; SAFE-LOCKED: Move pushes, CanSender pops, both under task critical section; freed after unlink
 CAN/CanMotion.cpp: CanMotion::movementBufferList                      # CanMessageBuffer *; SAFE-ONE-TASK: Move task only (DDA::Prepare)
