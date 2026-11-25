@@ -8,12 +8,13 @@
 // priority than the main task, which runs M558 and M502, walk the list and call CheckTriggered on every entry:
 // - the step ISR, while a move that checks endstops executes (Move::CheckEndstops in src/Movement/Move.cpp);
 // - the CAN receiver task, after every endstop, Z probe or GpIn state change that an expansion board reports
-//   (src/CAN/CommandProcessor.cpp -> Move::OnEndstopOrZProbeStatesChanged). Upstream does so whether or not a move is executing;
-//   since #66 the fork does so only while a segment that checks endstops executes. The test plays the upstream reader.
-// So a probe must be out of the list before its deletion starts. M574 shows how: it locks movement, waits for standstill and
-// clears the list before it may delete endstops. The test plays these readers while a probe is deleted (in its destructor,
-// before and after its memory is freed) and at the next remote input change. It never calls a deleted object itself: the reader
-// first compares each list entry with the probes deleted so far, and their memory is kept until the case ends.
+//   (src/CAN/CommandProcessor.cpp -> Move::OnEndstopOrZProbeStatesChanged), but only while a segment that checks endstops
+//   executes (upstream 190e3f174).
+// So a probe may stay in the list after its deletion, as long as no reader walks the list before the next move that checks
+// endstops has rebuilt it: M558 with P and M502 lock movement and wait for standstill before they delete probes. The test plays
+// these readers while a probe is deleted (in its destructor, before and after its memory is freed) and at the next remote input
+// change. It never calls a deleted object itself: the reader first compares each list entry with the probes deleted so far, and
+// their memory is kept until the case ends.
 
 #include <algorithm>
 #include <cinttypes>
@@ -367,17 +368,27 @@ static std::vector<void *> freed;											// the deleted probes, whose memory 
 static const void *beingDeleted = nullptr;									// the probe whose destructor is running
 static const char *_ecv_array deletionReader = "";							// who can walk the list while a probe is deleted
 static unsigned int zProbeStops = 0;										// how often the reader stopped all motion for a Z probe
+static bool checkingSegmentExecutes = false;								// a segment that checks endstops is executing
 
 static bool IsDeleted(const void *p) noexcept
 {
 	return p == beingDeleted || std::find(freed.begin(), freed.end(), p) != freed.end();
 }
 
+static const char *_ecv_array const CanReceiver = "the CAN receiver task (remote input change)";
+static const char *_ecv_array const StepIsr = "the step ISR";
+
 // One call of Move::CheckEndstops (src/Movement/Move.cpp), from the step ISR or from the CAN receiver task: it calls
 // EndstopsManager::CheckEndstops until that returns no action or stopAll. Before that the list is walked here and each entry
-// compared with the deleted probes, so that the test never calls a deleted object.
+// compared with the deleted probes, so that the test never calls a deleted object. The CAN receiver task calls it only while a
+// segment that checks endstops executes (Move::OnEndstopOrZProbeStatesChanged), the step ISR only during such a segment anyway.
 static void ReaderRuns(const char *_ecv_array who, const char *_ecv_array moment) noexcept
 {
+	if (who == CanReceiver && !checkingSegmentExecutes)
+	{
+		return;
+	}
+
 	for (const EndstopOrZProbe *e = emgr->activeEndstops; e != nullptr; e = e->GetNext())
 	{
 		if (IsDeleted(e))
@@ -416,9 +427,6 @@ void ZProbe::operator delete(void *p) noexcept
 	ReaderRuns(deletionReader, "after the probe's memory has been freed");
 }
 
-static const char *_ecv_array const CanReceiver = "the CAN receiver task (remote input change)";
-static const char *_ecv_array const StepIsr = "the step ISR";
-
 // The steps of a probing move that touch the active list: EnableZProbe before the move (GCodes4.cpp, e.g. state gridProbing3 of
 // G30), then the step ISR checks the endstops while the move executes. Without a trigger the move ends at its end point, and
 // WaitForEndstopOrProbingMoveToFinish (GCodes4.cpp) and the states after it leave the list alone, so the probe stays in it.
@@ -428,7 +436,10 @@ static void ProbingMoveWithoutTrigger(size_t probeNumber, bool probingAway) noex
 	{
 		failures.push_back("EnableZProbe failed");
 	}
+	checkingSegmentExecutes = true;
 	ReaderRuns(StepIsr, "during the probing move");
+	ReaderRuns(CanReceiver, "during the probing move");
+	checkingSegmentExecutes = false;
 }
 
 static unsigned int passed = 0, failed = 0;
@@ -440,6 +451,7 @@ template<class F> static void Case(const char *_ecv_array name, F body) noexcept
 	reprap.gcodes = GCodes();
 	failures.clear();
 	zProbeStops = 0;
+	checkingSegmentExecutes = false;
 	deletionReader = CanReceiver;
 
 	std::string why = body(em);
@@ -501,9 +513,14 @@ int main()
 			GCodeBuffer gb("M558 K0 P8 C\"io3.in\" H5 F120 T6000");
 			const GCodeResult rslt = em.HandleM558(gb, reply);
 			ReaderRuns(CanReceiver, "at the next remote input change after M558");
+			const bool haveNewProbe = em.zProbes[0] != nullptr && !IsDeleted(em.zProbes[0]);
+			if (haveNewProbe)
+			{
+				ProbingMoveWithoutTrigger(0, false);									// the next G30 rebuilds the list before the readers walk it
+			}
 			return Join({ Check(rslt == GCodeResult::ok, "M558 did not succeed"),
 						  Check(IsDeleted(old), "the old probe was not deleted"),
-						  Check(em.zProbes[0] != nullptr && !IsDeleted(em.zProbes[0]), "there is no new probe") });
+						  Check(haveNewProbe, "there is no new probe") });
 		});
 
 	Case("M558 replaces the probe by one on an expansion board after a G38.4 that never lost contact, and no remote input change reaches the old probe",
@@ -538,6 +555,7 @@ int main()
 			deletionReader = StepIsr;
 			ZProbe *const old = em.zProbes[0] = new LocalZProbe(0);
 			if (!em.EnableZProbe(0)) { return std::string("EnableZProbe failed"); }
+			checkingSegmentExecutes = true;
 			ReaderRuns(StepIsr, "during the probing move");
 			reprap.gcodes.atStandstill = false;										// the G30 holds the movement lock until it has finished
 			GCodeBuffer gb("M558 K0 P8 C\"io3.in\"");
@@ -549,6 +567,7 @@ int main()
 			}
 			ReaderRuns(StepIsr, "when the probe triggers after M558");
 			const unsigned int stopsWhenTriggered = zProbeStops;
+			checkingSegmentExecutes = false;
 			reprap.gcodes.atStandstill = true;										// the G30 has finished
 			deletionReader = CanReceiver;
 			const GCodeResult after = em.HandleM558(gb, reply);
@@ -564,6 +583,7 @@ int main()
 			deletionReader = StepIsr;
 			ZProbe *const zp = em.zProbes[0] = new LocalZProbe(0);
 			if (!em.EnableZProbe(0)) { return std::string("EnableZProbe failed"); }
+			checkingSegmentExecutes = true;
 			reprap.gcodes.atStandstill = false;										// a probing move executes
 			GCodeBuffer gb("M558 K0 H5 F120");
 			const GCodeResult rslt = em.HandleM558(gb, reply);
@@ -581,9 +601,11 @@ int main()
 			ZProbe *const zp = em.zProbes[0];
 			if (rslt != GCodeResult::ok || zp == nullptr) { return std::string("M558 did not succeed"); }
 			if (!em.EnableZProbe(0)) { return std::string("EnableZProbe failed"); }
+			checkingSegmentExecutes = true;
 			ReaderRuns(StepIsr, "during the probing move");
 			zp->triggered = true;
 			ReaderRuns(StepIsr, "when the probe triggers");
+			checkingSegmentExecutes = false;
 			return Join({ Check(zProbeStops == 1, "the probe did not stop the probing move"),
 						  Check(em.activeEndstops == nullptr, "the triggered probe is still in the active list") });
 		});

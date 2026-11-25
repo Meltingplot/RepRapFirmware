@@ -763,7 +763,6 @@ GCodeResult EndstopsManager::HandleM558(GCodeBuffer& gb, const StringRef &reply)
 			return GCodeResult::error;
 		}
 
-		activeEndstops = nullptr;				// we are about to remove the probe, so make sure it is not in the active list
 		DeleteObject(zProbes[probeNumber]);		// delete the old probe first, the new one might use the same ports
 
 		ZProbe *_ecv_from newProbe;
