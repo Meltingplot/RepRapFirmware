@@ -21,11 +21,16 @@ gen/SetKinematics.inc: $(SRC)/Movement/Move.cpp extract-setkinematics.awk
 	@mkdir -p gen
 	awk -v f="$(abspath $<)" -f extract-setkinematics.awk $< > $@.tmp && mv $@.tmp $@
 
-build/kinematics-test: kinematics_test.cpp gen/SetKinematics.inc Makefile
+# SetKinematics replaces the kinematics with ReplaceObject (src/RepRapFirmware.h)
+gen/ReplaceObject.inc: $(SRC)/RepRapFirmware.h ../endstops-test/extract-functions.awk
+	@mkdir -p gen
+	awk -v f="$(abspath $<)" -v cls="" -v names="ReplaceObject" -f ../endstops-test/extract-functions.awk $< > $@.tmp && mv $@.tmp $@
+
+build/kinematics-test: kinematics_test.cpp gen/SetKinematics.inc gen/ReplaceObject.inc Makefile
 	@mkdir -p build
 	$(CXX) $(BASEFLAGS) $(CXXFLAGS) -Igen kinematics_test.cpp -o $@
 
-build/asan-kinematics-test: kinematics_test.cpp gen/SetKinematics.inc Makefile
+build/asan-kinematics-test: kinematics_test.cpp gen/SetKinematics.inc gen/ReplaceObject.inc Makefile
 	@mkdir -p build
 	$(CXX) $(BASEFLAGS) $(CXXFLAGS) $(ASANFLAGS) -Igen kinematics_test.cpp -o $@
 

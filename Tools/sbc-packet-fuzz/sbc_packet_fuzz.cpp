@@ -216,7 +216,7 @@ public:
 
 // GCodes/GCodeBuffer/GCodeBuffer.h: the members that the extracted text uses. The epoch members do what the real ones do, the others
 // return the state from byte 1 of the input. PutBinary copies the code as BinaryParser::Put does (the Tools/binary-code-fuzz target
-// fuzzes the parser itself)
+// fuzzes the parser itself). A GB without gbNoBuffer has its buffer from the start; the stand-in allocates it at its first code
 class GCodeBuffer
 {
 public:
@@ -239,11 +239,12 @@ public:
 	void ResolveMacroRequest(bool, bool) noexcept { }
 	void MacroRequestSent() noexcept { }
 	bool IsMacroStartedByCode() const noexcept { return (gbFlags & gbMacroStartedByCode) != 0; }
-	void MarkCodeReplySurplus() noexcept { }
+	void MarkReplyVoid() noexcept { }
 	bool IsRecordPending() const noexcept { return (gbFlags & gbRecordPending) != 0; }
 	void SetAbortRecorded(bool) noexcept { }
 	void SetConnectionEndRecorded() noexcept { }
-	void SetMacroErrorRecorded(bool) noexcept { }
+	void SetFailedMacroPending(bool) noexcept { }
+	bool IsFailedMacroPending() const noexcept { return false; }
 	void SetFileFinished() noexcept { }
 	void SetPrintFinished() noexcept { }
 	bool IsExecutingOnSbc() const noexcept { return (gbFlags & gbExecutingOnSbc) != 0; }
@@ -258,10 +259,10 @@ public:
 	bool IsMessagePromptPending() const noexcept { return false; }
 	GCodeMachineState& LatestMachineState() noexcept { return machineState; }
 	bool HasBuffer() const noexcept { return (gbFlags & gbNoBuffer) == 0 || buffer != nullptr; }
-	void PrimeBinaryBuffer() noexcept { if (buffer == nullptr) { buffer = new uint32_t[MaxGCodeBinaryLength / sizeof(uint32_t)]; } }
+	void AllocateBinaryBuffer() noexcept { if (buffer == nullptr) { buffer = new uint32_t[MaxGCodeBinaryLength / sizeof(uint32_t)]; } }
 	void PutBinary(const uint32_t *data, size_t len, uint8_t) noexcept
 	{
-		PrimeBinaryBuffer();
+		AllocateBinaryBuffer();
 		if (len * sizeof(uint32_t) <= MaxGCodeBinaryLength)		// BinaryParser::Put
 		{
 			memcpyu32(buffer, data, len);
@@ -421,6 +422,7 @@ private:
 // SbcInterface: the members that the extracted text uses, as src/SBC/SbcInterface.h declares them
 
 constexpr uint32_t SbcYieldTimeout = 10;			// SbcInterface.cpp
+#include "SbcConstants.inc"						// MinimumBuffersForSbcJson, MaxSbcAnswerDataLength and ValueTooLongForSbc of SbcInterface.cpp
 
 static void StopUsbTask() noexcept { }
 
@@ -431,6 +433,7 @@ public:
 	void ProcessPackets() noexcept;									// the packet loop of ExchangeData
 	bool FillBuffer(GCodeBuffer &gb) noexcept;
 	bool IsDroppedByEpoch(GCodeBuffer& gb, const PacketHeader& packet) noexcept;
+	bool MakeJsonAnswer(OutputBuffer *_ecv_null &json, const ExpressionValue& val, size_t otherDataLength) THROWS(GCodeException);
 	void RecordChannelAbort(GCodeBuffer& gb, bool connectionLost) noexcept;
 	void InvalidateBufferedCodes(GCodeChannel channel) noexcept;
 	void EndConnection(bool waitForMainTask) noexcept;

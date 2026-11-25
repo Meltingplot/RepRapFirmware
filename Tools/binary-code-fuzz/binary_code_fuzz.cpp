@@ -70,7 +70,7 @@ extern "C" void debugPrintf(const char *fmt, ...) noexcept
 	abort();
 }
 
-// Every permanent allocation is a heap block of its own. The code buffer of the G-code buffer (BinaryParser::AllocateBuffer) and the
+// Every permanent allocation is a heap block of its own. The code buffer of the G-code buffer (GCodeBuffer::AllocateBinaryBuffer) and the
 // index and storage blocks of the string heap (Heap.cpp) come from here
 void *Tasks::AllocPermanent(size_t sz, std::align_val_t align) noexcept
 {
@@ -294,7 +294,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 	{
 		gb = new GCodeBuffer(GCodeChannel::SBC);
 		gb->binaryParser.Init();
-		gb->binaryParser.AllocateBuffer();			// as GCodeBuffer::PrimeBinaryBuffer does before the first code, so that every input is filled
+		gb->AllocateBinaryBuffer();					// as SbcInterface::FillBuffer does before the first code, so that every input is filled
 	}
 
 	// What earlier codes left in the buffer, then the code as GCodeBuffer::PutBinary puts it (FillBuffer passes the words of the code)
@@ -539,7 +539,7 @@ static int RunAddressChecks() noexcept
 
 	gb = new GCodeBuffer(GCodeChannel::SBC);
 	gb->binaryParser.Init();
-	gb->binaryParser.AllocateBuffer();
+	gb->AllocateBinaryBuffer();
 	unsigned int failed = 0;
 	for (const Case& c : cases)
 	{

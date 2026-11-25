@@ -10,8 +10,8 @@
 // The test plays TaskCriticalSectionLocker (RRFLibraries RTOSIface.h) with a counter, Task<> with a stand-in whose Create records the
 // call, and ::operator new and delete with the host heap. No allocation or free of the task may happen with the scheduler suspended.
 // It also checks what M951 does: H creates the task once, a second M951 does not create another, without a sensor no task is created,
-// M951 without parameters reports the settings, and if another task creates the task while this one allocates its own (played inside
-// operator new, only while the scheduler is running), only one task is created and the other allocation is freed.
+// and M951 without parameters reports the settings. M951 runs only in the main task, so no other task can create the task while this
+// one allocates its own.
 
 #include <cmath>
 #include <cstdarg>
@@ -38,7 +38,6 @@ static unsigned int suspended = 0;							// uxSchedulerSuspended
 static bool checking = false;									// true while a case runs Configure
 static std::vector<std::string> failures;
 static unsigned int taskAllocations = 0, taskFrees = 0, creates = 0;
-static void (*duringAllocation)() = nullptr;					// another task that runs while Configure allocates, if it can
 
 // As TaskCriticalSectionLocker in RRFLibraries src/RTOSIface/RTOSIface.h: vTaskSuspendAll in the constructor, xTaskResumeAll in
 // the destructor
@@ -176,14 +175,7 @@ void *operator new(size_t sz)
 		}
 		++taskAllocations;
 	}
-	void *const p = malloc(sz);
-	if (isTask && duringAllocation != nullptr && suspended == 0)		// another task can run only while the scheduler is running
-	{
-		void (*const other)() = duringAllocation;
-		duringAllocation = nullptr;
-		other();
-	}
-	return p;
+	return malloc(sz);
 }
 
 void operator delete(void *p) noexcept
@@ -204,18 +196,15 @@ void operator delete(void *p, size_t sz) noexcept
 	free(p);
 }
 
-static HeightController *controller = nullptr;
 static unsigned int passed = 0, failed = 0;
 
 // Run M951 with each of 'commands' on a new HeightController and check the number of tasks created, allocated and freed
-static void Case(const char *name, std::vector<const char *> commands, void (*other)(), unsigned int expectedCreates,
-					unsigned int expectedAllocations, unsigned int expectedFrees, const char *expectedReply) noexcept
+static void Case(const char *name, std::vector<const char *> commands, unsigned int expectedCreates, unsigned int expectedAllocations,
+					unsigned int expectedFrees, const char *expectedReply) noexcept
 {
 	HeightController hc;
-	controller = &hc;
 	failures.clear();
 	taskAllocations = taskFrees = creates = 0;
-	duringAllocation = other;
 	StringRef reply;
 	checking = true;
 	for (const char *cmd : commands)
@@ -258,27 +247,16 @@ static void Case(const char *name, std::vector<const char *> commands, void (*ot
 		printf("FAIL %s: %s\n", name, why.c_str());
 	}
 	delete hc.heightControllerTask;
-	controller = nullptr;
-}
-
-// A higher priority task that runs M951 H1 while Configure in the main task allocates its task
-static void OtherTaskConfigures() noexcept
-{
-	GCodeBuffer gb("H1");
-	StringRef reply;
-	(void)controller->Configure(gb, reply);
 }
 
 int main()
 {
-	Case("M951 H1 allocates the task with the scheduler running and creates it", { "H1" }, nullptr, 1, 1, 0, nullptr);
-	Case("a second M951 does not create another task", { "H1", "H1 P2" }, nullptr, 1, 1, 0, nullptr);
-	Case("M951 P2 without a sensor creates no task", { "P2" }, nullptr, 0, 0, 0, nullptr);
-	Case("M951 without parameters and without a sensor reports that", { "" }, nullptr, 0, 0, 0, "Height controller is not configured");
-	Case("M951 without parameters reports the settings", { "H2 F10 Z1:4", "" }, nullptr, 1, 1, 0,
+	Case("M951 H1 allocates the task with the scheduler running and creates it", { "H1" }, 1, 1, 0, nullptr);
+	Case("a second M951 does not create another task", { "H1", "H1 P2" }, 1, 1, 0, nullptr);
+	Case("M951 P2 without a sensor creates no task", { "P2" }, 0, 0, 0, nullptr);
+	Case("M951 without parameters and without a sensor reports that", { "" }, 0, 0, 0, "Height controller is not configured");
+	Case("M951 without parameters reports the settings", { "H2 F10 Z1:4", "" }, 1, 1, 0,
 			"Height controller uses sensor 2, frequency 10.0, P1.0 I0.0 D0.0, Z1.0 to 4.0");
-	Case("if another task creates the task meanwhile, the second allocation is freed with the scheduler running", { "H1" },
-			OtherTaskConfigures, 1, 2, 1, nullptr);
 	printf("%u passed, %u failed\n", passed, failed);
 	return (failed == 0) ? 0 : 1;
 }

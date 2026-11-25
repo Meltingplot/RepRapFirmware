@@ -25,7 +25,7 @@ Real text, copied out at build time with `../sbc-packet-fuzz/extract.awk`: `GCod
 
 Played (`shim/`, `binary_code_fuzz.cpp`):
 - `GCodeBuffer`: the members that `BinaryParser` uses, with the names of the real class. The code buffer is allocated once with
-  `BinaryParser::AllocateBuffer` (384 bytes, `MaxGCodeBinaryLength`) and filled with byte 3 of the input before each code, as the rest of
+  `GCodeBuffer::AllocateBinaryBuffer` (384 bytes, `MaxGCodeBinaryLength`) and filled with byte 3 of the input before each code, as the rest of
   earlier codes; `Tasks::AllocPermanent` gives every allocation a heap block of its own, so that ASan sees a read beyond the 384 bytes
 - `ExpressionParser`: it reads the first character of the expression the way the real parser does (`CurrentCharacter`,
   `ExpressionParser.cpp:2608`, returns `*currentp` only while `currentp < endp`) and returns a value chosen by it, see

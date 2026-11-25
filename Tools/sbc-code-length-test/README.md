@@ -11,14 +11,15 @@ mode:
 ## What is tested and why
 
 A G-code buffer allocates its buffer once, when it gets its first code: `StringParser::Put` for a text code, `BinaryParser::Put` for a
-binary code. In SBC mode one channel can get both:
+binary code (now `GCodeBuffer::AllocateBinaryBuffer`, before the first binary code). In SBC mode one channel can get both:
 - USB, Aux and the codes that RRF puts itself, for example a trigger action, are text.
 - The macros that DSF runs on the same channel are binary.
 
 So `StringParser::Put` allocates `MaxGCodeBinaryLength` bytes in SBC mode, "because binary codes have slightly more overhead". But
 both parsers take their limit from the same `GCodeBuffer::bufferLength`:
 - `StringParser::Put` records 256 for its 384 bytes, so a binary code of 257 to 384 bytes on that channel is refused as too long.
-- `BinaryParser::Put` records 384, so a text line on a channel whose first code was binary may have up to 383 characters.
+- `BinaryParser::Put` recorded 384, so a text line on a channel whose first code was binary may have up to 383 characters. The binary
+  buffer is now allocated by `GCodeBuffer::AllocateBinaryBuffer`, which `SbcInterface::FillBuffer` calls before the first binary code.
 
 The test puts codes in both orders, in SBC mode and in standalone mode. It checks:
 - that a text line of 255 characters is stored and one of 256 characters is refused;
@@ -31,7 +32,9 @@ The test puts codes in both orders, in SBC mode and in standalone mode. It check
 It compiles the real text, which the Makefile extracts at build time with `../macro-error-test/extract.awk`, with `#line` directives
 that point at the real lines (the build fails if one is missing):
 - `src/GCodes/GCodeBuffer/StringParser.cpp`: `Put(char)`, `AddToChecksum` and `StoreAndAddToChecksum`.
-- `src/GCodes/GCodeBuffer/BinaryParser.cpp`: `AllocateBuffer`, `Put` and `ParametersFit`.
+- `src/GCodes/GCodeBuffer/BinaryParser.cpp`: `Put` and `ParametersFit`.
+- `src/GCodes/GCodeBuffer/GCodeBuffer.cpp`: `AllocateBinaryBuffer`, which the test calls before the first binary code as
+  `SbcInterface::FillBuffer` does.
 - `src/Config/Configuration.h` and `src/SBC/SbcMessageFormats.h`: `MaxGCodeStringLength` and `MaxGCodeBinaryLength`.
 
 `sbc_code_length_test.cpp` gives them minimal `GCodeBuffer`, `StringParser`, `BinaryParser`, `RepRap` and `Tasks::AllocPermanent`

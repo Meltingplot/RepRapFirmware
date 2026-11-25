@@ -33,8 +33,10 @@ evaluation.
 The Makefile copies the real text out of the sources at build time (`extract.awk`, with `#line` directives so that messages point at
 the real lines):
 - from RRFLibraries `src/RTOSIface/RTOSIface.h` and `RTOSIface.cpp`: `ReadWriteLock` with `LockForReading`, `ReleaseReader`,
-  `LockForWriting`, `ReleaseWriter` and its `LockRecord`, and `ReadLocker`, `WriteLocker` and `WriteLockedPointer`;
-- `Move::SetKinematics` (`src/Movement/Move.cpp`) and `Tool::DeleteTool` (`src/Tools/Tool.cpp`), the deleting commands;
+  `LockForWriting`, `ReleaseWriter` and its `LockRecord` with `NewLockRecord`, and `ReadLocker`, `WriteLocker` and
+  `WriteLockedPointer`;
+- `Move::SetKinematics` (`src/Movement/Move.cpp`) with `ReplaceObject` (`src/RepRapFirmware.h`) and `Tool::DeleteTool`
+  (`src/Tools/Tool.cpp`), the deleting commands;
 - the `EvaluateExpression` and `SetVariable` cases of `SbcInterface::ExchangeData` with `SbcInterface::MakeJsonAnswer`, which
   writes their JSON answer, and `FileInfoParser::ProcessCustomInfo`, the readers.
 

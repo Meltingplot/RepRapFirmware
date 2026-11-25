@@ -39,15 +39,22 @@ LIBSOURCES := $(RRFLIBS)/src/General/StringRef.cpp $(RRFLIBS)/src/General/SafeVs
 DTFLAGS := -DSRC_SBC_SBCINTERFACE_H_
 HEADERS := $(wildcard shim/*.h shim/*/*.h shim/*/*/*.h) $(SRC)/SBC/DataTransfer.h $(SRC)/SBC/SbcMessageFormats.h fuzz_driver.inc Makefile
 
-SBC_FUNCTIONS := SbcInterface::IsDroppedByEpoch SbcInterface::RecordChannelAbort SbcInterface::InvalidateBufferedCodes SbcInterface::FillBuffer
+SBC_FUNCTIONS := SbcInterface::IsDroppedByEpoch SbcInterface::RecordChannelAbort SbcInterface::InvalidateBufferedCodes SbcInterface::FillBuffer \
+	SbcInterface::MakeJsonAnswer
 OUTPUT_FUNCTIONS := OutputBuffer::Length OutputBuffer::Clear line:size_t~OutputBuffer::copy(const~char~*_ecv_array~src,~size_t~len) \
 	line:size_t~OutputBuffer::cat(const~char~*_ecv_array~src,~size_t~len)
-GEN := gen/SbcPacketLoop.inc gen/SbcFunctions.inc gen/OutputBuffer.inc
+GEN := gen/SbcConstants.inc gen/SbcPacketLoop.inc gen/SbcFunctions.inc gen/OutputBuffer.inc
 
 .PHONY: all asan libfuzzer check findings coverage clean
 all: build/sbc-packet-fuzz build/asan-sbc-packet-fuzz
 asan: build/asan-sbc-packet-fuzz
 libfuzzer: build/libfuzzer-sbc-packet-fuzz
+
+# The constants of SbcInterface.cpp for the JSON answers. Fails unless all four lines are found
+gen/SbcConstants.inc: $(SRC)/SBC/SbcInterface.cpp Makefile
+	@mkdir -p gen
+	grep -E '^(constexpr size_t MinimumBuffersForSbcJson|static_assert\(MinimumBuffersForSbcJson|constexpr size_t MaxSbcAnswerDataLength|constexpr const char \*_ecv_array ValueTooLongForSbc) ' $< | tr -d '\r' > $@.tmp
+	test "$$(wc -l < $@.tmp)" -eq 4 && mv $@.tmp $@
 
 gen/SbcPacketLoop.inc: $(SRC)/SBC/SbcInterface.cpp extract.awk Makefile
 	@mkdir -p gen

@@ -21,6 +21,7 @@ public:
 	size_t cat(const char *_ecv_array src, size_t len) noexcept { text.catn(src, len); return len; }
 	size_t cat(StringRef &str) noexcept { text.cat(str.c_str()); return str.strlen(); }
 	size_t EncodeChar(char c) noexcept { text.cat(c); return 1; }
+	bool HadOverflow() const noexcept { return false; }			// the stand-in never runs out of buffers
 private:
 	String<StringLength256> text;
 };

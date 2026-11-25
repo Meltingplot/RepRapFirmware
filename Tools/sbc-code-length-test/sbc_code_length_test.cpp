@@ -1,6 +1,7 @@
 // Host test of the code length limits of a G-code buffer in SBC mode, compiled from the real text of StringParser::Put,
 // StringParser::AddToChecksum and StringParser::StoreAndAddToChecksum (src/GCodes/GCodeBuffer/StringParser.cpp), of BinaryParser::Put
-// and BinaryParser::ParametersFit (src/GCodes/GCodeBuffer/BinaryParser.cpp) and of MaxGCodeStringLength (src/Config/Configuration.h) and MaxGCodeBinaryLength
+// and BinaryParser::ParametersFit (src/GCodes/GCodeBuffer/BinaryParser.cpp), of GCodeBuffer::AllocateBinaryBuffer
+// (src/GCodes/GCodeBuffer/GCodeBuffer.cpp) and of MaxGCodeStringLength (src/Config/Configuration.h) and MaxGCodeBinaryLength
 // (src/SBC/SbcMessageFormats.h), which the Makefile extracts.
 //
 // A G-code buffer allocates its buffer once, for its first code. Text codes may hold MaxGCodeStringLength characters including the
@@ -10,7 +11,8 @@
 // MaxGCodeStringLength - 1 characters and a binary code of MaxGCodeBinaryLength bytes.
 //
 // The test plays the G-code buffer, RepRap and Tasks::AllocPermanent with stand-ins, puts text with StringParser::Put character by
-// character and binary codes with BinaryParser::Put, and checks which codes are stored and which are marked as too long
+// character and binary codes with BinaryParser::Put, after GCodeBuffer::AllocateBinaryBuffer if the buffer has none yet, as
+// SbcInterface::FillBuffer does, and checks which codes are stored and which are marked as too long
 // (GCodeBuffer::overflowed, which becomes "GCode command too long" in StringParser::CheckMetaCommand and GCodes::ActOnCode). It also
 // checks that a binary code whose parameters do not fit in it is marked as malformed instead of stored (GCodeBuffer::malformed, which
 // becomes "GCode command malformed" in GCodes::ActOnCode).
@@ -170,6 +172,8 @@ public:
 	bool IsDoingFile() const noexcept { return false; }
 	MachineState& LatestMachineState() noexcept { return machineState; }
 	MachineState& CurrentFileMachineState() noexcept { return machineState; }
+	bool HasBuffer() const noexcept { return buffer != nullptr; }			// as in GCodeBuffer.h
+	void AllocateBinaryBuffer() noexcept;
 
 	char *buffer = nullptr;
 	size_t bufferLength = 0;
@@ -238,7 +242,6 @@ class BinaryParser
 public:
 	explicit BinaryParser(GCodeBuffer& gcodeBuffer) noexcept : gb(gcodeBuffer) { }
 
-	void AllocateBuffer() noexcept;
 	void Put(const uint32_t *data, size_t len) noexcept;
 	bool HasCode() const noexcept { return bufferLength != 0; }
 
@@ -254,6 +257,7 @@ private:
 
 #include "StringParser.inc"
 #include "BinaryParser.inc"
+#include "GCodeBuffer.inc"
 
 // A G-code buffer with both parsers, as GCodeBuffer has them
 struct Channel
@@ -274,6 +278,16 @@ struct Channel
 		return !gb.overflowed && stringParser.StoredLength() == line.size() && strcmp(gb.buffer, line.c_str()) == 0;
 	}
 
+	// As SbcInterface::FillBuffer: allocate the buffer before the first binary code, then put the code
+	void PutAsFillBuffer(const std::vector<uint32_t>& code) noexcept
+	{
+		if (!gb.HasBuffer())
+		{
+			gb.AllocateBinaryBuffer();
+		}
+		binaryParser.Put(code.data(), code.size());
+	}
+
 	// Put a binary code of the given length in bytes. Return true if it was stored
 	bool PutBinary(size_t length) noexcept
 	{
@@ -283,7 +297,7 @@ struct Channel
 		header.letter = 'M';
 		header.majorCode = 98;
 		memcpy(code.data(), &header, sizeof(header));
-		binaryParser.Put(code.data(), code.size());
+		PutAsFillBuffer(code);
 		return !gb.overflowed && !gb.malformed && binaryParser.HasCode() && memcmp(gb.buffer, code.data(), length) == 0;
 	}
 
@@ -307,7 +321,7 @@ struct Channel
 			param.uintValue = value;
 			memcpy(reinterpret_cast<char *>(code.data()) + sizeof(CodeHeader), &param, sizeof(param));
 		}
-		binaryParser.Put(code.data(), code.size());
+		PutAsFillBuffer(code);
 		return !gb.overflowed && !gb.malformed && binaryParser.HasCode() && memcmp(gb.buffer, code.data(), length) == 0;
 	}
 };

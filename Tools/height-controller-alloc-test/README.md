@@ -14,11 +14,11 @@ task.
 `malloc` and this one then work on the heap at once. Up to 3.7-dev de1bfe598, `Configure` allocated the task inside its
 `TaskCriticalSectionLocker`, which suspends the scheduler. M951 runs in the main task.
 
-The test plays the locker with a counter and checks that the task is allocated, and an unused one freed, with the scheduler
-running. It also checks what M951 does: H creates the task once, a second M951 does not create another one, without a sensor no task
-is created, M951 without parameters reports the settings or that the controller is not configured, and if another task creates the
-task while this one allocates its own, only one task is created and the second allocation is freed. The other task is played
-inside `operator new`, and only while the scheduler is running, because only then can the board switch tasks there.
+The test plays the locker with a counter and checks that the task is allocated with the scheduler running. It also checks what
+M951 does: H creates the task once, a second M951 does not create another one, without a sensor no task is created, and M951 without
+parameters reports the settings or that the controller is not configured. M951 is only a G-code handler in the main task
+(`GCodes2.cpp` -> `Move::ConfigureHeightFollowing`), so no other task can create the task while this one allocates its own;
+upstream's version of the fix, which replaced the fork's, does not check for that.
 
 ## Running
 
