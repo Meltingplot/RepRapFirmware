@@ -882,7 +882,7 @@ void ExpressionParser::ParseArray(size_t& length, function_ref<void(ExpressionVa
 			if (CurrentCharacter() != EXPRESSION_LIST_SEPARATOR) break;
 			AdvancePointer();
 			if (SkipWhiteSpace() == '}') break;		// we allow a trailing command in an array
-			if (numElements == length)
+			if (numElements >= length)
 			{
 				ThrowParseException("Array too long");
 			}
@@ -1116,9 +1116,7 @@ void ExpressionParser::EvaluateTake(ExpressionValue& rslt, uint32_t arg, bool ev
 
 	case TypeCode::HeapString:
 		{
-			// Copy from the handle, not from a pointer into the heap, because allocating the result may garbage-collect and so move the string
-			const size_t len = min<size_t>(rslt.shVal.GetLength(), arg);
-			const StringHandle sh(rslt.shVal, 0, len);
+			const StringHandle sh(rslt.shVal, 0, min<size_t>(rslt.shVal.GetLength(), arg));
 			rslt.SetStringHandle(sh);
 		}
 		break;
@@ -1194,7 +1192,6 @@ void ExpressionParser::EvaluateDrop(ExpressionValue& rslt, uint32_t arg, bool ev
 
 	case TypeCode::HeapString:
 		{
-			// Copy from the handle, not from a pointer into the heap, because allocating the result may garbage-collect and so move the string
 			const size_t slen = rslt.shVal.GetLength();
 			const size_t offset = min<size_t>(slen, arg);
 			const StringHandle sh(rslt.shVal, offset, slen - offset);

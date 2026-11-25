@@ -629,11 +629,7 @@ const char *_ecv_array EndstopsManager::TranslateEndStopResult(bool hit, bool at
 void EndstopsManager::SetZProbeDefaults() noexcept
 {
 	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);				// we are about to delete object model objects
-	activeEndstops = nullptr;			// we are about to remove the Z probes, so make sure they are not in the active list
-	if (zProbes[0] != nullptr)
-	{
-		zProbes[0]->SetDefaults();
-	}
+	WriteLocker lock(zProbesLock);
 	for (size_t i = 0; i < MaxZProbes; ++i)
 	{
 		DeleteObject(zProbes[i]);

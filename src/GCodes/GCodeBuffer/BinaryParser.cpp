@@ -28,26 +28,14 @@ void BinaryParser::Init() noexcept
 	seenParameterValue = nullptr;
 }
 
-// Allocate the buffer of the GCodeBuffer if it has none. Callers that put a code with the scheduler suspended must call this before they
-// suspend it (GCodeBuffer::PrimeBinaryBuffer), because AllocPermanent doesn't take the malloc mutex while the scheduler is suspended
-void BinaryParser::AllocateBuffer() noexcept
-{
-	if (gb.buffer == nullptr)
-	{
-		gb.buffer = static_cast<char *>(Tasks::AllocPermanent(MaxGCodeBinaryLength, std::align_val_t(4)));
-		gb.bufferLength = MaxGCodeBinaryLength;
-	}
-}
-
 // Add an entire binary G-Code, overwriting any existing content
 // CAUTION! This may be called with the task scheduler suspended, so don't do anything that might block or take more than a few microseconds to execute
 void BinaryParser::Put(const uint32_t *data, size_t len) noexcept
 {
-	// Buffer allocation happens dynamically when the GB is used for the first time.
+	// Buffer allocation happens dynamically when the GB is used for the first time, see SbcInterface::FillBuffer.
 	// Hence, in theory, it is possible for different GBs to have different buffer sizes
 	if (header == nullptr)
 	{
-		AllocateBuffer();
 		header = reinterpret_cast<CodeHeader *>(gb.buffer);
 	}
 

@@ -613,6 +613,15 @@ bool GCodes::SpinGCodeBuffer(GCodeBuffer& gb) noexcept
 	bool result;
 
 	MutexLocker gbLock(gb.mutex);
+#if HAS_SBC_INTERFACE
+	if (gb.IsFailedMacroPending())
+	{
+		gb.CurrentFileMachineState().CloseFile();
+		gb.PopState(false);
+		gb.Init();
+		gb.SetFailedMacroPending(false);
+	}
+#endif
 	if (gb.GetState() == GCodeState::normal)
 	{
 		if (gb.LatestMachineState().messageAcknowledged)
@@ -3744,7 +3753,7 @@ bool GCodes::DoFileMacro(GCodeBuffer& gb, const char *_ecv_array fileName, bool 
 			if (reportMissing)
 			{
 				const bool isCodeReply = gb.LatestMachineState().lastCodeFromSbc && codeRunning != SystemHelperMacroCode;
-				if (!isCodeReply || !gb.IsCodeReplySurplus())		// a part of the reply of a code that the SBC has dropped is surplus
+				if (!isCodeReply || !gb.IsReplyVoid())				// a part of the reply of a code that the SBC has dropped is void
 				{
 					platform.MessageF((isCodeReply) ? (MessageType)(gb.GetResponseMessageType() | WarningMessageFlag | PushFlag) : WarningMessage,
 										"Macro file %s not found\n", fileName);
@@ -4492,12 +4501,11 @@ void GCodes::HandleReplyPreserveResult(GCodeBuffer& gb, GCodeResult rslt, const 
 	{
 		const bool isPushMessage = rslt == GCodeResult::notFinished || gb.HasJustStartedMacro() ||
 									(gb.LatestMachineState().waitingForAcknowledgement && gb.IsMessagePromptPending());
-		if (gb.IsCodeReplySurplus())
+		if (gb.IsReplyVoid())
 		{
-			// The SBC has dropped this code when it invalidated the channel, so this reply is surplus. Otherwise it would complete the next code
 			if (!isPushMessage)
 			{
-				gb.SetCodeReplySurplus(false);		// this was the final reply
+				gb.SetReplyVoid(false);			// this was the final reply; a push message, including that of a macro just started, does not end the code
 			}
 			return;
 		}
@@ -4626,16 +4634,14 @@ void GCodes::HandleReply(GCodeBuffer& gb, OutputBuffer *_ecv_null reply) noexcep
 	// Deal with replies to the SBC
 	if (gb.LatestMachineState().lastCodeFromSbc)
 	{
-		if (gb.IsCodeReplySurplus())
+		if (gb.IsReplyVoid())
 		{
-			// The SBC has dropped this code when it invalidated the channel, so this final reply is surplus
-			gb.SetCodeReplySurplus(false);
+			gb.SetReplyVoid(false);
 			OutputBuffer::ReleaseAll(reply);
+			return;
 		}
-		else
-		{
-			platform.Message(gb.GetResponseMessageType(), reply);
-		}
+
+		platform.Message(gb.GetResponseMessageType(), reply);
 		return;
 	}
 #endif

@@ -67,8 +67,6 @@ public:
 	bool Put(char c) noexcept SPEED_CRITICAL;										// Add a character to the end
 #if HAS_SBC_INTERFACE
 	void PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noexcept;		// Add an entire binary G-Code of the given channel epoch to the latest level, overwriting any existing content
-	bool HasBuffer() const noexcept { return buffer != nullptr; }					// Return true if the buffer for the code has been allocated
-	void PrimeBinaryBuffer() noexcept { binaryParser.AllocateBuffer(); }			// Make sure the buffer exists so that the next PutBinary cannot reach the memory allocator. Don't call this with the scheduler suspended
 #endif
 	void PutAndDecode(const char *_ecv_array data, size_t len) noexcept;			// Add an entire G-Code, overwriting any existing content
 	void PutAndDecode(const char *_ecv_array str) noexcept;							// Add a null-terminated string, overwriting any existing content
@@ -248,11 +246,14 @@ public:
 
 	bool IsInvalidated() const noexcept { return invalidated; }				// Indicates if the channel is invalidated
 	void Invalidate(bool i = true) noexcept { invalidated = i; }			// Invalidate this channel (or not)
+	bool IsFailedMacroPending() const noexcept { return failedMacroPending; }	// Does the main task have to pop a macro that failed on the SBC?
+	void SetFailedMacroPending(bool p) noexcept { failedMacroPending = p; }	// Request or clear that pop
+	bool IsReplyVoid() const noexcept { return replyVoid; }					// Has the SBC dropped the code that is still being executed?
+	void SetReplyVoid(bool v) noexcept { replyVoid = v; }					// Set whether the reply to the current code must be discarded
+	void MarkReplyVoid() noexcept;											// Called when the SBC has dropped the code being executed, sets replyVoid if its replies go out without a channel epoch
 	bool IsAbortRecorded() const noexcept { return abortRecorded; }			// Has the SBC task recorded an abort of this channel that the main task has yet to apply?
 	void SetAbortRecorded(bool r) noexcept { abortRecorded = r; }			// Called when an abort of this channel has been recorded (or applied)
-	bool IsMacroErrorRecorded() const noexcept { return macroErrorRecorded; }	// Has the SBC task recorded a failed macro of this channel that the main task has yet to pop?
-	void SetMacroErrorRecorded(bool r) noexcept { macroErrorRecorded = r; }	// Called when a failed macro of this channel has been recorded (or popped)
-	bool IsRecordPending() const noexcept { return abortRecorded || macroErrorRecorded; }	// Must the SBC task keep off this GB until the main task has applied a record?
+	bool IsRecordPending() const noexcept { return abortRecorded || failedMacroPending; }	// Must the SBC task keep off this GB until the main task has applied an abort or popped a failed macro?
 
 	// Channel epoch, see SbcMessageFormats.h. Only the SBC task changes the epoch of the channel and the abort gate
 	bool IsChannelEpochKnown() const noexcept { return channelEpochKnown; }	// Is the epoch of this channel known in this connection?
@@ -269,15 +270,13 @@ public:
 	bool IsCodeOfEndedConnection() const noexcept;							// Does the code being executed belong to an SBC connection that has ended?
 	bool IsMacroRequestOfCode() const noexcept;								// Is the pending macro request sent as one of the code being executed?
 
-	bool IsCodeReplySurplus() const noexcept { return codeReplySurplus; }	// Has the SBC dropped the code being executed, so that its replies are surplus?
-	void SetCodeReplySurplus(bool s) noexcept { codeReplySurplus = s; }		// Called when the SBC has dropped the code being executed (or when it has finished)
-	void MarkCodeReplySurplus() noexcept;									// Called when the SBC has dropped the code being executed
-
 	bool IsSendRequested() const noexcept { return sendToSbc; }				// Is this code supposed to be sent to the SBC
 	void SendToSbc() noexcept { sendToSbc = true; }							// Send this code to the attached SBC
 	bool CallsFileFunction() const noexcept;								// Is the current command text that calls fileexists() or fileread()?
 	void SentToSbc() noexcept;												// Code has been sent to the SBC, wait for it to finish
 	bool IsExecutingOnSbc() const noexcept { return bufferState == GCodeBufferState::executingOnSbc; }
+	bool HasBuffer() const noexcept { return buffer != nullptr; }			// Has the code buffer been allocated?
+	void AllocateBinaryBuffer() noexcept;									// Allocate the code buffer for binary codes
 #endif
 
 	GCodeState GetState() const noexcept;
@@ -432,8 +431,6 @@ private:
 	volatile bool isWaitingForMacro;	// Is this GB waiting in DoFileMacro?
 	volatile bool macroFileClosed;		// Last macro file has been closed in RRF, tell the SBC
 	volatile bool abortRecorded;		// The SBC has aborted this channel. Set by the SBC task, taken by the main task before it applies the abort
-	volatile bool macroErrorRecorded;	// DSF could not run the macro on top of the stack, which the GB did not wait for. Set by the SBC task and taken by the main task
-										// before it pops the macro, both with the GB mutex held
 	volatile bool connectionEndRecorded;	// The connection that the codes on the stack belong to has been lost. Set by the SBC task together with abortRecorded,
 										// taken by the main task together with abortRecorded before it applies it to the levels (EndConnectionOfCodes). Until then
 										// their epochs count as invalid and none of their replies is written (IsCodeOfEndedConnection, read by any task)
@@ -441,25 +438,26 @@ private:
 	// Accessed only when the GB mutex is acquired
 	String<MaxFilenameLength> requestedMacroFile;
 	bool isBinaryBuffer;
-	bool codeReplySurplus;			// The SBC has dropped the code being executed. Also set by the SBC task while the main task waits for a macro
 
 	uint8_t
-		macroJustStarted : 1,		// Whether the GB has just started a macro file
 		macroFileError : 1,			// Whether the macro file could be opened or if an error occurred
 		macroFileEmpty : 1;			// Whether the macro file is actually empty
 
 	// Cleared by the SBC task under the GB mutex but set by the main task without it (MessageBoxClosed, AbortFile from other channels),
 	// so each has a byte of its own: a stale read-modify-write of a shared bitfield byte would undo the SBC task's change
+	bool macroJustStarted;			// Whether the GB has just started a macro file
 	bool abortFile;					// Whether to abort the last file on the stack
 	bool abortAllFiles;				// Whether to abort all opened files
 	bool sendToSbc;					// Indicates if the GB string content is supposed to be sent to the SBC
 	bool messagePromptPending;		// Has the SBC been notified about a message waiting for acknowledgement?
 	bool messageAcknowledged;		// Last message has been acknowledged
+	bool failedMacroPending;		// Set by the SBC task, the main task pops the failed macro
+	bool replyVoid;					// The SBC no longer expects a reply to the code being executed
 
 	// Accessed only by the SBC task, except that the main task sets it for a pause and clears it when it applies an abort of the channel
 	bool invalidated;				// Set to true if the GB content is not valid and about to be cleared
 
-	// Written only by the SBC task. The main task reads channelEpochKnown when it applies an abort (MarkCodeReplySurplus)
+	// Written only by the SBC task. The main task reads channelEpochKnown when it applies an abort (MarkReplyVoid)
 	uint8_t
 		channelEpoch : 6,			// Epoch of this channel, valid if channelEpochKnown
 		channelEpochKnown : 1,		// Whether the epoch is known, from the first tagged packet of this channel in this connection

@@ -665,16 +665,6 @@ void DataTransfer::ReadGetObjectModel(size_t packetLength, const StringRef &key,
 	flags.copy(data, min<size_t>(header->flagsLength, dataLength - keyLength));
 }
 
-void DataTransfer::ReadObjectModelKeyChanged(size_t packetLength, const StringRef& key) noexcept
-{
-	// Read header
-	const StringHeader *header = ReadDataHeader<StringHeader>();
-	const size_t dataLength = (packetLength > sizeof(StringHeader)) ? packetLength - sizeof(StringHeader) : 0;
-	const char *data = ReadData(dataLength);
-
-	// Read key, as far as it lies within the packet
-	key.copy(data, min<size_t>(header->length, dataLength));
-}
 
 void DataTransfer::ReadPrintStartedInfo(size_t packetLength, const StringRef& filename, GCodeFileInfo& info) noexcept
 {
@@ -853,6 +843,16 @@ GCodeChannel DataTransfer::ReadSetLastCodeResult(GCodeResult& result) noexcept
 	return GCodeChannel(header->channel);
 }
 
+void DataTransfer::ReadObjectModelKeyChanged(size_t packetLength, const StringRef& key) noexcept
+{
+	// Read header
+	const StringHeader *header = ReadDataHeader<StringHeader>();
+
+	// Read key
+	const size_t keyLength = (packetLength > sizeof(StringHeader)) ? packetLength - sizeof(StringHeader) : 0;
+	key.copy(ReadData(keyLength), min<size_t>(header->length, keyLength));
+}
+
 static inline bool IsExtendedSequenceNumber(uint16_t sequenceNumber) noexcept
 {
 	return (sequenceNumber >> SbcExtendedCounterBits) == SbcExtendedActiveStatus;
@@ -1005,7 +1005,6 @@ bool DataTransfer::CompleteGuardedTransfer() noexcept
 	}
 	return false;
 }
-
 void DataTransfer::ExchangeHeader() noexcept
 {
 	Cache::FlushBeforeDMASend(&txHeader, sizeof(txHeader));
@@ -2267,8 +2266,9 @@ bool DataTransfer::WriteReadFile(FileHandle handle, size_t bufferSize) noexcept
 
 bool DataTransfer::WriteFileData(FileHandle handle, const char *data, size_t& length) noexcept
 {
-	// Check if the headers and at least one byte of data can be written
-	if (!CanWritePacket(sizeof(FileHandleHeader) + 1))
+	// Check if anything can be written
+	size_t freeSpace = FreeTxSpace();
+	if (freeSpace <= sizeof(PacketHeader) + sizeof(FileHandleHeader))
 	{
 		return false;
 	}

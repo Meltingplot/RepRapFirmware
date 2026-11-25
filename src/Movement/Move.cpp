@@ -4127,9 +4127,7 @@ void Move::OnEndstopOrZProbeStatesChanged() noexcept
 	{
 		BasePriorityBooster booster(NvicPriorityStep);		// shut out the step interrupt
 
-		// Only check the endstops while a segment that checks them is executing, as the step ISR and the phase stepping control loop do.
-		// A move that ends without an endstop or Z probe triggering leaves them in the active list, so they may belong to an earlier move.
-		// DMs of drives that have no local drivers are in these lists too, so this covers moves executed entirely by remote drivers.
+		// The active endstop list may be left over from an earlier move, so only check it while a segment that checks endstops is executing
 		MovementFlags flags;
 		flags.Clear();
 		for (const DriveMovement *_ecv_null dm = activeDMs; dm != nullptr; dm = dm->nextDM)

@@ -179,7 +179,7 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 	{
 		ExpansionBoardData& board = boards[src];
 #if SUPPORT_ACCELEROMETERS
-		bool restarted = false;
+		bool boardRestarted = false;
 #endif
 		{
 			WriteLocker lock(boardsLock);
@@ -199,7 +199,7 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 					Event::AddEvent(EventType::expansion_reconnect, 0, src, 0, "");
 				}
 #if SUPPORT_ACCELEROMETERS
-				restarted = true;
+				boardRestarted = true;
 #endif
 			}
 			board.hasVin = board.hasV12 = board.hasMcuTemp = false;
@@ -260,10 +260,9 @@ void ExpansionManager::ProcessAnnouncement(CanMessageBuffer *buf, bool isNewForm
 		}
 
 #if SUPPORT_ACCELEROMETERS
-		if (restarted)
+		if (boardRestarted)
 		{
-			// Not under boardsLock: in SBC mode finishing the file waits for the SBC task, which reads the board data under that lock
-			Accelerometers::RemoteBoardRestarted(src);
+			Accelerometers::RemoteBoardRestarted(src);		// file I/O must not hold boardsLock
 		}
 #endif
 
@@ -349,7 +348,7 @@ void ExpansionManager::ProcessBoardStatusReport(const CanMessageBuffer *buf) noe
 		board.hasInductiveSensor = msg.hasInductiveSensor;
 
 		size_t offset = msg.GetAnalogHandlesOffset();
-		for (unsigned int i = 0; i < msg.numAnalogHandles && offset + sizeof(AnalogHandleDataV1) <= buf->dataLength; i++)
+		for (unsigned int i = 0; i < msg.numAnalogHandles; i++)
 		{
 			AnalogHandleDataV1 data;
 			memcpy(&data, (const uint8_t *_ecv_array)&msg + offset, sizeof(AnalogHandleDataV1));
@@ -423,8 +422,7 @@ void ExpansionManager::ProcessDriveStatusReport(const CanMessageBuffer *buf) noe
 	if (board.HasDrivers())
 	{
 		const CanMessageDriversStatus& msg = buf->msg.driversStatus;
-		const size_t maxDrivers = msg.hasClosedLoopData ? ARRAY_SIZE(msg.closedLoopData) : ARRAY_SIZE(msg.openLoopData);
-		for (size_t driver = 0; driver < min<size_t>(min<size_t>(board.numDrivers, msg.numDriversReported), maxDrivers); driver++)
+		for (size_t driver = 0; driver < min<size_t>(board.numDrivers, msg.numDriversReported); driver++)
 		{
 			DriverData& dd = board.driverData[driver];
 			if (msg.hasClosedLoopData)
