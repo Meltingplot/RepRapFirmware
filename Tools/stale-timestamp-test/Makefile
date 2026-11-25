@@ -1,6 +1,6 @@
 # Host test of the timeout checks that compare a clock reading with a time stamp that another task or an ISR writes: the real text of
 # RemoteHeater::GetTemperature, GetAveragePWM, GetMode, RemoteFan::Check, LocalFan::GetRPM, the remote branches of FilamentMonitor and
-# PulsedFilamentMonitor::Check and IsLocalMotionDetected, extracted at build time. stale_timestamp_test.cpp runs them with a writer that stores a newer stamp right after the clock read.
+# PulsedFilamentMonitor::Check and IsLocalMotionDetected (from the header), extracted at build time. stale_timestamp_test.cpp runs them with a writer that stores a newer stamp right after the clock read.
 # Run with make in WSL (g++ 13).
 #
 #   make              build build/stale-timestamp-test
@@ -16,7 +16,8 @@ ASANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
 EXTRACT = @mkdir -p gen && awk -v f="$(abspath $<)" -v names="$(1)" -f extract.awk $< > $@.tmp && mv $@.tmp $@
 
-GEN := gen/RemoteHeater.inc gen/RemoteFan.inc gen/LocalFan.inc gen/FilamentMonitor.inc gen/PulsedFilamentMonitor.inc
+GEN := gen/RemoteHeater.inc gen/RemoteFan.inc gen/LocalFan.inc gen/FilamentMonitor.inc gen/PulsedFilamentMonitor.inc \
+	gen/PulsedFilamentMonitorH.inc
 
 .PHONY: all asan check clean
 all: build/stale-timestamp-test
@@ -35,7 +36,18 @@ gen/FilamentMonitor.inc: $(RRF)/src/FilamentMonitors/FilamentMonitor.cpp extract
 	$(call EXTRACT,FilamentMonitor::FilamentPresenceKnown FilamentMonitor::IsFilamentPresent FilamentMonitor::IsMotionDetected)
 
 gen/PulsedFilamentMonitor.inc: $(RRF)/src/FilamentMonitors/PulsedFilamentMonitor.cpp extract.awk Makefile
-	$(call EXTRACT,PulsedFilamentMonitor::Interrupt PulsedFilamentMonitor::Check PulsedFilamentMonitor::IsLocalMotionDetected)
+	$(call EXTRACT,PulsedFilamentMonitor::Interrupt PulsedFilamentMonitor::Check)
+
+# IsLocalMotionDetected is defined in the class in PulsedFilamentMonitor.h, on one line or as a block: copy it out as a definition
+# outside the class
+gen/PulsedFilamentMonitorH.inc: $(RRF)/src/FilamentMonitors/PulsedFilamentMonitor.h Makefile
+	@mkdir -p gen
+	awk -v f="$(abspath $<)" '{ sub(/\r$$/, "") } \
+		!p && index($$0, "\tbool IsLocalMotionDetected() const noexcept override") == 1 { \
+			printf "#line %d \"%s\"\n", NR, f; sub(/^\tbool IsLocalMotionDetected\(\) const noexcept override/, "bool PulsedFilamentMonitor::IsLocalMotionDetected() const noexcept"); print; \
+			if ($$0 ~ /}[ \t]*$$/) { found = 1; exit } p = 1; next } \
+		p { print; if ($$0 == "\t}") { found = 1; exit } } \
+		END { if (!found) { print "PulsedFilamentMonitor::IsLocalMotionDetected not found in " f > "/dev/stderr"; exit 1 } }' $< > $@.tmp && mv $@.tmp $@
 
 build/stale-timestamp-test: stale_timestamp_test.cpp $(GEN) Makefile
 	@mkdir -p build

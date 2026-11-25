@@ -114,6 +114,7 @@ public:
 #endif
 	void AbortPrint(GCodeBuffer& gb) noexcept;									// Cancel any print in progress
 	void PauseSequenceAborted(GCodeBuffer& gb) noexcept;						// Settle pauseState to paused if a pause sequence is aborted before it commits
+	void AbortStateMachine(GCodeBuffer& gb) noexcept;							// Clean up state machine side effects before aborting
 	void HandleM114(GCodeBuffer& gb, const StringRef& s) const noexcept;		// Write where we are into a string
 	bool DoingFileMacro() const noexcept;										// Is a macro file being processed by any input channel?
 	bool GetMacroRestarted() const noexcept;									// Return true if the macro being executed by fileGCode was restarted
@@ -234,7 +235,7 @@ public:
 	void UnlockAll(const GCodeBuffer& gb) noexcept;									// Release all locks
 	GCodeBuffer *_ecv_null GetGCodeBuffer(GCodeChannel channel) const noexcept { return gcodeSources[channel.ToBaseType()]; }
 #if HAS_SBC_INTERFACE
-	void ChannelAbortRecorded() noexcept;											// Called by the SBC task when it has recorded a failed macro, the abort of a channel or the end of a connection
+	void ChannelAbortRecorded() noexcept;											// Called by the SBC task when it has recorded the abort of a channel or the end of a connection
 #endif
 
 #if HAS_MASS_STORAGE
@@ -389,7 +390,6 @@ private:
 	void DoStraightManualProbe(GCodeBuffer& gb, const StraightProbeSettings& sps) noexcept;
 
 	void StartPrinting(bool fromStart) noexcept;								// Start printing the file already selected
-	void AbortStateMachine(GCodeBuffer& gb) noexcept;								// Clean up state machine side effects before aborting
 	void StopPrint(GCodeBuffer *_ecv_null gbp, StopPrintReason reason) noexcept;	// Stop the current print
 
 	bool DoFilePrint(GCodeBuffer& gb, const StringRef& reply) noexcept;					// Get G Codes from a file and print them

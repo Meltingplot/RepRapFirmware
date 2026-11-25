@@ -38,8 +38,8 @@ RemoteFan::~RemoteFan() noexcept
 
 bool RemoteFan::Check(bool checkSensors) noexcept
 {
-	const uint32_t lastTimeReceived = whenLastReportReceived;			// capture it before we call millis(), the CanReceiver task may update it
-	if (millis() - lastTimeReceived > FanReportTimeout)
+	const uint32_t wlrr = whenLastReportReceived;			// read this before calling millis() in case the CAN task updates it
+	if (millis() - wlrr > FanReportTimeout)
 	{
 		lastRpm = -1;
 		lastPwm = -1.0;

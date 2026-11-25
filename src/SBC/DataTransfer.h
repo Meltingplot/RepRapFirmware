@@ -63,7 +63,6 @@ public:
 	const char *ReadData(size_t packetLength) noexcept;										// Read the packet data and advance to the next packet (if any)
 	bool ReadBoolean() noexcept;															// Read a boolean value
 	void ReadGetObjectModel(size_t packetLength, const StringRef &key, const StringRef &flags) noexcept;		// Read an object model request
-	void ReadObjectModelKeyChanged(size_t packetLength, const StringRef& key) noexcept;							// Read the key of an object model key that DSF changed
 	void ReadPrintStartedInfo(size_t packetLength, const StringRef& filename, GCodeFileInfo &info) noexcept;	// Read info about the started file print
 	PrintStoppedReason ReadPrintStoppedInfo() noexcept;										// Read info about why the print has been stopped
 	GCodeChannel ReadMacroCompleteInfo(bool &error) noexcept;								// Read info about a completed macro file
@@ -76,6 +75,7 @@ public:
 	int ReadFileData(size_t packetLength, char *buffer, size_t length) noexcept;									// Read file data from the SBC
 	size_t ReadFileList(size_t packetLength, char *buffer, size_t length, bool& endOfList) noexcept;				// Read a chunk of a directory listing from the SBC
 	GCodeChannel ReadSetLastCodeResult(GCodeResult& result) noexcept;						// Read the result of the last executed code
+	void ReadObjectModelKeyChanged(size_t packetLength, const StringRef& key) noexcept;		// Read the key of a changed object model key notification
 
 	// The packets that belong to the work of a code channel take the tag of its channel epoch, see SbcMessageFormats.h. A code reply carries it in its message type
 	void ResendPacket(const PacketHeader *packet) noexcept;

@@ -16,12 +16,12 @@ does the same (`src/Heating/Sensors/TemperatureSensor.cpp:52-56`). The fixed fun
 | `RemoteFan::Check` (`src/Fans/RemoteFan.cpp`) | `UpdateFromRemote`, CanReceiver task | RPM and PWM set to -1 until the next fan report, and the fan did not count as a running thermostatic fan |
 | `LocalFan::GetRPM` (`src/Fans/LocalFan.cpp`) | `Interrupt`, the tacho ISR | RPM 0 for one reading |
 | `FilamentMonitor::FilamentPresenceKnown`, `IsFilamentPresent`, `IsMotionDetected` (`src/FilamentMonitors/FilamentMonitor.cpp`) | `UpdateRemoteFilamentStatus`, CanReceiver task | Presence unknown, no filament and no motion for that check |
-| `PulsedFilamentMonitor::Check`, `IsLocalMotionDetected` (`src/FilamentMonitors/PulsedFilamentMonitor.cpp`) | `Interrupt`, the pin interrupt of the monitor | `Check` ran the "sync overdue" comparison although a pulse had just arrived, and the monitor read as not moving |
+| `PulsedFilamentMonitor::Check` (`src/FilamentMonitors/PulsedFilamentMonitor.cpp`), `IsLocalMotionDetected` (`PulsedFilamentMonitor.h`) | `Interrupt`, the pin interrupt of the monitor | `Check` ran the "sync overdue" comparison although a pulse had just arrived, and the monitor read as not moving |
 
 Found by the shared-data census of 2026-11-23 (F1, F4, F5, F6; the pulsed filament monitor as a side item of F4), which also read
 the order of the clock call and the load in the `Duet3_MB6HC` ELF. How often the window is hit on a board was not measured.
-`PulsedFilamentMonitor::IsLocalMotionDetected` was defined in the class in `PulsedFilamentMonitor.h`. The fix moved it into the
-`.cpp` file, so that the test can extract it.
+Upstream fixed the same functions in 08a6e56d0, which replaced the fork's fixes. `PulsedFilamentMonitor::IsLocalMotionDetected` is
+defined in the class in `PulsedFilamentMonitor.h` there; the Makefile copies it out of the header as a definition outside the class.
 
 ## What the test compiles
 
@@ -37,10 +37,8 @@ Each function runs three cases: a report some time ago (fresh), one older than t
 writer stores during the check. The first and the last must give the reported values, the second the timed-out ones. That is 30
 runs.
 
-Without the fixes the 10 runs with a newer report during the check fail; the others pass. Against the source before the fix of the
-pulsed filament monitor, the extraction of `PulsedFilamentMonitor::IsLocalMotionDetected` fails, because the function was in the
-header then. That part was checked against a copy of the old source with the function moved unchanged into the `.cpp` file: both
-runs with a newer pulse fail there.
+Against the source before the fixes (upstream 08a6e56d0^) the 10 runs with a newer report during the check fail, including both
+runs of the pulsed filament monitor with a newer pulse; the others pass.
 
 Not covered:
 - the other places of the census that were found to be ordered right, or where the writer cannot preempt the reader;

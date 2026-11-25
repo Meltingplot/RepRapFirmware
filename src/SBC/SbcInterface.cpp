@@ -653,10 +653,7 @@ void SbcInterface::ExchangeData() noexcept
 					{
 						if (error)
 						{
-							// DSF could not run a macro that the GB does not wait for, e.g. a missing daemon.g. The main task reads the stack without
-							// the GB mutex, e.g. for M122 and the object model, so it pops the macro itself at the start of its next spin (ApplyRecordedAborts)
-							gb->SetMacroErrorRecorded(true);
-							reprap.GetGCodes().ChannelAbortRecorded();
+							gb->SetFailedMacroPending(true);	// only the main task may pop the stack
 						}
 						else
 						{
@@ -1021,7 +1018,7 @@ void SbcInterface::ExchangeData() noexcept
 				// wakes up and reports the macro as not found, unless its replies carry its epoch. The main task waits, so the stack does not change
 				if (gb->IsWaitingForMacro() && gb->IsMacroStartedByCode())
 				{
-					gb->MarkCodeReplySurplus();
+					gb->MarkReplyVoid();
 				}
 				RecordChannelAbort(*gb, false);
 			}
@@ -1995,8 +1992,10 @@ void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 	// Note that we do not call StopPrint here or set any other variables; DSF already does that
 	GCodes& gcodes = reprap.GetGCodes();
 	gcodes.PauseSequenceAborted(gb);								// don't get stuck in "pausing" if this abort tears down the pause sequence
+	gcodes.AbortStateMachine(gb);
 	gb.AbortFile(true);
 	gb.FileAbortSent();												// DSF has aborted its files itself
+	gb.SetFailedMacroPending(false);								// AbortFile has popped a macro that failed on the SBC as well
 
 	// Close a message box left at the base level as cancelled, without the abort flag that would make the main task stop the print
 	gb.MessageAcknowledged(true, false, 0, ExpressionValue());
@@ -2091,26 +2090,16 @@ bool SbcInterface::IsDroppedByEpoch(GCodeBuffer& gb, const PacketHeader& packet)
 	return true;
 }
 
-// Apply the failed macros, the channel aborts and the ends of connections that the SBC task has recorded. This is called by the main task at the
-// start of its spin
+// Apply the channel aborts and the ends of connections that the SBC task has recorded. This is called by the main task at the start of its spin.
+// A macro that failed on the SBC is popped by the main task in SpinGCodeBuffer, unless the abort of its channel pops it first
 void SbcInterface::ApplyRecordedAborts() noexcept
 {
 	for (size_t i = 0; i < NumGCodeChannels; i++)
 	{
 		GCodeBuffer * const gb = reprap.GetGCodes().GetGCodeBuffer(GCodeChannel(i));
-		if (gb != nullptr && (gb->IsRecordPending() || gb->IsConnectionEndRecorded()))
+		if (gb != nullptr && (gb->IsAbortRecorded() || gb->IsConnectionEndRecorded()))
 		{
 			MutexLocker locker(gb->mutex);
-
-			// Pop the macro that DSF could not run. Unlike an abort, the SBC task records that with the GB mutex held, and only while no abort is
-			// recorded, so an abort recorded as well came after it and is applied after the pop
-			if (gb->IsMacroErrorRecorded())
-			{
-				gb->SetMacroErrorRecorded(false);
-				gb->CurrentFileMachineState().CloseFile();
-				gb->PopState(false);
-				gb->Init();
-			}
 
 			// The SBC task records without the GB mutex. Take the record before applying it, so that a record that comes in meanwhile stays set and
 			// is applied in the next spin. Both flags are taken at once, because InvalidateResources records an abort and the end of the connection
@@ -2143,7 +2132,7 @@ void SbcInterface::ApplyRecordedAborts() noexcept
 				// are surplus unless they carry its epoch. None of the replies of a code of a lost connection is written anyway (IsCodeOfEndedConnection)
 				if (!connectionLost && gb->LatestMachineState().lastCodeFromSbc && !gb->IsCompletelyIdle())
 				{
-					gb->MarkCodeReplySurplus();
+					gb->MarkReplyVoid();
 				}
 
 				const uint32_t applyDelay = millis() - whenAbortRecorded;
@@ -2279,7 +2268,7 @@ void SbcInterface::Suspend() noexcept
 
 bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 {
-	if (gb.IsInvalidated() || gb.IsMacroFileClosed() || gb.IsMessageAcknowledged() ||
+	if (gb.IsInvalidated() || gb.IsMacroFileClosed() || gb.IsMessageAcknowledged() || gb.IsFailedMacroPending() ||
 		gb.IsAbortRequested() || (reportPause && gb.IsFileChannel()) ||
 		(gb.LatestMachineState().waitingForAcknowledgement && gb.IsMessagePromptPending()))
 	{
@@ -2287,8 +2276,7 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 		return false;
 	}
 
-	bool gotCommand = false;
-	bool bufferNeeded = false;
+	bool gotCommand = false, needBuffer = false;
 	{
 		// The whole walk must be atomic: readPointer is a cursor into variable-length records, so a concurrent defragment would invalidate it.
 		// The codes of a channel whose abort or failed macro is recorded wait until the main task has applied it. This is checked here, because
@@ -2314,9 +2302,7 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 					{
 						if (!gb.HasBuffer())
 						{
-							// This is the first code for this GB. Its buffer must not be allocated while the scheduler is suspended, so leave the code where it is
-							// and prime the buffer below
-							bufferNeeded = true;
+							needBuffer = true;			// cannot allocate with the scheduler suspended
 							break;
 						}
 
@@ -2392,11 +2378,12 @@ bool SbcInterface::FillBuffer(GCodeBuffer &gb) noexcept
 		}
 	}
 
-	if (bufferNeeded)
+	if (needBuffer)
 	{
-		gb.PrimeBinaryBuffer();						// now that the scheduler is running again. The code stays pending and is read on the next call
+		gb.AllocateBinaryBuffer();			// the code stays pending for the next call
 	}
-	else if (gotCommand)
+
+	if (gotCommand)
 	{
 		gb.DecodeCommand();
 		return true;

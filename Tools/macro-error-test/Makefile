@@ -14,7 +14,7 @@ CXXFLAGS ?= -O1 -g
 BASEFLAGS := -std=gnu++17 -fno-rtti -Wall -Wextra
 ASANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
-GEN := gen/MacroCompletedCase.inc gen/SbcInterface.inc gen/GCodeBuffer.inc gen/GCodeMachineState.inc
+GEN := gen/MacroCompletedCase.inc gen/SbcInterface.inc gen/GCodeBuffer.inc gen/GCodeMachineState.inc gen/SpinPop.inc
 
 .PHONY: all asan check clean
 all: build/macro-error-test
@@ -26,15 +26,20 @@ gen/MacroCompletedCase.inc: $(SRC)/SBC/SbcInterface.cpp extract.awk
 
 gen/SbcInterface.inc: $(SRC)/SBC/SbcInterface.cpp extract.awk
 	@mkdir -p gen
-	awk -v f="$(abspath $<)" -v names="SbcInterface::RecordChannelAbort SbcInterface::ApplyRecordedAborts SbcInterface::FillBuffer" -f extract.awk $< > $@.tmp && mv $@.tmp $@
+	awk -v f="$(abspath $<)" -v names="SbcInterface::RecordChannelAbort SbcInterface::ApplyRecordedAborts SbcInterface::InvalidateChannel SbcInterface::FillBuffer" -f extract.awk $< > $@.tmp && mv $@.tmp $@
 
 gen/GCodeBuffer.inc: $(SRC)/GCodes/GCodeBuffer/GCodeBuffer.cpp extract.awk
 	@mkdir -p gen
-	awk -v f="$(abspath $<)" -v names="GCodeBuffer::PopState GCodeBuffer::CurrentFileMachineState GCodeBuffer::Diagnostics" -f extract.awk $< > $@.tmp && mv $@.tmp $@
+	awk -v f="$(abspath $<)" -v names="GCodeBuffer::PopState GCodeBuffer::CurrentFileMachineState GCodeBuffer::AbortFile GCodeBuffer::Diagnostics" -f extract.awk $< > $@.tmp && mv $@.tmp $@
 
 gen/GCodeMachineState.inc: $(SRC)/GCodes/GCodeMachineState.cpp extract.awk
 	@mkdir -p gen
-	awk -v f="$(abspath $<)" -v names="GCodeMachineState::CloseFile GCodeMachineState::Pop" -f extract.awk $< > $@.tmp && mv $@.tmp $@
+	awk -v f="$(abspath $<)" -v names="GCodeMachineState::DoingFile GCodeMachineState::CloseFile GCodeMachineState::Pop" -f extract.awk $< > $@.tmp && mv $@.tmp $@
+
+# The pop of a failed macro at the start of GCodes::SpinGCodeBuffer: the block "if (gb.IsFailedMacroPending())" at one tab
+gen/SpinPop.inc: $(SRC)/GCodes/GCodes.cpp
+	@mkdir -p gen
+	awk -v f="$(abspath $<)" '{ sub(/\r$$/, "") } $$0 == "\tif (gb.IsFailedMacroPending())" { p = 1; printf "#line %d \"%s\"\n", NR, f } p { print } p && $$0 == "\t}" { found = 1; exit } END { if (!found) { print "the pop of a failed macro not found in " f > "/dev/stderr"; exit 1 } }' $< > $@.tmp && mv $@.tmp $@
 
 build/macro-error-test: macro_error_test.cpp $(GEN) Makefile
 	@mkdir -p build

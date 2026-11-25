@@ -1,5 +1,5 @@
 # Host test of the code length limits of a G-code buffer in SBC mode: the real text of StringParser::Put, AddToChecksum and
-# StoreAndAddToChecksum and of BinaryParser::AllocateBuffer and Put, and the real MaxGCodeStringLength and MaxGCodeBinaryLength,
+# StoreAndAddToChecksum, of BinaryParser::Put and of GCodeBuffer::AllocateBinaryBuffer, and the real MaxGCodeStringLength and MaxGCodeBinaryLength,
 # extracted from src/ at build time, with the G-code buffer and Tasks::AllocPermanent played in sbc_code_length_test.cpp. Run with
 # make in WSL (g++ 13).
 #
@@ -16,7 +16,7 @@ CXXFLAGS ?= -O1 -g
 BASEFLAGS := -std=gnu++17 -fno-rtti -Wall -Wextra
 ASANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
-GEN := gen/Lengths.inc gen/StringParser.inc gen/BinaryParser.inc
+GEN := gen/Lengths.inc gen/StringParser.inc gen/BinaryParser.inc gen/GCodeBuffer.inc
 
 .PHONY: all asan check clean
 all: build/sbc-code-length-test
@@ -34,7 +34,11 @@ gen/StringParser.inc: $(SRC)/GCodes/GCodeBuffer/StringParser.cpp $(EXTRACT) Make
 
 gen/BinaryParser.inc: $(SRC)/GCodes/GCodeBuffer/BinaryParser.cpp $(EXTRACT) Makefile
 	@mkdir -p gen
-	awk -v f="$(abspath $<)" -v names="BinaryParser::AllocateBuffer BinaryParser::Put BinaryParser::ParametersFit" -f $(EXTRACT) $< > $@.tmp && mv $@.tmp $@
+	awk -v f="$(abspath $<)" -v names="BinaryParser::Put BinaryParser::ParametersFit" -f $(EXTRACT) $< > $@.tmp && mv $@.tmp $@
+
+gen/GCodeBuffer.inc: $(SRC)/GCodes/GCodeBuffer/GCodeBuffer.cpp $(EXTRACT) Makefile
+	@mkdir -p gen
+	awk -v f="$(abspath $<)" -v names="GCodeBuffer::AllocateBinaryBuffer" -f $(EXTRACT) $< > $@.tmp && mv $@.tmp $@
 
 build/sbc-code-length-test: sbc_code_length_test.cpp $(GEN) Makefile
 	@mkdir -p build

@@ -155,8 +155,8 @@ bool FilamentMonitor::FilamentPresenceKnown() const noexcept
 #if SUPPORT_CAN_EXPANSION
 	if (hasRemote)
 	{
-		const uint32_t lastTimeReceived = whenRemoteLiveBitsReceived;		// capture it before we call millis(), the CanReceiver task may update it
-		return remotePresenceValid && millis() - lastTimeReceived < RemoteLiveBitsTimeout;
+		const uint32_t wrlbr = whenRemoteLiveBitsReceived;		// read this before calling millis() in case the CAN task updates it
+		return remotePresenceValid && millis() - wrlbr < RemoteLiveBitsTimeout;
 	}
 #endif
 	bool dummy;
@@ -169,8 +169,8 @@ bool FilamentMonitor::IsFilamentPresent() const noexcept
 #if SUPPORT_CAN_EXPANSION
 	if (hasRemote)
 	{
-		const uint32_t lastTimeReceived = whenRemoteLiveBitsReceived;		// capture it before we call millis(), the CanReceiver task may update it
-		return remotePresence && remotePresenceValid && millis() - lastTimeReceived < RemoteLiveBitsTimeout;
+		const uint32_t wrlbr = whenRemoteLiveBitsReceived;		// read this before calling millis() in case the CAN task updates it
+		return remotePresence && remotePresenceValid && millis() - wrlbr < RemoteLiveBitsTimeout;
 	}
 #endif
 	bool present = false;
@@ -183,8 +183,8 @@ bool FilamentMonitor::IsMotionDetected() const noexcept
 #if SUPPORT_CAN_EXPANSION
 	if (hasRemote)
 	{
-		const uint32_t lastTimeReceived = whenRemoteLiveBitsReceived;		// capture it before we call millis(), the CanReceiver task may update it
-		return remoteMotion && millis() - lastTimeReceived < RemoteLiveBitsTimeout;
+		const uint32_t wrlbr = whenRemoteLiveBitsReceived;		// read this before calling millis() in case the CAN task updates it
+		return remoteMotion && millis() - wrlbr < RemoteLiveBitsTimeout;
 	}
 #endif
 	return IsLocalMotionDetected();
@@ -530,13 +530,13 @@ static uint32_t checkCalls = 0, clearCalls = 0;		//TEMP DEBUG
 
 #if SUPPORT_CAN_EXPANSION
 
-/*static*/ void FilamentMonitor::UpdateRemoteFilamentStatus(CanAddress src, CanMessageFilamentMonitorsStatusV2& msg) noexcept
+/*static*/ void FilamentMonitor::UpdateRemoteFilamentStatus(CanAddress src, const CanMessageFilamentMonitorsStatusV2& msg) noexcept
 {
 	Bitmap<uint32_t> drivers(msg.driversReported);
 	size_t slotIndex = 0;
 
 	ReadLocker lock(filamentMonitorsLock);
-	while (!drivers.IsEmpty() && slotIndex < ARRAY_SIZE(msg.data))
+	while (!drivers.IsEmpty())
 	{
 		const unsigned int driverNumber = drivers.LowestSetBit();
 

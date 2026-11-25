@@ -197,6 +197,7 @@ public:
 #include "LocalFan.inc"
 #include "FilamentMonitor.inc"
 #include "PulsedFilamentMonitor.inc"
+#include "PulsedFilamentMonitorH.inc"
 
 // ---------------------------------------------------------------------------------------------------------------------------------
 

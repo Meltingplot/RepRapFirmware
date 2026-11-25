@@ -19,7 +19,7 @@ ASANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer
 
 EXTRACT = @mkdir -p gen && awk -v f="$(abspath $<)" -v names="$(1)" -f extract.awk $< > $@.tmp && mv $@.tmp $@
 
-GEN := gen/RTOSIfaceClasses.inc gen/RTOSIface.inc gen/SetKinematics.inc gen/DeleteTool.inc gen/SbcCases.inc gen/MakeJsonAnswer.inc \
+GEN := gen/RTOSIfaceClasses.inc gen/RTOSIface.inc gen/ReplaceObject.inc gen/SetKinematics.inc gen/DeleteTool.inc gen/SbcCases.inc gen/MakeJsonAnswer.inc \
 	gen/ProcessCustomInfo.inc
 
 .PHONY: all asan check clean
@@ -30,7 +30,10 @@ gen/RTOSIfaceClasses.inc: $(RRFLIBS)/src/RTOSIface/RTOSIface.h extract.awk Makef
 	$(call EXTRACT,class:ReadWriteLock class:ReadLocker class:WriteLocker class:WriteLockedPointer)
 
 gen/RTOSIface.inc: $(RRFLIBS)/src/RTOSIface/RTOSIface.cpp extract.awk Makefile
-	$(call EXTRACT,class:LockRecord ReadWriteLock::LockForReading ReadWriteLock::ReleaseReader ReadWriteLock::LockForWriting ReadWriteLock::ReleaseWriter)
+	$(call EXTRACT,class:LockRecord NewLockRecord ReadWriteLock::LockForReading ReadWriteLock::ReleaseReader ReadWriteLock::LockForWriting ReadWriteLock::ReleaseWriter)
+
+gen/ReplaceObject.inc: $(SRC)/RepRapFirmware.h extract.awk Makefile
+	$(call EXTRACT,ReplaceObject)
 
 gen/SetKinematics.inc: $(SRC)/Movement/Move.cpp extract.awk Makefile
 	$(call EXTRACT,Move::SetKinematics)

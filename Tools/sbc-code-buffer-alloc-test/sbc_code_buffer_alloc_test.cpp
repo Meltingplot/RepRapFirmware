@@ -1,18 +1,18 @@
 // Host test of the first binary code of a G-code buffer in SBC mode (SbcInterface::FillBuffer in src/SBC/SbcInterface.cpp), compiled
 // from the real text of the function that the Makefile extracts.
 //
-// FillBuffer runs in the main task. It walks the codes that the SBC task has stored inside a TaskCriticalSectionLocker, which
-// suspends the scheduler, and hands the next code of the channel to GCodeBuffer::PutBinary. BinaryParser::Put
-// (src/GCodes/GCodeBuffer/BinaryParser.cpp) allocates the buffer of a G-code buffer with Tasks::AllocPermanent when the buffer gets its
-// first code. AllocPermanent takes the malloc mutex only while the scheduler is running (GetMallocMutex in src/Platform/Tasks.cpp), so
-// with the scheduler suspended it runs without it, while a task of the same or a lower priority may have been preempted inside malloc.
-// Up to 3.7-dev de1bfe598 the first code of each channel was put, and its buffer allocated, inside the locker.
+// FillBuffer runs in the main task. It walks the codes that the SBC task has stored inside a TaskCriticalSectionLocker, which suspends
+// the scheduler, and hands the next code of the channel to GCodeBuffer::PutBinary. The buffer of a G-code buffer is allocated with
+// Tasks::AllocPermanent (GCodeBuffer::AllocateBinaryBuffer) before its first code. AllocPermanent takes the malloc mutex only while
+// the scheduler is running (GetMallocMutex in src/Platform/Tasks.cpp), so with the scheduler suspended it runs without it, while a
+// task of the same or a lower priority may have been preempted inside malloc. Up to 3.7-dev de1bfe598 the first code of each channel
+// was put, and its buffer allocated by BinaryParser::Put, inside the locker. Now FillBuffer allocates it after the locker.
 //
 // The test plays TaskCriticalSectionLocker (RRFLibraries RTOSIface.h) with a counter, and GCodeBuffer with a stand-in whose PutBinary
-// allocates the buffer when there is none, as BinaryParser::Put does. No allocation may happen with the scheduler suspended. It also
-// checks what FillBuffer does: the call that finds the first code of a channel without a buffer primes the buffer and leaves the code
-// pending, the next call reads it, codes of other channels stay pending and are read once, the ring pointers are reset when the buffer
-// is read completely, and nothing is read or allocated while no code is pending.
+// writes into the buffer, as BinaryParser::Put does, and fails without one. No allocation may happen with the scheduler suspended. It
+// also checks what FillBuffer does: the call that finds the first code of a channel without a buffer allocates the buffer and leaves
+// the code pending, the next call reads it, codes of other channels stay pending and are read once, the ring pointers are reset when
+// the buffer is read completely, and nothing is read or allocated while no code is pending.
 
 #include <cstddef>
 #include <cstdint>
@@ -73,8 +73,8 @@ struct CodeHeader
 	int32_t lineNumber;
 };
 
-// Just what FillBuffer uses of GCodeBuffer (src/GCodes/GCodeBuffer/GCodeBuffer.h). PutBinary allocates the buffer when there is none,
-// as BinaryParser::Put does, and PrimeBinaryBuffer allocates it in the same way.
+// Just what FillBuffer uses of GCodeBuffer (src/GCodes/GCodeBuffer/GCodeBuffer.h). AllocateBinaryBuffer allocates the buffer as
+// GCodeBuffer::AllocateBinaryBuffer does, and PutBinary writes into it, as BinaryParser::Put does.
 struct MachineState
 {
 	bool waitingForAcknowledgement = false;
@@ -103,16 +103,21 @@ public:
 	bool IsFileChannel() const noexcept { return false; }
 	bool IsMessagePromptPending() const noexcept { return false; }
 	bool IsRecordPending() const noexcept { return false; }
+	bool IsFailedMacroPending() const noexcept { return false; }
 	MachineState& LatestMachineState() noexcept { return machineState; }
 	Channel GetChannel() const noexcept { return channel; }
 
 	bool HasBuffer() const noexcept { return buffer != nullptr; }
-	void PrimeBinaryBuffer() noexcept { if (buffer == nullptr) { buffer = static_cast<char *>(Tasks::AllocPermanent(MaxGCodeBinaryLength)); } }
+	void AllocateBinaryBuffer() noexcept { buffer = static_cast<char *>(Tasks::AllocPermanent(MaxGCodeBinaryLength)); }
 
 	void PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noexcept
 	{
 		(void)epoch;
-		PrimeBinaryBuffer();
+		if (buffer == nullptr)
+		{
+			failures.push_back("a code was put into a G-code buffer without a buffer");
+			return;
+		}
 		memcpy(buffer, data, len * sizeof(uint32_t));
 		lastMajorCode = reinterpret_cast<const CodeHeader *>(data)->majorCode;
 		++codesPut;
@@ -183,7 +188,7 @@ static void Report(const char *name, std::string why) noexcept
 	allocations = 0;
 }
 
-// Read the first code of a channel without a buffer: the first call primes the buffer and must not read the code, the second call
+// Read the first code of a channel without a buffer: the first call allocates the buffer and must not read the code, the second call
 // reads it. Return true if it went that way
 static bool ReadOnSecondCall(SbcInterface& sbc, GCodeBuffer& gb) noexcept
 {
@@ -203,7 +208,7 @@ int main()
 		if (!sbc.FillBuffer(gb) || gb.codesPut != 1 || gb.lastMajorCode != 28) { why += " the second call did not read the code"; }
 		if (allocations != 1) { why += " the buffer was allocated " + std::to_string(allocations) + " times"; }
 		if (sbc.rxPointer != 0 || sbc.txPointer != 0 || !sbc.sendBufferUpdate) { why += " the ring pointers were not reset"; }
-		Report("the first code of a channel primes its buffer with the scheduler running and is read on the next call", why);
+		Report("the first code of a channel allocates its buffer with the scheduler running and is read on the next call", why);
 	}
 
 	{

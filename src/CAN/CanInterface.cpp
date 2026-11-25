@@ -552,8 +552,7 @@ static void ReInitBus0() noexcept
 
 void CanInterface::SwitchToExpansionMode(CanAddress addr, bool useTestMode) noexcept
 {
-	FilamentMonitor::DeleteAll();					// do this before we suspend the scheduler, because it takes a write lock and frees memory
-
+	FilamentMonitor::DeleteAll();						// this takes a lock and releases memory, so it must be done before the scheduler is suspended
 	TaskCriticalSectionLocker lock;
 
 	myAddress = addr;
@@ -1912,10 +1911,13 @@ GCodeResult CanInterface::ReadRemoteHandles(CanAddress boardAddress, RemoteInput
 	const GCodeResult rslt = SendRequestAndGetCustomReply(buf, rid, reply, nullptr, nullptr, CanMessageType::readInputsReplyV0,
 															[callback, param](const CanMessageBuffer *bufp) noexcept -> void
 																{
-																	auto response = bufp->msg.readInputsReplyV0;
-																	for (unsigned int i = 0; i < min<unsigned int>(response.numReported, ARRAY_SIZE(response.results)) && sizeof(uint32_t) + (i + 1) * sizeof(response.results[0]) <= bufp->dataLength; i++)
+																	const auto& response = bufp->msg.readInputsReplyV0;
+																	if (response.ValidMessageLength(bufp->dataLength))
 																	{
-																		callback(param, response.results[i].handle, LoadLEU32(&response.results[i].reading));
+																		for (unsigned int i = 0; i < response.numReported; i++)
+																		{
+																			callback(param, response.results[i].handle, LoadLEU32(&response.results[i].reading));
+																		}
 																	}
 																});
 	return rslt;
@@ -2145,10 +2147,11 @@ GCodeResult CanInterface::EnableCan(GCodeBuffer& gb, const StringRef& reply) THR
 
 	bool seen = false;
 
+	const CanBusMode oldMode = canBusModes[bus];
 #if NUM_CAN_PORTS == 1
 	const CanBusMode mode = CanBusMode::rrfCanFD;
 #else
-	CanBusMode mode = canBusModes[bus];
+	CanBusMode mode = oldMode;
 	bool modeChanged = false;
 #endif
 
@@ -2262,7 +2265,7 @@ GCodeResult CanInterface::EnableCan(GCodeBuffer& gb, const StringRef& reply) THR
 		}
 		reprap.BoardsUpdated();
 
-		if (mode == CanBusMode::rrfCanFD)
+		if (mode == CanBusMode::rrfCanFD && mode != oldMode)
 		{
 			// Send a startup message. Ideally we would wait a little while first
 			CanMessageBuffer buf;

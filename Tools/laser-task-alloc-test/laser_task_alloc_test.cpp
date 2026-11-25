@@ -10,8 +10,8 @@
 //
 // The test plays TaskCriticalSectionLocker (RRFLibraries RTOSIface.h) with a counter, Task<> with a stand-in whose Create records
 // the call, and ::operator new and delete with the host heap. No allocation or free may happen with the scheduler suspended. It also
-// checks what CreateLaserTask does: it creates the task once, a second call does nothing, and if another task creates the laser task
-// while this one allocates its own (played inside operator new), only one task is created and the other allocation is freed.
+// checks what CreateLaserTask does: it creates the task once and a second call does nothing. Every caller runs in the main task, so
+// no other task can create the laser task while this one allocates its own.
 
 #include <cstddef>
 #include <cstdint>
@@ -32,7 +32,6 @@ static unsigned int suspended = 0;							// uxSchedulerSuspended
 static bool checking = false;									// true while a case runs CreateLaserTask
 static std::vector<std::string> failures;
 static unsigned int taskAllocations = 0, taskFrees = 0, creates = 0;
-static void (*duringAllocation)() = nullptr;					// another task that runs while CreateLaserTask allocates, if it can
 
 // As TaskCriticalSectionLocker in RRFLibraries src/RTOSIface/RTOSIface.h: vTaskSuspendAll in the constructor, xTaskResumeAll in
 // the destructor
@@ -100,14 +99,7 @@ void *operator new(size_t sz)
 		}
 		++taskAllocations;
 	}
-	void *const p = malloc(sz);
-	if (isTask && duringAllocation != nullptr && suspended == 0)		// another task can run only while the scheduler is running
-	{
-		void (*const other)() = duringAllocation;
-		duringAllocation = nullptr;
-		other();
-	}
-	return p;
+	return malloc(sz);
 }
 
 void operator delete(void *p) noexcept
@@ -130,11 +122,10 @@ void operator delete(void *p, size_t sz) noexcept
 
 static unsigned int passed = 0, failed = 0;
 
-static void Case(const char *name, unsigned int calls, void (*other)(), unsigned int expectedAllocations, unsigned int expectedFrees) noexcept
+static void Case(const char *name, unsigned int calls, unsigned int expectedAllocations, unsigned int expectedFrees) noexcept
 {
 	failures.clear();
 	taskAllocations = taskFrees = creates = 0;
-	duringAllocation = other;
 	checking = true;
 	for (unsigned int i = 0; i < calls; ++i)
 	{
@@ -174,18 +165,10 @@ static void Case(const char *name, unsigned int calls, void (*other)(), unsigned
 	Move::laserTask = nullptr;
 }
 
-// A higher priority task that creates the laser task while CreateLaserTask in the main task allocates its own
-static void OtherTaskCreates() noexcept
-{
-	Move::CreateLaserTask();
-}
-
 int main()
 {
-	Case("the laser task is allocated with the scheduler running and created", 1, nullptr, 1, 0);
-	Case("a second call does not create another laser task", 2, nullptr, 1, 0);
-	Case("if another task creates the laser task meanwhile, the second allocation is freed with the scheduler running", 1,
-			OtherTaskCreates, 2, 1);
+	Case("the laser task is allocated with the scheduler running and created", 1, 1, 0);
+	Case("a second call does not create another laser task", 2, 1, 0);
 	printf("%u passed, %u failed\n", passed, failed);
 	return (failed == 0) ? 0 : 1;
 }

@@ -310,6 +310,7 @@ public:
 	GCodes& GetGCodes() noexcept;
 	PrintMonitor& GetPrintMonitor() noexcept;
 	OutputBuffer *GetModelResponse(const void *gb, const char *key, const char *flags) THROWS(GCodeException);
+	Mutex& GetObjectModelReportMutex() noexcept { return objectModelReportMutex; }
 	WriteLockedPointer<VariableSet> GetGlobalVariablesForWriting() noexcept;
 	void PrepareToLoadIap() noexcept { }
 	void StartIap(const char *) noexcept;
@@ -320,6 +321,7 @@ public:
 private:
 	Platform platform;
 	FuzzSbcConnection sbcConnection;
+	Mutex objectModelReportMutex;
 };
 extern RepRap reprap;
 

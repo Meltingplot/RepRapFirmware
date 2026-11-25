@@ -1,8 +1,8 @@
 # Kinematics change host test
 
-This test runs RRF's real `Move::SetKinematics` from `src/Movement/Move.cpp` on a PC. The Makefile copies the function text out
-of `Move.cpp` at build time, as `Tools/sbc-harness` does with `SbcInterface::TaskLoop`, because `Move.cpp` as a whole needs the
-hardware headers of CoreN2G. `kinematics_test.cpp` gives it a minimal `Move`, `Kinematics`, `reprap` and a compile-only
+This test runs RRF's real `Move::SetKinematics` from `src/Movement/Move.cpp`, with `ReplaceObject` from `src/RepRapFirmware.h`, on
+a PC. The Makefile copies the function text out of these files at build time, as `Tools/sbc-harness` does with
+`SbcInterface::TaskLoop`, because `Move.cpp` as a whole needs the hardware headers of CoreN2G. `kinematics_test.cpp` gives it a minimal `Move`, `Kinematics`, `reprap` and a compile-only
 `ObjectModel::lifetimeLock`.
 
 The test checks what another task sees while the kinematics changes:

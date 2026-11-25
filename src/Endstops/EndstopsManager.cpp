@@ -629,11 +629,7 @@ const char *_ecv_array EndstopsManager::TranslateEndStopResult(bool hit, bool at
 void EndstopsManager::SetZProbeDefaults() noexcept
 {
 	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);				// we are about to delete object model objects
-	activeEndstops = nullptr;			// we are about to remove the Z probes, so make sure they are not in the active list
-	if (zProbes[0] != nullptr)
-	{
-		zProbes[0]->SetDefaults();
-	}
+	WriteLocker lock(zProbesLock);
 	for (size_t i = 0; i < MaxZProbes; ++i)
 	{
 		DeleteObject(zProbes[i]);
@@ -767,7 +763,6 @@ GCodeResult EndstopsManager::HandleM558(GCodeBuffer& gb, const StringRef &reply)
 			return GCodeResult::error;
 		}
 
-		activeEndstops = nullptr;				// we are about to remove the probe, so make sure it is not in the active list
 		DeleteObject(zProbes[probeNumber]);		// delete the old probe first, the new one might use the same ports
 
 		ZProbe *_ecv_from newProbe;

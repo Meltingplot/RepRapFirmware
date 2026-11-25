@@ -96,10 +96,11 @@ bool StringParser::Put(char c) noexcept
 		// If USB/AUX channels request very long codes via macros, this will avoid bottlenecks from macros
 #if HAS_SBC_INTERFACE
 		gb.bufferLength = reprap.UsingSbcInterface() ? MaxGCodeBinaryLength : MaxGCodeStringLength;
+		gb.buffer = static_cast<char *>(Tasks::AllocPermanent(gb.bufferLength, std::align_val_t(4)));
 #else
+		gb.buffer = static_cast<char *>(Tasks::AllocPermanent(MaxGCodeStringLength, std::align_val_t(4)));
 		gb.bufferLength = MaxGCodeStringLength;
 #endif
-		gb.buffer = static_cast<char *>(Tasks::AllocPermanent(gb.bufferLength, std::align_val_t(4)));
 	}
 
 	if (c != 0)

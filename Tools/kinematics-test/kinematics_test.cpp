@@ -59,6 +59,7 @@ ReadWriteLock ObjectModel::lifetimeLock;
 static Move move;
 static RepRap reprap;
 
+#include "ReplaceObject.inc"
 #include "SetKinematics.inc"
 
 static std::vector<std::string> failures;

@@ -1,10 +1,11 @@
 // Host test of a macro that DSF could not run, reported with SbcRequest::MacroCompleted and an error while the G-code buffer does not wait
 // for the macro (e.g. a missing daemon.g). Compiled from the real text that the Makefile extracts:
 // - SBC task: the MacroCompleted case of SbcInterface::ExchangeData and SbcInterface::RecordChannelAbort (src/SBC/SbcInterface.cpp)
-// - main task: SbcInterface::ApplyRecordedAborts and SbcInterface::FillBuffer (src/SBC/SbcInterface.cpp), GCodeBuffer::Diagnostics, the
-//   reader of M122 (src/GCodes/GCodeBuffer/GCodeBuffer.cpp)
-// - the stack: GCodeBuffer::PopState and GCodeBuffer::CurrentFileMachineState (GCodeBuffer.cpp), GCodeMachineState::CloseFile and
-//   GCodeMachineState::Pop (src/GCodes/GCodeMachineState.cpp)
+// - main task: the pop of a failed macro at the start of GCodes::SpinGCodeBuffer (src/GCodes/GCodes.cpp), SbcInterface::ApplyRecordedAborts
+//   with SbcInterface::InvalidateChannel and SbcInterface::FillBuffer (src/SBC/SbcInterface.cpp), GCodeBuffer::Diagnostics, the reader of
+//   M122 (src/GCodes/GCodeBuffer/GCodeBuffer.cpp)
+// - the stack: GCodeBuffer::PopState, GCodeBuffer::AbortFile and GCodeBuffer::CurrentFileMachineState (GCodeBuffer.cpp),
+//   GCodeMachineState::CloseFile, GCodeMachineState::DoingFile and GCodeMachineState::Pop (src/GCodes/GCodeMachineState.cpp)
 //
 // The main task (TaskPriority::SpinPriority) walks the stack of every G-code buffer for M122 without the buffer mutex, and the SBC task
 // (TaskPriority::SbcPriority) has the higher priority, so it can run at any instruction of that walk. Whatever it deletes there, the walk
@@ -190,8 +191,15 @@ public:
 		channelAbortRequested = true;
 	}
 
+	// What SbcInterface::InvalidateChannel calls besides the GB
+	void PauseSequenceAborted(GCodeBuffer&) noexcept { }
+	void AbortStateMachine(GCodeBuffer&) noexcept { Log("AbortStateMachine"); }
+	void UnlockAll(GCodeBuffer&) noexcept { }
+
 	bool channelAbortRequested = false;
 };
+
+class ExpressionValue { };
 
 class RepRap
 {
@@ -285,6 +293,7 @@ public:
 	// Real text from GCodeMachineState.cpp
 	GCodeMachineState *Pop() const noexcept;
 	void CloseFile() noexcept;
+	bool DoingFile() const noexcept;
 
 	GCodeMachineState *_ecv_null previous;
 	FileId fileId = NoFileId;
@@ -333,6 +342,7 @@ public:
 
 	// Real text from GCodeBuffer.cpp
 	bool PopState(bool withinSameFile) noexcept;
+	void AbortFile(bool abortAll) noexcept;
 	GCodeMachineState& CurrentFileMachineState() const noexcept;
 	void Diagnostics(const StringRef& reply) noexcept;
 
@@ -375,20 +385,32 @@ public:
 		}
 		abortRecorded = r;
 	}
-	bool IsMacroErrorRecorded() const noexcept { return macroErrorRecorded; }
-	void SetMacroErrorRecorded(bool r) noexcept
+	bool IsFailedMacroPending() const noexcept { return failedMacroPending; }
+	void SetFailedMacroPending(bool p) noexcept
 	{
 		Check(mutex.holdCount != 0 && mutex.holder == currentTask,
-				std::string("the ") + TaskName(currentTask) + " task changes the record of the failed macro without the GB mutex");
-		Log((r) ? "record the failed macro" : "take the failed macro");
-		macroErrorRecorded = r;
+				std::string("the ") + TaskName(currentTask) + " task changes the pop of the failed macro without the GB mutex");
+		if (p != failedMacroPending)
+		{
+			Log((p) ? "request the pop of the failed macro" : "clear the pop of the failed macro");
+		}
+		failedMacroPending = p;
 	}
-	bool IsRecordPending() const noexcept { return abortRecorded || macroErrorRecorded; }
+	bool IsRecordPending() const noexcept { return abortRecorded || failedMacroPending; }		// as in GCodeBuffer.h
 	bool IsConnectionEndRecorded() const noexcept { return connectionEndRecorded; }
 	void SetConnectionEndRecorded() noexcept { connectionEndRecorded = true; }
 	void ConnectionEndApplied() noexcept { connectionEndRecorded = false; }
 	void EndConnectionOfCodes() noexcept { Log("EndConnectionOfCodes"); }
-	void MarkCodeReplySurplus() noexcept { }
+	void MarkReplyVoid() noexcept { }
+
+	// What SbcInterface::InvalidateChannel calls besides AbortFile
+	bool IsSendRequested() const noexcept { return false; }
+	bool IsExecutingOnSbc() const noexcept { return false; }
+	void SetFinished(bool) noexcept { }
+	void FileAbortSent() noexcept { abortFile = false; }
+	void MessageAcknowledged(bool, bool, uint32_t, const ExpressionValue&) noexcept { }
+	void MessagePromptSent() noexcept { }
+	void MessageAcknowledgementSent() noexcept { }
 
 	void SetFileFinished() noexcept
 	{
@@ -397,7 +419,7 @@ public:
 	}
 	// The buffer of every stand-in GB exists from the start, so FillBuffer never takes its first-code path (GCodeBuffer.h)
 	bool HasBuffer() const noexcept { return true; }
-	void PrimeBinaryBuffer() noexcept { }
+	void AllocateBinaryBuffer() noexcept { }
 	void PutBinary(const uint32_t *, size_t, uint8_t) noexcept
 	{
 		Log("PutBinary");
@@ -416,8 +438,11 @@ public:
 	bool macroFileClosed = false;
 	bool invalidated = false;
 	bool abortRecorded = false;
-	bool macroErrorRecorded = false;
+	bool failedMacroPending = false;
 	bool connectionEndRecorded = false;
+	bool abortFile = false;
+	bool abortAllFiles = false;
+	bool macroJustStarted = false;
 };
 
 // SBC interface: what the real text uses
@@ -472,6 +497,7 @@ public:
 	// Real text from SbcInterface.cpp
 	void RecordChannelAbort(GCodeBuffer& gb, bool connectionLost) noexcept;
 	void ApplyRecordedAborts() noexcept;
+	void InvalidateChannel(GCodeBuffer& gb) noexcept;
 	bool FillBuffer(GCodeBuffer &gb) noexcept;
 
 	DataTransfer transfer;
@@ -484,11 +510,6 @@ public:
 
 private:
 	bool IsDroppedByEpoch(GCodeBuffer&, const PacketHeader&) noexcept { return false; }
-	void InvalidateChannel(GCodeBuffer& gb) noexcept
-	{
-		Log("InvalidateChannel");
-		Check(!OnStack(gb.machineState, mustBeGone), "the channel abort is applied while the failed macro is still on the stack");
-	}
 };
 
 static SbcInterface sbc;
@@ -508,6 +529,13 @@ bool SbcInterface::HandleMacroCompleted(const PacketHeader *packet) noexcept
 		break;
 	}
 	return packetAcknowledged;
+}
+
+// The start of GCodes::SpinGCodeBuffer for one GB, up to the pop of a failed macro
+static void MainTaskSpinsGb(GCodeBuffer& gb) noexcept
+{
+	MutexLocker gbLock(gb.mutex);
+#include "SpinPop.inc"
 }
 
 void SbcInterface::StoreCode(GCodeChannel::RawType channel) noexcept
@@ -592,7 +620,7 @@ static bool SbcSendsMacroCompleted(bool error) noexcept
 	return acknowledged;
 }
 
-// The start of GCodes::Spin: carry out ChannelAbortRequest
+// A spin of the main task: GCodes::Spin carries out ChannelAbortRequest at its start, then calls GCodes::SpinGCodeBuffer for each GB
 static void MainTaskSpinStarts() noexcept
 {
 	currentTask = Task::main;
@@ -600,6 +628,13 @@ static void MainTaskSpinStarts() noexcept
 	{
 		reprap.GetGCodes().channelAbortRequested = false;
 		sbc.ApplyRecordedAborts();
+	}
+	for (GCodeBuffer *_ecv_null gb : gcodeSources)
+	{
+		if (gb != nullptr)
+		{
+			MainTaskSpinsGb(*gb);
+		}
 	}
 }
 
@@ -650,10 +685,9 @@ int main()
 		Check(Count(Task::sbc, "release the name daemon.g") == 0, "the SBC task releases the file name of the failed macro");
 		Check(Count(Task::sbc, "Init") == 0, "the SBC task initialises the parsers of the GB");
 		Check(daemonGb->machineState == failedMacro, "the SBC task changes the stack");
-		Check(daemonGb->IsMacroErrorRecorded(), "the failed macro is not recorded on the GB");
-		Check(reprap.GetGCodes().channelAbortRequested, "the main task is not asked to apply the record");
+		Check(daemonGb->IsFailedMacroPending(), "the pop of the failed macro is not requested on the GB");
 	}
-	Report("the SBC task records the failed macro, asks the main task to pop it and leaves the stack alone");
+	Report("the SBC task requests the pop of the failed macro on the GB and leaves the stack alone");
 
 	// 3. What the main task does at the start of its next spin
 	Setup(true);
@@ -661,22 +695,22 @@ int main()
 		(void)SbcSendsMacroCompleted(true);
 		events.clear();
 		MainTaskSpinStarts();
-		const std::vector<std::string> expected = { "take the failed macro", "release the name daemon.g", "delete the level daemon.g", "Init" };
+		const std::vector<std::string> expected = { "release the name daemon.g", "delete the level daemon.g", "Init", "clear the pop of the failed macro" };
 		bool asExpected = (events.size() == expected.size());
 		for (size_t i = 0; asExpected && i < expected.size(); ++i)
 		{
 			asExpected = (events[i].task == Task::main && events[i].what == expected[i]);
 		}
-		Check(asExpected, "the main task does not take the record, close the file, delete the level once and then initialise the GB: " + EventsText());
+		Check(asExpected, "the main task does not close the file, delete the level once, initialise the GB and clear the pop: " + EventsText());
 		Check(OnlyBase(*daemonGb), "the base level is not on top of the stack of the Daemon GB");
 		Check(OnlyBase(*httpGb), "the stack of another GB has changed");
-		Check(!daemonGb->IsRecordPending(), "the record stays");
+		Check(!daemonGb->IsRecordPending(), "the pop stays requested");
 		events.clear();
 		MainTaskSpinStarts();
 		sbc.ApplyRecordedAborts();
-		Check(events.empty(), "a further apply changes the GB again");
+		Check(events.empty(), "a further spin changes the GB again");
 	}
-	Report("the main task pops the failed macro once at the start of its next spin, with CloseFile, PopState and Init");
+	Report("the main task pops the failed macro once in its next spin of the GB, with CloseFile, PopState and Init");
 
 	// 4. DSF sends further packets of the channel in the same exchange. Those that act on the GB must see the stack after the pop
 	Setup(true);
@@ -713,28 +747,23 @@ int main()
 	}
 	Report("a code that the SBC sends after the failed macro is put on the level below it");
 
-	// 6. DSF aborts the channel (InvalidateChannel) after the failed macro, before the main task has applied the record
+	// 6. DSF aborts the channel (InvalidateChannel) after the failed macro, before the main task has popped it
 	Setup(true);
 	{
 		(void)SbcSendsMacroCompleted(true);
 		currentTask = Task::sbc;
 		sbc.RecordChannelAbort(*daemonGb, false);
 		currentTask = Task::main;
-		mustBeGone = failedMacro;
 		events.clear();
 		MainTaskSpinStarts();
-		size_t pop = events.size(), abort = events.size();
-		for (size_t i = 0; i < events.size(); ++i)
-		{
-			if (events[i].task == Task::main && events[i].what == "delete the level daemon.g") { pop = i; }
-			if (events[i].task == Task::main && events[i].what == "InvalidateChannel") { abort = i; }
-		}
-		Check(pop < events.size(), "the main task does not pop the failed macro");
-		Check(abort < events.size(), "the main task does not apply the abort");
-		Check(pop < abort, "the abort is applied before the failed macro is popped");
-		Check(!daemonGb->IsRecordPending(), "a record stays");
+		Check(Count(Task::main, "AbortStateMachine") == 1, "the main task does not apply the abort");
+		Check(Count(Task::main, "delete the level daemon.g") == 1, "the failed macro is not deleted exactly once");
+		Check(Count(Task::main, "delete the level base") == 0, "the base level is deleted");
+		Check(Count(Task::main, "Init") == 0, "the pop of the failed macro runs after the abort has popped it");
+		Check(OnlyBase(*daemonGb), "the base level is not on top of the stack of the Daemon GB");
+		Check(!daemonGb->IsRecordPending(), "a record or the pop stays");
 	}
-	Report("an abort recorded after the failed macro is applied after the pop, in the same spin");
+	Report("an abort recorded after the failed macro pops it with the other files and clears the pending pop, in the same spin");
 
 	// 7. Unchanged: while an abort is recorded, the SBC task keeps off the GB
 	Setup(true);
@@ -745,7 +774,7 @@ int main()
 		events.clear();
 		const bool acknowledged = SbcSendsMacroCompleted(true);
 		Check(!acknowledged, "the packet is not requested again");
-		Check(daemonGb->machineState == failedMacro && !daemonGb->IsMacroErrorRecorded(), "the SBC task acts on the GB");
+		Check(daemonGb->machineState == failedMacro && !daemonGb->IsFailedMacroPending(), "the SBC task acts on the GB");
 		Check(Count(Task::sbc, "delete the level daemon.g") == 0, "the SBC task deletes a level");
 	}
 	Report("a MacroCompleted while an abort of the channel is recorded is requested again");
@@ -758,7 +787,7 @@ int main()
 		daemonGb->mutex.busyInMainTask = false;
 		Check(!acknowledged, "the packet is not requested again");
 		Check(daemonGb->machineState == failedMacro, "the stack changes");
-		Check(!daemonGb->IsMacroErrorRecorded() && !reprap.GetGCodes().channelAbortRequested, "the failed macro is recorded");
+		Check(!daemonGb->IsFailedMacroPending() && !reprap.GetGCodes().channelAbortRequested, "the pop of the failed macro is requested");
 		Check(events.empty(), "something happens: " + EventsText());
 	}
 	Report("a MacroCompleted while the main task holds the GB mutex is requested again and changes nothing");

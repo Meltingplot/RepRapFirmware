@@ -19,6 +19,7 @@
 #include <GCodes/GCodeException.h>
 #include <Platform/RepRap.h>
 #include <Platform/Platform.h>
+#include <Platform/Tasks.h>
 #include <Movement/StepTimer.h>
 
 // Macros to reduce the amount of explicit conditional compilation in this file
@@ -116,7 +117,7 @@ GCodeBuffer::GCodeBuffer(GCodeChannel::RawType channel, GCodeInput *_ecv_from no
 	  disabled(false), timerRunning(false), motionCommanded(false), hadExplicitLineNumber(false), buffer(nullptr), bufferLength(0)
 
 #if HAS_SBC_INTERFACE
-	  , isWaitingForMacro(false), abortRecorded(false), macroErrorRecorded(false), connectionEndRecorded(false), isBinaryBuffer(false), invalidated(false),
+	  , isWaitingForMacro(false), abortRecorded(false), connectionEndRecorded(false), isBinaryBuffer(false), invalidated(false),
 	  channelEpoch(0), channelEpochKnown(false), abortGateSet(false)
 #endif
 {
@@ -142,8 +143,8 @@ void GCodeBuffer::Reset() noexcept
 	requestedMacroFile.Clear();
 	macroFileClosed = false;
 	isWaitingForMacro = false;
-	macroJustStarted = macroFileError = macroFileEmpty = false;
-	abortFile = abortAllFiles = sendToSbc = messagePromptPending = messageAcknowledged = codeReplySurplus = false;
+	macroFileError = macroFileEmpty = false;
+	macroJustStarted = abortFile = abortAllFiles = sendToSbc = messagePromptPending = messageAcknowledged = failedMacroPending = replyVoid = false;
 	machineState->lastCodeFromSbc = machineState->macroStartedByCode = machineState->codeEpochValid = machineState->codeOfEndedConnection = false;
 #endif
 	cancelWait = false;
@@ -324,9 +325,14 @@ void GCodeBuffer::PutBinary(const uint32_t *data, size_t len, uint8_t epoch) noe
 	machineState->codeEpoch = epoch & ChannelEpochMask;
 	machineState->codeOfEndedConnection = false;
 	isBinaryBuffer = true;
-	macroJustStarted = false;
-	codeReplySurplus = false;		// the code that the SBC dropped has finished, or this code belongs to a macro that the dropped code has started since
+	macroJustStarted = replyVoid = false;
 	binaryParser.Put(data, len);
+}
+
+void GCodeBuffer::AllocateBinaryBuffer() noexcept
+{
+	buffer = static_cast<char *>(Tasks::AllocPermanent(MaxGCodeBinaryLength, std::align_val_t(4)));
+	bufferLength = MaxGCodeBinaryLength;
 }
 
 // Start at epoch 0 when the SBC starts a connection, or forget the epoch when the connection is lost. Either way there is no gate
@@ -377,17 +383,16 @@ bool GCodeBuffer::IsMacroRequestOfCode() const noexcept
 	return machineState->macroStartedByCode && (!channelEpochKnown || GetCodeEpoch() == (ChannelEpochValid | channelEpoch));
 }
 
-// Flag the replies of the code being executed as surplus, because the SBC has dropped it. This is needed only if they would go out without a channel
+// Discard the replies of the code being executed, because the SBC has dropped it. This is needed only if they would go out without a channel
 // epoch, that is if the epoch of the code on the latest level is invalid or the channel epoch is unknown. Otherwise they carry the epoch of the code,
 // which the SBC tells apart from the current one
-void GCodeBuffer::MarkCodeReplySurplus() noexcept
+void GCodeBuffer::MarkReplyVoid() noexcept
 {
 	if (!channelEpochKnown || (GetCodeEpoch() & ChannelEpochValid) == 0)
 	{
-		codeReplySurplus = true;
+		replyVoid = true;
 	}
 }
-
 #endif
 
 // Add an entire G-Code, overwriting any existing content
@@ -1331,7 +1336,8 @@ bool GCodeBuffer::RequestMacroFile(const char *filename, bool fromCode) noexcept
 
 	// Request the macro file from the SBC
 	MutexLocker lock(mutex);								// the SBC task reads the request while holding this mutex
-	macroJustStarted = macroFileError = macroFileEmpty = false;
+	macroJustStarted = false;
+	macroFileError = macroFileEmpty = false;
 	machineState->macroStartedByCode = fromCode;
 	requestedMacroFile.copy(filename);
 

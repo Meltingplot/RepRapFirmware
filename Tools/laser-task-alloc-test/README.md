@@ -14,11 +14,11 @@ needs the hardware headers of CoreN2G. `laser_task_alloc_test.cpp` gives them a 
 `TaskCriticalSectionLocker`, which suspends the scheduler. It runs in the main task: M452, M670, a scanning Z probe, M571 and
 extruder heater feedforward create the laser task.
 
-The test plays the locker with a counter and checks that the task is allocated, and an unused one freed, with the scheduler
-running. It also checks what `CreateLaserTask` does: it creates the task once, a second call does not create another one, and if
-another task creates the laser task while this one allocates its own, only one task is created and the second allocation is
-freed. The other task is played inside `operator new`, and only while the scheduler is running, because only then can the board
-switch tasks there.
+The test plays the locker with a counter and checks that the task is allocated with the scheduler running. It also checks what
+`CreateLaserTask` does: it creates the task once, and a second call does not create another one. Every caller is a G-code handler
+in the main task (`GCodes2.cpp` M452 and M670, `Platform.cpp` M571, `EndstopsManager.cpp` M558 with a scanning probe, `Tool.cpp`
+feedforward), so no other task can create the laser task while this one allocates its own; upstream's version of the fix, which
+replaced the fork's, does not check for that.
 
 ## Running
 

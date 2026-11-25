@@ -199,6 +199,16 @@ private:
 	bool downgraded = false;
 };
 
+// CoreN2G CoreIO.h: AtomicCriticalSectionLocker disables interrupts on the board. The test runs one task at a time, so it does nothing
+class AtomicCriticalSectionLocker
+{
+public:
+	AtomicCriticalSectionLocker() noexcept { }
+	void Cancel() noexcept { }
+	AtomicCriticalSectionLocker(const AtomicCriticalSectionLocker&) = delete;
+	AtomicCriticalSectionLocker& operator=(const AtomicCriticalSectionLocker&) = delete;
+};
+
 template<class T> class ReadLockedPointer
 {
 public:

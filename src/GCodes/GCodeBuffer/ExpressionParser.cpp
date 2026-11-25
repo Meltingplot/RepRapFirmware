@@ -882,7 +882,7 @@ void ExpressionParser::ParseArray(size_t& length, function_ref<void(ExpressionVa
 			if (CurrentCharacter() != EXPRESSION_LIST_SEPARATOR) break;
 			AdvancePointer();
 			if (SkipWhiteSpace() == '}') break;		// we allow a trailing command in an array
-			if (numElements == length)
+			if (numElements >= length)
 			{
 				ThrowParseException("Array too long");
 			}
@@ -1116,9 +1116,7 @@ void ExpressionParser::EvaluateTake(ExpressionValue& rslt, uint32_t arg, bool ev
 
 	case TypeCode::HeapString:
 		{
-			// Copy from the handle, not from a pointer into the heap, because allocating the result may garbage-collect and so move the string
-			const size_t len = min<size_t>(rslt.shVal.GetLength(), arg);
-			const StringHandle sh(rslt.shVal, 0, len);
+			const StringHandle sh(rslt.shVal, 0, min<size_t>(rslt.shVal.GetLength(), arg));
 			rslt.SetStringHandle(sh);
 		}
 		break;
@@ -1194,7 +1192,6 @@ void ExpressionParser::EvaluateDrop(ExpressionValue& rslt, uint32_t arg, bool ev
 
 	case TypeCode::HeapString:
 		{
-			// Copy from the handle, not from a pointer into the heap, because allocating the result may garbage-collect and so move the string
 			const size_t slen = rslt.shVal.GetLength();
 			const size_t offset = min<size_t>(slen, arg);
 			const StringHandle sh(rslt.shVal, offset, slen - offset);
@@ -1673,10 +1670,13 @@ void ExpressionParser::CheckForExtraCharacters() THROWS(GCodeException)
 }
 
 // Parse a number. The initial character of the string is a decimal digit.
-void ExpressionParser::ParseNumber(ExpressionValue& rslt) noexcept
+void ExpressionParser::ParseNumber(ExpressionValue& rslt) THROWS(GCodeException)
 {
 	NumericConverter conv;
-	conv.Accumulate(CurrentCharacter(), NumericConverter::AcceptSignedFloat | NumericConverter::AcceptHex, [this]()->char { AdvancePointer(); return CurrentCharacter(); });	// must succeed because CurrentCharacter is a decimal digit
+	if (!conv.Accumulate(CurrentCharacter(), NumericConverter::AcceptSignedFloat | NumericConverter::AcceptHex, [this]()->char { AdvancePointer(); return CurrentCharacter(); }))
+	{
+		ThrowParseException("expected exponent digits");			// the first character is a decimal digit, so this is the only way it can fail
+	}
 
 	if (conv.FitsInInt32())
 	{
@@ -2035,7 +2035,7 @@ void ExpressionParser::ParseIdentifierExpression(ExpressionValue& rslt, bool eva
 				{
 					ConvertToFloat(rslt, evaluate);
 					const float f = ((func.RawValue() == Function::floor) ? floorf : (func.RawValue() == Function::ceil) ? ceilf : rintf)(rslt.fVal);
-					if (f < (float)std::numeric_limits<int32_t>::max() && f >= (float)std::numeric_limits<int32_t>::min())		// (float)INT32_MAX is 2^31, which does not fit
+					if (f < (float)std::numeric_limits<int32_t>::max() && f >= (float)std::numeric_limits<int32_t>::min())		// the maximum converts to 2^31, which does not fit
 					{
 						rslt.SetInt((int32_t)f);
 					}
@@ -2290,7 +2290,7 @@ void ExpressionParser::ParseIdentifierExpression(ExpressionValue& rslt, bool eva
 					ConvertToFloat(rslt, evaluate);
 					ConvertToFloat(nextOperand, evaluate);
 					const float fres = powf(rslt.fVal, nextOperand.fVal);
-					if (integerResult && fres < (float)std::numeric_limits<int32_t>::max() && fres >= (float)std::numeric_limits<int32_t>::min())	// (float)INT32_MAX is 2^31
+					if (integerResult && fres < (float)std::numeric_limits<int32_t>::max() && fres >= (float)std::numeric_limits<int32_t>::min())
 					{
 						rslt.SetInt(lrintf(fres));
 					}

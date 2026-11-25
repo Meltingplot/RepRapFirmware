@@ -287,6 +287,17 @@ bool Platform::SysFileExists(const char *_ecv_array filename) const noexcept
 	return false;
 }
 
+// As Platform.cpp: the overload for a heap string reads the name under the heap lock and checks the file after releasing it
+bool Platform::SysFileExists(const StringHandle& filename) const noexcept
+{
+	String<MaxFilenameLength> name;
+	{
+		const ReadLockedPointer<const char> p = filename.Get();
+		name.copy(p.Ptr());
+	}
+	return SysFileExists(name.c_str());
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // The object model: the root (class RepRap of shim/Platform/RepRap.h) with tables written the way the real classes write them
 // (Move.cpp:80-151, 168-379: arrays whose elements are the same object with another table number, the element index from

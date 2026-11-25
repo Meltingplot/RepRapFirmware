@@ -79,10 +79,8 @@ void StringHandle::Delete() noexcept
 	Heap::IndexSlot *_ecv_null const slot = slotPtr;
 	if (slot != nullptr)
 	{
-		// Clear the pointer to the handle entry before releasing it. Another task may copy this handle at any time, e.g. the object model
-		// reading inputs[].currentFile, and the copy must find either a slot that still holds our reference or no slot at all.
-		slotPtr = nullptr;
 		ReadLocker locker(Heap::heapLock);						// prevent other tasks modifying the heap
+		slotPtr = nullptr;										// clear the pointer first, another task may be copying this handle
 		Heap::DeleteSlot(slot);
 	}
 }
@@ -128,8 +126,8 @@ size_t StringHandle::GetLength() const noexcept
 	return strlen(slotPtr->storage->data);
 }
 
-// Build a handle from 'len' characters of the string of another handle, starting at 'offset'. The caller must have checked that they lie within that string.
-// The source is read through its handle after the space has been allocated, because the allocation may garbage-collect and so move the source string.
+// Construct from part of another string, which the caller has checked to be in range.
+// The source is read through its handle after allocating, because allocating may garbage collect and move it
 StringHandle::StringHandle(const StringHandle& source, size_t offset, size_t len) noexcept
 {
 	if (len == 0)
@@ -141,9 +139,6 @@ StringHandle::StringHandle(const StringHandle& source, size_t offset, size_t len
 		WriteLocker locker(Heap::heapLock);						// prevent other tasks modifying the heap
 		Heap::IndexSlot * const slot = Heap::AllocateHandle();
 		Heap::StorageSpace * const space = Heap::AllocateSpace(sizeof(Heap::StorageSpace) + len + 1);
-#if CHECK_HANDLES
-		Heap::CheckSlotGood(source.slotPtr);
-#endif
 		SafeStrncpy(space->data, source.slotPtr->storage->data + offset, min<size_t>(len + 1, space->length - sizeof(Heap::StorageSpace)));
 		slot->storage = space;
 		slotPtr = slot;
@@ -153,8 +148,9 @@ StringHandle::StringHandle(const StringHandle& source, size_t offset, size_t len
 // AutoStringHandle members
 
 AutoStringHandle::AutoStringHandle(const AutoStringHandle& other) noexcept
-	: StringHandle(other)
 {
+	AtomicCriticalSectionLocker lock;							// the owner may be deleting the handle from another task
+	slotPtr = other.slotPtr;
 	IncreaseRefCount();
 }
 

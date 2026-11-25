@@ -12,10 +12,13 @@ public:
 	void AppendCharsToBuffer(OutputBuffer *buf) const noexcept { }
 };
 
+class StringHandle;
+
 class Platform
 {
 public:
 	bool SysFileExists(const char *_ecv_array filename) const noexcept;
+	bool SysFileExists(const StringHandle& filename) const noexcept;
 	void AppendSysDir(const StringRef & path) const noexcept { path.cat("0:/sys/"); }
 	void AppendWebDir(const StringRef & path) const noexcept { path.cat("0:/www/"); }
 	ReadLockedPointer<const char> GetSysDir() const noexcept { return ReadLockedPointer<const char>(nullptr, "0:/sys/"); }

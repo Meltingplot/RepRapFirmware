@@ -28,6 +28,13 @@ public:
 	int GetCommandNumber() const noexcept { return binaryParser.GetCommandNumber(); }
 	int8_t GetCommandFraction() const noexcept { return binaryParser.GetCommandFraction(); }
 
+	// As GCodeBuffer::AllocateBinaryBuffer (GCodeBuffer.cpp), which SbcInterface::FillBuffer calls before the first code of the buffer
+	void AllocateBinaryBuffer() noexcept
+	{
+		buffer = static_cast<char *>(Tasks::AllocPermanent(MaxGCodeBinaryLength, std::align_val_t(4)));
+		bufferLength = MaxGCodeBinaryLength;
+	}
+
 	GCodeChannel codeChannel;
 	mutable GCodeMachineState machineState;
 	int32_t explicitLineNumber = -1;
