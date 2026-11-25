@@ -60,6 +60,7 @@ void HarnessInternalError(const char *file, int line) noexcept { printf("       
 size_t StringRef::copy(const char *, size_t) const noexcept { return 0; }
 int StringRef::lcat(const char *) const noexcept { return 0; }
 int StringRef::lcatf(const char *, ...) const noexcept { return 0; }
+int StringRef::printf(const char *, ...) const noexcept { return 0; }		// DataTransfer::GetSetVariableResultLength, not reached here
 
 // ---------------------------------------------------------------------------------------------------------------------
 

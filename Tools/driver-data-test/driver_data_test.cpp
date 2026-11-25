@@ -75,7 +75,7 @@ private:
 // The members of ExpansionBoardData in src/CAN/ExpansionManager.h that the accessors use
 struct ExpansionBoardData
 {
-	bool HasDrivers() const noexcept { return numDrivers != 0 && driverData != nullptr; }
+	bool HasDriver(size_t driver) const noexcept { return driver < numDrivers && driverData != nullptr; }
 
 	DriverData *_ecv_array _ecv_null driverData = nullptr;
 	uint8_t numDrivers = 0;

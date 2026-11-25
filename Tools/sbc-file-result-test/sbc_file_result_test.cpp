@@ -90,6 +90,14 @@ struct SbcTaskStub { void Give(uint32_t) noexcept { } };
 static SbcTaskStub sbcTaskStub;
 static SbcTaskStub *sbcTask = &sbcTaskStub;		// static Task<SBCTaskStackWords> *sbcTask in SbcInterface.cpp
 
+// RRFLibraries src/RTOSIface/RTOSIface.h: the number of write locks on ReadWriteLock objects that the calling task holds, which
+// WaitForFileSlot checks. The main task of this test holds none
+class TaskBase
+{
+public:
+	static unsigned int GetCallerWriteLocksHeld() noexcept { return 0; }
+};
+
 enum MessageType { ErrorMessage };
 
 class Platform

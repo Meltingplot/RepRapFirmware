@@ -133,12 +133,13 @@ public:
 
 static RepRap reprap;
 
-// The CanInterface state in src/CAN/CanInterface.cpp that SwitchToExpansionMode sets, and ReInit, which resets the CAN filters
+// The CanInterface state in src/CAN/CanInterface.cpp that SwitchToExpansionMode sets, and ReInitBus0, which resets the CAN filters of
+// bus 0
 static CanAddress myAddress = 0;
 static bool inExpansionMode = false;
 static bool inTestMode = false;
 
-static void ReInit() noexcept
+static void ReInitBus0() noexcept
 {
 	++filterResets;
 	addressAtFilterReset = myAddress;

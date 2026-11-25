@@ -944,6 +944,8 @@ struct CanMessageBuffer
 
 	CanId_t id;
 	size_t dataLength;
+	uint16_t bus = 0;						// a 2-bit field in CANlib src/CanMessageBuffer.h: the bus on which a received message arrived
+	bool useBrs = true;						// a 1-bit field there: send a message with bit rate switching
 	CanMessage msg;
 	bool acknowledged = false;
 };
@@ -997,6 +999,7 @@ struct ExpansionBoardData
 	uint32_t whenLastStatusReportReceived = 0;
 	uint32_t neverUsedRam = 0;
 	UniqueId uniqueId;
+	uint16_t busPlusOne = 0;				// a 2-bit field there: the CAN bus that the board has been heard on plus one, or 0
 	BoardState state = BoardState::unknown;
 	uint8_t numDrivers = 0;
 	bool hasVin = false, hasV12 = false, hasMcuTemp = false;
