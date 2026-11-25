@@ -1992,6 +1992,7 @@ void SbcInterface::InvalidateChannel(GCodeBuffer& gb) noexcept
 	// Note that we do not call StopPrint here or set any other variables; DSF already does that
 	GCodes& gcodes = reprap.GetGCodes();
 	gcodes.PauseSequenceAborted(gb);								// don't get stuck in "pausing" if this abort tears down the pause sequence
+	gcodes.AbortStateMachine(gb);
 	gb.AbortFile(true);
 	gb.FileAbortSent();												// DSF has aborted its files itself
 	gb.SetFailedMacroPending(false);								// AbortFile has popped a macro that failed on the SBC as well
