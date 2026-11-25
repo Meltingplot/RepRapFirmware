@@ -13,6 +13,9 @@ file has the reasoning and the findings.
   1 SAFE-PRIMED, 94 SAFE-NO-HEAP, 10 SAFE-NO-TARGET. The keys of seven of the eight SUSPECT entries went away, together with
   `Event::AddEventV [suspended] -> indirect call`: #72 moves the construction of the event, which formats its text, out of the
   region (`Event.cpp:39-46`). `SbcInterface::FillBuffer` stays as FIXED (see below).
+- **Upstream sync of 2026-11-25** (3.7-dev and 3.7-ch, RRFLibraries 18a6ddd): upstream replaced two of the fixes with fixes of
+  its own. RRFLibraries acefba1 replaced the K23 fix, and its `ReadWriteLock::LockForReading` and `LockForWriting` keys are
+  FIXED; e520116e9 replaced the `FillBuffer` fix, and its key went away (see below).
 - **How:** the heap findings were read in the code, each fix has a host test under `Tools/` that fails without it, and the
   fixed firmware was built and checked (the key goes away). The targets of the calls through a register were read by two
   agents, one for the exception handlers and one for the task regions, with file and line for each target.
@@ -59,9 +62,9 @@ CHX first: MB6HC in SBC mode, with TOOL1LC, EXP1HCL and SZP expansion boards on 
 
 | Entry | Task(s) | CHX | Fix |
 |---|---|---|---|
-| `ReadWriteLock::LockForReading`, `LockForWriting` (K23) | every task that takes a lock: heat (sensor list), Move, CAN receiver, main, SBC | **real**: heat (3) against main (1) and SBC (2) inside `malloc` | fixed by RRFLibraries #2 (888b479), test `Tools/lock-record-alloc-test` from #71 |
+| `ReadWriteLock::LockForReading`, `LockForWriting` (K23) | every task that takes a lock: heat (sensor list), Move, CAN receiver, main, SBC | **real**: heat (3) against main (1) and SBC (2) inside `malloc` | fixed by RRFLibraries #2 (888b479), replaced by upstream acefba1 on 2026-11-25; both keys are FIXED; test `Tools/lock-record-alloc-test` from #71 |
 | `Event::AddEventV` | heat (heater faults, `LocalHeater.cpp:1069`), CAN receiver (expansion board events, `CommandProcessor.cpp:764`; `ExpansionManager.cpp:181-187, 616`), main (driver events from `Move::PollOneDriver`, `Move.cpp:3986`, `:4021`, called by `Platform::Spin`, `Platform.cpp:883`; M957 `GCodes3.cpp:1595`, filament errors) | **real**: an event from an expansion board or a heater fault while main or SBC is inside `malloc`, whenever the Event freelist is empty | fixed by #72 |
-| `SbcInterface::FillBuffer` | main, SBC mode only | latent (no priority-1 peer in SBC mode); the first code of each channel | fixed by #77; the key stays as FIXED |
+| `SbcInterface::FillBuffer` | main, SBC mode only | latent (no priority-1 peer in SBC mode); the first code of each channel | fixed by #77, replaced by upstream e520116e9 on 2026-11-25; the key went away |
 | `DDARing::ConfigureMovementQueue` (M595 P) | main | latent in SBC mode, real without SBC after `network->Activate` | fixed by #73 |
 | `Move::CreateLaserTask` (M452, M670, M571, scanning probe, feedforward) | main | latent in SBC mode | fixed by #74 |
 | `HeightController::Configure` (M951) | main | latent in SBC mode | fixed by #75 |
@@ -81,6 +84,10 @@ Notes on the heap findings:
   no other region reaches a `ReadWriteLock` through direct calls; `CanInterface::SwitchToExpansionMode` was the one that did
   (through `FilamentMonitor::DeleteAll`), and its fix moves that out of the region. A lock taken behind a call through a
   register would not show; the targets read for the SAFE-NO-HEAP entries below take none.
+  Upstream acefba1 (RRFLibraries 3.7-ch, merged in 18a6ddd) replaced the fix: `NewLockRecord` takes the record from the free
+  list inside the critical section and leaves the critical section only to allocate when the list is empty (`RTOSIface.cpp:257-269`).
+  Where the compiler does not inline `NewLockRecord` (both lock functions in all three configurations), the check sees the call
+  inside the region but not that the callee leaves the region before it allocates, so both keys are FIXED.
 - **`Event::AddEventV`.** The new event is created inside the `TaskCriticalSectionLocker` (`Event.cpp:41-58`). `Event` uses the
   freelist (`Event.h:40`), so it allocates when no released event is on the list. The fix creates it before the locker and
   releases it after the locker when a similar event is queued.
@@ -91,6 +98,9 @@ Notes on the heap findings:
   cannot see that the remaining path to `Put`'s allocation only runs when the buffer exists: in 75d4b34ad `FillBuffer` calls
   `PutBinary` inside its locker only after `gb.HasBuffer()` (`SbcInterface.cpp:2270-2275`, `:2301`), and
   `BinaryParser::AllocateBuffer` allocates only when there is no buffer (`BinaryParser.cpp:35-37`).
+  Upstream e520116e9 replaced the fix in the sync of 2026-11-25: `BinaryParser::Put` no longer allocates, and `FillBuffer` calls
+  `GCodeBuffer::AllocateBinaryBuffer` (`GCodeBuffer.cpp:332-336`) after the locker (`SbcInterface.cpp:2381-2384`), so the key
+  went away.
 - **M595, laser task, M951.** `DDA::operator new` is `Tasks::AllocPermanent` (`DDA.h:104`); `Task<>` has no `operator new` of its
   own, so the tasks come from `::operator new`. The fixes allocate before the locker; the two task fixes check again inside the
   locker and free an unused task after it (`TaskBase::TerminateAndUnlink` does nothing for a task that was never created,

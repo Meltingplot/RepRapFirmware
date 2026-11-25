@@ -19,8 +19,10 @@ lower priority task was preempted inside `malloc`, both then work on the free li
 `ReadWriteLock` keeps a lock record per task that holds or waits for the lock. The records come from a free list
 (`FreelistManager.h`), and when that is empty, from `::operator new`. In RRFLibraries up to 696a015 (3.7-dev before 888b479),
 `LockForReading`, `ConditionalLockForReading`, `LockForWriting` and `ConditionalLockForWriting` allocate the record after
-`RTOSIface::EnterTaskCriticalSection()`, which suspends the scheduler. The fix allocates it before and returns it to the free list
-after the scheduler is resumed when it is not needed.
+`RTOSIface::EnterTaskCriticalSection()`, which suspends the scheduler. The fork fix 888b479 allocated it before and returned it to
+the free list after the scheduler was resumed when it was not needed. Upstream acefba1, which replaced it in the merge 18a6ddd,
+takes the record from the free list inside the critical section and leaves the critical section to allocate when the list is
+empty (`NewLockRecord`, `RTOSIface.cpp:257-269`).
 
 The race is played with two tasks at RRF's priorities (`src/Platform/TaskPriorities.h`): MAIN (`SpinPriority`, 1) calls `malloc`,
 and an interrupt wakes HEAT (`HeatPriority`, 3) at a point inside that `malloc`. HEAT then takes a read lock, as

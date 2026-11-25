@@ -118,7 +118,11 @@ function to the heap and to calls through a register.
   and why they do not reach the heap. A new target of an existing call (a new override of a virtual function, a new callback in an
   interrupt table) does not make a new finding. The census of the entry has to be read again then.
 - **Correlated conditions.** The analysis does not track values. A call on a path that cannot run inside the region (because of
-  a test the check does not evaluate) is still found. `SbcInterface::FillBuffer` is such a case after its fix.
+  a test the check does not evaluate) is still found. `SbcInterface::FillBuffer` was such a case after the fork fix #77, until
+  upstream e520116e9 replaced that fix.
+- **A callee that leaves the region of its caller.** A function that ends the region, reaches the heap and opens the region again
+  before it returns leaves the state unchanged, so its call is found inside the caller's region. Upstream `NewLockRecord`
+  (RRFLibraries `RTOSIface.cpp:257-269`) is such a case where it is not inlined.
 - **The run-time context of a function.** A function that is only ever called with the scheduler suspended, but that does not
   suspend it itself, is a region only through its callers' calls. A region that a caller opens and a callee closes (or the other
   way round) on some paths only is taken as unchanged, with a note.
