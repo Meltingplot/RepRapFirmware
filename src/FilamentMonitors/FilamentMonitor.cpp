@@ -155,8 +155,8 @@ bool FilamentMonitor::FilamentPresenceKnown() const noexcept
 #if SUPPORT_CAN_EXPANSION
 	if (hasRemote)
 	{
-		const uint32_t lastTimeReceived = whenRemoteLiveBitsReceived;		// capture it before we call millis(), the CanReceiver task may update it
-		return remotePresenceValid && millis() - lastTimeReceived < RemoteLiveBitsTimeout;
+		const uint32_t wrlbr = whenRemoteLiveBitsReceived;		// read this before calling millis() in case the CAN task updates it
+		return remotePresenceValid && millis() - wrlbr < RemoteLiveBitsTimeout;
 	}
 #endif
 	bool dummy;
@@ -169,8 +169,8 @@ bool FilamentMonitor::IsFilamentPresent() const noexcept
 #if SUPPORT_CAN_EXPANSION
 	if (hasRemote)
 	{
-		const uint32_t lastTimeReceived = whenRemoteLiveBitsReceived;		// capture it before we call millis(), the CanReceiver task may update it
-		return remotePresence && remotePresenceValid && millis() - lastTimeReceived < RemoteLiveBitsTimeout;
+		const uint32_t wrlbr = whenRemoteLiveBitsReceived;		// read this before calling millis() in case the CAN task updates it
+		return remotePresence && remotePresenceValid && millis() - wrlbr < RemoteLiveBitsTimeout;
 	}
 #endif
 	bool present = false;
@@ -183,8 +183,8 @@ bool FilamentMonitor::IsMotionDetected() const noexcept
 #if SUPPORT_CAN_EXPANSION
 	if (hasRemote)
 	{
-		const uint32_t lastTimeReceived = whenRemoteLiveBitsReceived;		// capture it before we call millis(), the CanReceiver task may update it
-		return remoteMotion && millis() - lastTimeReceived < RemoteLiveBitsTimeout;
+		const uint32_t wrlbr = whenRemoteLiveBitsReceived;		// read this before calling millis() in case the CAN task updates it
+		return remoteMotion && millis() - wrlbr < RemoteLiveBitsTimeout;
 	}
 #endif
 	return IsLocalMotionDetected();

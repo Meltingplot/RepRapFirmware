@@ -328,8 +328,8 @@ GCodeResult RemoteHeater::ResetFault(const StringRef& reply) noexcept
 
 float RemoteHeater::GetTemperature() const noexcept
 {
-	const uint32_t lastTimeReceived = whenLastStatusReceived;		// capture it before we call millis(), the CanReceiver task may update it
-	if (millis() - lastTimeReceived < RemoteStatusTimeout)
+	const uint32_t wlsr = whenLastStatusReceived;			// read this before calling millis() in case the CAN task updates it
+	if (millis() - wlsr < RemoteStatusTimeout)
 	{
 		return lastTemperature;
 	}
@@ -340,8 +340,8 @@ float RemoteHeater::GetTemperature() const noexcept
 
 float RemoteHeater::GetAveragePWM() const noexcept
 {
-	const uint32_t lastTimeReceived = whenLastStatusReceived;		// capture it before we call millis(), the CanReceiver task may update it
-	return (millis() - lastTimeReceived < RemoteStatusTimeout) ? (float)averagePwm / 255.0 : 0;
+	const uint32_t wlsr = whenLastStatusReceived;			// read this before calling millis() in case the CAN task updates it
+	return (millis() - wlsr < RemoteStatusTimeout) ? (float)averagePwm / 255.0 : 0;
 }
 
 // Return the integral accumulator
@@ -440,9 +440,9 @@ void RemoteHeater::Suspend(bool sus) noexcept
 
 HeaterMode RemoteHeater::GetMode() const noexcept
 {
-	const uint32_t lastTimeReceived = whenLastStatusReceived;		// capture it before we call millis(), the CanReceiver task may update it
+	const uint32_t wlsr = whenLastStatusReceived;			// read this before calling millis() in case the CAN task updates it
 	return (tuningState != TuningState::notTuning) ? HeaterMode::tuning0_settling
-		: (millis() - lastTimeReceived < RemoteStatusTimeout) ? lastMode
+		: (millis() - wlsr < RemoteStatusTimeout) ? lastMode
 			: HeaterMode::offline;
 }
 

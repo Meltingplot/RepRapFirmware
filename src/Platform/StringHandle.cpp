@@ -79,10 +79,8 @@ void StringHandle::Delete() noexcept
 	Heap::IndexSlot *_ecv_null const slot = slotPtr;
 	if (slot != nullptr)
 	{
-		// Clear the pointer to the handle entry before releasing it. Another task may copy this handle at any time, e.g. the object model
-		// reading inputs[].currentFile, and the copy must find either a slot that still holds our reference or no slot at all.
-		slotPtr = nullptr;
 		ReadLocker locker(Heap::heapLock);						// prevent other tasks modifying the heap
+		slotPtr = nullptr;										// clear the pointer first, another task may be copying this handle
 		Heap::DeleteSlot(slot);
 	}
 }
@@ -150,8 +148,9 @@ StringHandle::StringHandle(const StringHandle& source, size_t offset, size_t len
 // AutoStringHandle members
 
 AutoStringHandle::AutoStringHandle(const AutoStringHandle& other) noexcept
-	: StringHandle(other)
 {
+	AtomicCriticalSectionLocker lock;							// the owner may be deleting the handle from another task
+	slotPtr = other.slotPtr;
 	IncreaseRefCount();
 }
 

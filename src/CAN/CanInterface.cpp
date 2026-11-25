@@ -552,8 +552,7 @@ static void ReInitBus0() noexcept
 
 void CanInterface::SwitchToExpansionMode(CanAddress addr, bool useTestMode) noexcept
 {
-	FilamentMonitor::DeleteAll();					// do this before we suspend the scheduler, because it takes a write lock and frees memory
-
+	FilamentMonitor::DeleteAll();						// this takes a lock and releases memory, so it must be done before the scheduler is suspended
 	TaskCriticalSectionLocker lock;
 
 	myAddress = addr;

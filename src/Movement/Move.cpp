@@ -952,13 +952,9 @@ bool Move::SetKinematics(const char *_ecv_array _ecv_null name, int legacyType) 
 		return false;
 	}
 
-	// Point to the new kinematics before deleting the old one. Another task may read this pointer at any time, e.g. the object model
-	// reading move.kinematics, and it must find either the old kinematics intact or the new one.
-	// A task that evaluates an expression may still use the old kinematics after it has read the pointer, so wait until it has finished.
+	// A task that evaluates an expression may still use the old kinematics after it has read the pointer, so wait until it has finished
 	WriteLocker lifetimeLocker(ObjectModel::lifetimeLock);
-	Kinematics *_ecv_from const oldKinematics = kinematics;
-	kinematics = _ecv_not_null(nk);
-	delete oldKinematics;
+	ReplaceObject(kinematics, nk);						// switch the pointer before deleting, another task may be reporting the kinematics
 	reprap.MoveUpdated();
 	return true;
 }
@@ -1684,18 +1680,10 @@ void Move::CreateLaserTask() noexcept
 {
 	if (laserTask == nullptr)
 	{
-		// Allocate the task before we suspend the scheduler, because malloc doesn't take the malloc mutex while the scheduler is suspended
-		Task<LaserTaskStackWords> *_ecv_null newTask = new Task<LaserTaskStackWords>;
-		{
-			TaskCriticalSectionLocker lock;
-			if (laserTask == nullptr)
-			{
-				laserTask = newTask;
-				newTask->Create(LaserTaskStart, "LASER", nullptr, TaskPriority::LaserPriority);
-				newTask = nullptr;
-			}
-		}
-		delete newTask;					// if the laser task was created by another task meanwhile, free the one we allocated now that the scheduler is running again
+		Task<LaserTaskStackWords> * const newTask = new Task<LaserTaskStackWords>;	// this calls malloc, which must not happen with the scheduler suspended
+		TaskCriticalSectionLocker lock;
+		laserTask = newTask;
+		laserTask->Create(LaserTaskStart, "LASER", nullptr, TaskPriority::LaserPriority);
 	}
 }
 
