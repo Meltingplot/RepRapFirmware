@@ -1,14 +1,18 @@
-// Host test of the lock records of ReadWriteLock (RRFLibraries src/RTOSIface/RTOSIface.cpp). A lock record that is allocated with the
-// scheduler suspended runs RRF's malloc without the malloc mutex, because GetMallocMutex takes the mutex only while the scheduler is
-// running (src/Platform/Tasks.cpp:113-120). If a lower-priority task was preempted inside malloc, both work on the heap at once.
+// Host test of the lock records of ReadWriteLock (RRFLibraries src/RTOSIface/RTOSIface.cpp). ReadWriteLock allocates a lock record with
+// the scheduler suspended. Up to RRFLibraries 696a015 that ran RRF's malloc without the malloc mutex, because GetMallocMutex took the
+// mutex only while the scheduler was running; if a lower-priority task was preempted inside malloc, both worked on the heap at once.
+// Since RRFLibraries d8708f0 the free list takes a new record from CoreAllocPermanent, which is allowed with the scheduler suspended,
+// and since RRF d85662412 GetMallocMutex takes the mutex with the scheduler suspended too (src/Platform/Tasks.cpp:113-120), so that
+// FreeRTOS asserts (queue.c:1682) instead of malloc running unprotected.
 //
 // Real code under test (see the Makefile for where each part comes from):
 //  - the ReadWriteLock and Mutex members (RRFLibraries src/RTOSIface/RTOSIface.cpp), RTOSIface.h, General/FreelistManager.h (the
-//    LockRecord free list and its fall-back to ::operator new), from the RRFLibraries tree that the Makefile's RRFLIB names
+//    LockRecord free list and where it takes a new record from), from the RRFLibraries tree that the Makefile's RRFLIB names
 //  - GetMallocMutex / ReleaseMallocMutex (RRF src/Platform/Tasks.cpp:108-128)
-//  - malloc and free (RRF src/libc/nano-mallocr.c) on a private arena; _sbrk is the stand-in of arena.cpp
+//  - malloc and free (RRF src/libc/nano-mallocr.c) on a private arena, with _sbrk and CoreAllocPermanent of CoreN2G src/syscalls.h
 //  - vTaskSuspendAll and xTaskGetSchedulerState (FreeRTOS src/tasks.c)
-// Stand-ins: the single-core scheduler of host_rtos.cpp, _sbrk, and ::operator new / delete below (libsupc++ new_op.cc calls malloc).
+// Stand-ins: the single-core processor and scheduler of host_rtos.cpp (with the interrupt mask of AtomicCriticalSectionLocker), and
+// ::operator new / delete below (libsupc++ new_op.cc calls malloc).
 //
 // Two tasks, with the priorities that RRF gives them (src/Platform/TaskPriorities.h):
 //  MAIN (TaskPriority::SpinPriority = 1) calls malloc. HEAT (TaskPriority::HeatPriority = 3) waits for its next sample time, as
@@ -18,12 +22,15 @@
 // Usage: lock-record-alloc-test <split|sbrk> <race|freelist|outside>
 //        lock-record-alloc-test calls
 //  split     the interrupt comes while MAIN's malloc splits the first free chunk (before nano-mallocr.c:326; only the hook326 builds have it)
-//  sbrk      the interrupt comes while MAIN's malloc grows the heap (inside _sbrk, between the load and the store of heapTop)
+//  sbrk      the interrupt comes while MAIN's malloc grows the heap (inside _sbrk, before its update of heapTop; since CoreN2G c9b23d7
+//            interrupts are disabled there, so it is taken when _sbrk enables them again, still inside malloc)
 //  race      the interrupt that wakes HEAT comes at that point inside MAIN's malloc
 //  freelist  the same, but a lock record is already on the free list (a lock was taken and released before)
 //  outside   the interrupt comes just after MAIN's malloc has returned
 //  calls     MAIN alone calls each of the four functions that take a lock record (LockForReading, ConditionalLockForReading,
 //            LockForWriting, ConditionalLockForWriting) when the free list is empty, and each path that needs no record
+// The check of every run: the live blocks (malloc's and the lock records) do not overlap, malloc's free list is intact, and
+// ::operator new is never called with the scheduler suspended.
 // Exit code: 0 no corruption found and no ::operator new with the scheduler suspended, 1 corruption found, 3 vAssertCalled (the board
 // would reset), 5 ::operator new was called with the scheduler suspended, ASan's own code when it reports.
 
@@ -68,7 +75,7 @@ static ReadWriteLock sensorsLock;									// stands for Heat::sensorsLock (Heat.
 // Live blocks of the arena
 static TestBlock live[32];
 static unsigned int numLive = 0;
-static void *heatRecord = nullptr;									// the lock record that HEAT got from ::operator new, if any
+static void *heatRecord = nullptr;									// the new lock record that HEAT got, if any
 static size_t heatRecordSize = 0;
 
 static void AddLive(void *p, size_t n, const char *what) noexcept
@@ -104,8 +111,8 @@ static const char *SchedulerStateText() noexcept
 }
 
 // libsupc++ new_op.cc: operator new calls malloc, which on the board is RRF's nano-mallocr.c (in one MB6HC 3.7-dev build _Znwj at
-// 0x4ccdc0 calls malloc at 0x400568; the addresses change with every build). Only the LockRecord free list of FreelistManager.h:47
-// calls it in this test.
+// 0x4ccdc0 calls malloc at 0x400568; the addresses change with every build). In this test only the LockRecord free list of an
+// RRFLibraries before d8708f0 calls it, when the list is empty (FreelistManager.h:47 in 696a015).
 void *operator new(std::size_t sz)
 {
 	StaticTask_t *const t = HostRtos::Current();
@@ -116,7 +123,7 @@ void *operator new(std::size_t sz)
 	if (t != nullptr)
 	{
 		const TaskHandle holder = TestMallocMutexHolder();
-		HostRtos::Log("%s: ::operator new(%zu) for a LockRecord (FreelistManager.h:47); scheduler %s, uxSchedulerSuspended %u, mallocMutex held by %s",
+		HostRtos::Log("%s: ::operator new(%zu) for a LockRecord; scheduler %s, uxSchedulerSuspended %u, mallocMutex held by %s",
 						HostRtos::Name(t), sz, SchedulerStateText(), HostRtos::Suspended(), HostRtos::Name(holder));
 	}
 	void *const p = test_malloc((sz == 0) ? 1 : sz);
@@ -150,6 +157,25 @@ void operator delete(void *p) noexcept
 void operator delete(void *p, std::size_t) noexcept
 {
 	operator delete(p);
+}
+
+// FreelistManager.h:51 takes a new item from CoreAllocPermanent when its free list is empty (RRFLibraries d8708f0). This records the
+// block and calls the real CoreAllocPermanent of CoreN2G src/syscalls.h:74, compiled in arena.cpp.
+void *CoreAllocPermanent(size_t sz, std::align_val_t align) noexcept
+{
+	StaticTask_t *const t = HostRtos::Current();
+	HostRtos::Log("%s: CoreAllocPermanent(%zu) for a LockRecord (FreelistManager.h:51); scheduler %s, uxSchedulerSuspended %u, mallocMutex held by %s",
+					HostRtos::Name(t), sz, SchedulerStateText(), HostRtos::Suspended(), HostRtos::Name(TestMallocMutexHolder()));
+	void *const p = test_CoreAllocPermanent(sz, align);
+	TEST_UNPOISON(p, sz);
+	AddLive(p, sz, (t == &heatTask) ? "HEAT's LockRecord" : "a LockRecord");
+	if (t == &heatTask)
+	{
+		heatRecord = p;
+		heatRecordSize = sz;
+	}
+	HostRtos::Log("%s: CoreAllocPermanent returned %p", HostRtos::Name(t), p);
+	return p;
 }
 
 static void *TestMalloc(size_t n, const char *what) noexcept
@@ -186,7 +212,7 @@ extern "C" void TestPreemptionPointSplit()
 
 extern "C" void TestPreemptionPointSbrk()
 {
-	Preempt(Point::sbrk, "_sbrk (between the load of heapTop and its store; target: 0x48db00 .. 0x48db0a in one MB6HC build), called from nano-mallocr.c:266 via :361");
+	Preempt(Point::sbrk, "_sbrk (before its update of heapTop, CoreN2G syscalls.h:59), called from nano-mallocr.c:266 via :361");
 }
 
 extern "C" [[noreturn]] void TestOutOfMemory()
@@ -236,7 +262,7 @@ static void Check(const char *when) noexcept
 }
 
 // The "calls" variant: MAIN takes one lock with each function that needs a new lock record and keeps it, so that the free list stays
-// empty and every record comes from ::operator new. Then it runs the paths that need no record, while the free list is still empty.
+// empty and every lock takes a new record. Then it runs the paths that need no record, while the free list is still empty.
 static ReadWriteLock locks[4];
 
 static void CallsTaskCode(void *) noexcept
@@ -326,7 +352,7 @@ static void HeatTaskCode(void *) noexcept
 		}
 		else
 		{
-			HostRtos::Log("HEAT: holds the read lock, its lock record came from the lock record free list (no ::operator new)");
+			HostRtos::Log("HEAT: holds the read lock, its lock record came from the lock record free list");
 		}
 		HostRtos::Log("HEAT: polls a sensor and waits for the shared SPI bus (SpiTemperatureSensor.cpp:51, SharedSpiClient.cpp:29)");
 		TaskBase::TakeIndexed(HeatNotifyIndex);

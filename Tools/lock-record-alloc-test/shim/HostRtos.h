@@ -3,7 +3,8 @@
 // time, and a context switch happens only where FreeRTOS would switch on the board:
 //  - TestInterrupt(task): an interrupt makes a task ready (the tick waking a delayed task, an ISR giving a notification). If that task has a
 //    higher priority than the running one, the switch happens on return from the interrupt (PendSV), unless the scheduler is suspended:
-//    then it happens in xTaskResumeAll (FreeRTOS tasks.c:4049-4110, xPendingReadyList).
+//    then it happens in xTaskResumeAll (FreeRTOS tasks.c:4049-4110, xPendingReadyList). While interrupts are disabled
+//    (DisableInterrupts, the AtomicCriticalSectionLocker of CoreN2G), the interrupt is held pending until they are enabled again.
 //  - a task blocks: it takes a mutex that another task holds (priority inheritance raises the holder, queue.c:1795), or it waits for a notification.
 //  - a mutex or notification is given to a task with a higher priority (queue.c xQueueGenericSend, tasks.c xTaskGenericNotify).
 // vTaskSuspendAll and xTaskGetSchedulerState are the real FreeRTOS text (tasks.c), extracted into gen/ by the Makefile.
@@ -118,6 +119,8 @@ namespace HostRtos
 	const char *Name(const StaticTask_t *t) noexcept;
 	StaticTask_t *Current() noexcept;
 	void Interrupt(StaticTask_t *woken) noexcept;					// an ISR makes 'woken' ready and requests a context switch
+	void DisableInterrupts() noexcept;								// IrqSave: an interrupt is held pending from now on
+	void EnableInterrupts() noexcept;								// IrqRestore: takes a pending interrupt when the outermost one ends
 	void Log(const char *fmt, ...) noexcept __attribute__((format(printf, 1, 2)));
 	unsigned int Suspended() noexcept;							// uxSchedulerSuspended
 }

@@ -3,12 +3,14 @@
 # Everything taken from the firmware is the real text, compiled from the trees below or extracted into gen/ at build time:
 #
 #   RRF ($(RRF)):                src/libc/nano-mallocr.c (whole file), src/Platform/Tasks.cpp ("// Mutexes" to ReleaseMallocMutex)
+#   CoreN2G ($(COREN2G)):        src/syscalls.h _sbrk and CoreAllocPermanent, with one call inserted before _sbrk's update of heapTop
+#                                (the sbrk scenario's preemption point)
 #   RRFLibraries ($(RRFLIB)):    src/RTOSIface/RTOSIface.h, RTOSIface.cpp (vAssertCalled to the Mutex members, and the ReadWriteLock
 #                                members), General/FreelistManager.h
 #   FreeRTOS ($(FREERTOS)):      src/tasks.c vTaskSuspendAll, xTaskGetSchedulerState
 #
 # Binaries build/[asan-]lock-record-alloc-test-<malloc>:
-#   <malloc>  orig     nano-mallocr.c unchanged (the sbrk scenario's preemption point is in the _sbrk stand-in of arena.cpp)
+#   <malloc>  orig     nano-mallocr.c unchanged (the sbrk scenario's preemption point is in the _sbrk text, see above)
 #             hook326  nano-mallocr.c with one call inserted before line 326 (the split scenario's preemption point)
 #
 #   make              build the plain binaries
@@ -16,9 +18,11 @@
 #   make check        build both and run every scenario; each one must find no corruption and no ::operator new with the
 #                     scheduler suspended
 #   make check RRFLIB=<path>    the same against another RRFLibraries tree, e.g. one with a fix
+#   make check COREN2G=<path>   the same against another CoreN2G tree
 
 RRF ?= ../..
 RRFLIB ?= $(RRF)/../RRFLibraries
+COREN2G ?= $(RRF)/../CoreN2G
 FREERTOS ?= $(RRF)/../FreeRTOS
 
 CXX ?= g++
@@ -34,7 +38,7 @@ EXTRACT = @mkdir -p gen && awk -v f="$(abspath $(2))" $(3) -f extract.awk $(2) >
 
 # The RRFLibraries path is part of the generated text, so a change of RRFLIB rebuilds everything that depends on it
 GEN := gen/RTOSIface-mutex.inc gen/RTOSIface-rwlock.inc gen/Tasks-malloc-mutex.inc gen/vTaskSuspendAll.inc gen/xTaskGetSchedulerState.inc \
-	gen/nano-mallocr-hook326.c
+	gen/nano-mallocr-hook326.c gen/syscalls-heap.inc
 HDRS := $(wildcard shim/*.h) arena.h malloc_names.h $(RRFLIB)/src/RTOSIface/RTOSIface.h $(RRFLIB)/src/General/FreelistManager.h Makefile
 
 PLAIN := build/lock-record-alloc-test-orig build/lock-record-alloc-test-hook326
@@ -67,6 +71,9 @@ gen/xTaskGetSchedulerState.inc: $(FREERTOS)/src/tasks.c extract.awk Makefile
 gen/nano-mallocr-hook326.c: $(RRF)/src/libc/nano-mallocr.c extract.awk Makefile
 	$(call EXTRACT,,$<,-v hook='^                    r->size = alloc_size;$$' -v text='TestPreemptionPointSplit();')
 
+gen/syscalls-heap.inc: $(COREN2G)/src/syscalls.h extract.awk Makefile
+	$(call EXTRACT,,$<,-v start='^extern "C" void [*] _sbrk[(]ptrdiff_t incr[)] noexcept$$' -v endafter='^void [*]CoreAllocPermanent[(]size_t sz.*[)] noexcept$$' -v end='^}$$' -v hook='^[ \t]*heapTop = newHeap;$$' -v text='TestPreemptionPointSbrk();')
+
 # Objects. $(1) = plain or asan, $(2) = extra flags
 define objects
 build/$(1)/host_rtos.o: host_rtos.cpp $(GEN) $(HDRS)
@@ -92,9 +99,9 @@ build/nano-orig.o: $(RRF)/src/libc/nano-mallocr.c malloc_names.h Makefile
 build/nano-hook326.o: gen/nano-mallocr-hook326.c malloc_names.h Makefile
 	@mkdir -p build
 	$(CC) $(CBASE) $(CFLAGS) -c $< -o $@
-build/arena.o: arena.cpp arena.h Makefile
+build/arena.o: arena.cpp arena.h gen/syscalls-heap.inc shim/HostRtos.h Makefile
 	@mkdir -p build
-	$(CXX) $(BASEFLAGS) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(BASEFLAGS) $(CXXFLAGS) -Ishim -c $< -o $@
 
 # Binaries. $(1) = malloc variant
 define binary

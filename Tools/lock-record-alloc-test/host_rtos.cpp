@@ -33,6 +33,8 @@ static pthread_cond_t cpuChanged = PTHREAD_COND_INITIALIZER;
 static StaticTask_t *running = nullptr;								// the task that has the processor
 static bool yieldPending = false;									// xYieldPendings[0] in tasks.c: a switch held while the scheduler is suspended
 static unsigned int criticalNesting = 0;							// FreeRTOS uxCriticalNesting (port.c)
+static unsigned int interruptsDisabled = 0;						// PRIMASK set by IrqSave (CoreN2G AtomicCriticalSectionLocker), nested
+static StaticTask_t *pendingWoken = nullptr;						// the task that an interrupt pending while they are disabled makes ready
 static unsigned int logSequence = 0;
 
 // The FreeRTOS scheduler state, as declared in tasks.c:506 and :531
@@ -190,6 +192,12 @@ namespace HostRtos
 	// port.c:550-567), because the running task is preemptible at every instruction (configUSE_PREEMPTION 1, FreeRTOSConfig.h:77).
 	void Interrupt(StaticTask_t *woken) noexcept
 	{
+		if (interruptsDisabled != 0)
+		{
+			Log("INTERRUPT while %s runs with interrupts disabled: it stays pending until they are enabled again", Name(running));
+			pendingWoken = woken;
+			return;
+		}
 		pthread_mutex_lock(&cpu);
 		Log("INTERRUPT while %s runs: it makes %s (priority %lu) ready", Name(running), Name(woken), woken->uxPriority);
 		if (woken->host->state == HostTaskState::BlockedOnNotification)
@@ -199,6 +207,24 @@ namespace HostRtos
 		}
 		SwitchIfHigher(woken);
 		pthread_mutex_unlock(&cpu);
+	}
+
+	// IrqSave and IrqRestore of CoreN2G (Core.h), nested as AtomicCriticalSectionLocker nests them by saving PRIMASK. When the outermost
+	// one ends, the processor takes the interrupt that came meanwhile.
+	void DisableInterrupts() noexcept
+	{
+		++interruptsDisabled;
+	}
+
+	void EnableInterrupts() noexcept
+	{
+		if (--interruptsDisabled == 0 && pendingWoken != nullptr)
+		{
+			StaticTask_t *const woken = pendingWoken;
+			pendingWoken = nullptr;
+			Log("%s enables interrupts again: the pending interrupt is taken", Name(running));
+			Interrupt(woken);
+		}
 	}
 }
 
@@ -240,7 +266,7 @@ BaseType_t xTaskResumeAll() noexcept
 void vPortEnterCritical() noexcept { ++criticalNesting; }
 void vPortExitCritical() noexcept { --criticalNesting; }
 uint32_t __get_BASEPRI() noexcept { return (criticalNesting != 0) ? 0x50 : 0; }
-uint32_t __get_PRIMASK() noexcept { return 0; }
+uint32_t __get_PRIMASK() noexcept { return (interruptsDisabled != 0) ? 1 : 0; }
 
 void HostYield() noexcept { }
 

@@ -30,7 +30,7 @@ gen/RTOSIfaceClasses.inc: $(RRFLIBS)/src/RTOSIface/RTOSIface.h extract.awk Makef
 	$(call EXTRACT,class:ReadWriteLock class:ReadLocker class:WriteLocker class:WriteLockedPointer)
 
 gen/RTOSIface.inc: $(RRFLIBS)/src/RTOSIface/RTOSIface.cpp extract.awk Makefile
-	$(call EXTRACT,class:LockRecord NewLockRecord ReadWriteLock::LockForReading ReadWriteLock::ReleaseReader ReadWriteLock::LockForWriting ReadWriteLock::ReleaseWriter)
+	$(call EXTRACT,class:LockRecord ReadWriteLock::LockForReading ReadWriteLock::ReleaseReader ReadWriteLock::LockForWriting ReadWriteLock::ReleaseWriter)
 
 gen/ReplaceObject.inc: $(SRC)/RepRapFirmware.h extract.awk Makefile
 	$(call EXTRACT,ReplaceObject)
