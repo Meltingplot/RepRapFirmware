@@ -16,6 +16,11 @@ file has the reasoning and the findings.
 - **Upstream sync of 2026-11-25** (3.7-dev and 3.7-ch, RRFLibraries 18a6ddd): upstream replaced two of the fixes with fixes of
   its own. RRFLibraries acefba1 replaced the K23 fix, and its `ReadWriteLock::LockForReading` and `LockForWriting` keys are
   FIXED; e520116e9 replaced the `FillBuffer` fix, and its key went away (see below).
+- **Upstream sync of 2026-11-26** (3.7-ch, RRFLibraries f09f64e with d8708f0, CoreN2G c9b23d7, RRF d85662412): the free lists
+  take new items from `CoreAllocPermanent`, so the lock functions no longer reach `operator new`, and the two `ReadWriteLock`
+  keys went away. 105 entries. `CoreAllocPermanent` takes an interrupt lock and no mutex and is not a target of the check (README,
+  "Targets"). Heap use with the scheduler suspended now fails an assertion in `GetMallocMutex` instead of running without the
+  mutex.
 - **How:** the heap findings were read in the code, each fix has a host test under `Tools/` that fails without it, and the
   fixed firmware was built and checked (the key goes away). The targets of the calls through a register were read by two
   agents, one for the exception handlers and one for the task regions, with file and line for each target.
@@ -62,7 +67,7 @@ CHX first: MB6HC in SBC mode, with TOOL1LC, EXP1HCL and SZP expansion boards on 
 
 | Entry | Task(s) | CHX | Fix |
 |---|---|---|---|
-| `ReadWriteLock::LockForReading`, `LockForWriting` (K23) | every task that takes a lock: heat (sensor list), Move, CAN receiver, main, SBC | **real**: heat (3) against main (1) and SBC (2) inside `malloc` | fixed by RRFLibraries #2 (888b479), replaced by upstream acefba1 on 2026-11-25; both keys are FIXED; test `Tools/lock-record-alloc-test` from #71 |
+| `ReadWriteLock::LockForReading`, `LockForWriting` (K23) | every task that takes a lock: heat (sensor list), Move, CAN receiver, main, SBC | **real**: heat (3) against main (1) and SBC (2) inside `malloc` | fixed by RRFLibraries #2 (888b479), replaced by upstream acefba1 on 2026-11-25 and by d8708f0 on 2026-11-26; the keys went away; test `Tools/lock-record-alloc-test` from #71 |
 | `Event::AddEventV` | heat (heater faults, `LocalHeater.cpp:1069`), CAN receiver (expansion board events, `CommandProcessor.cpp:764`; `ExpansionManager.cpp:181-187, 616`), main (driver events from `Move::PollOneDriver`, `Move.cpp:3986`, `:4021`, called by `Platform::Spin`, `Platform.cpp:883`; M957 `GCodes3.cpp:1595`, filament errors) | **real**: an event from an expansion board or a heater fault while main or SBC is inside `malloc`, whenever the Event freelist is empty | fixed by #72 |
 | `SbcInterface::FillBuffer` | main, SBC mode only | latent (no priority-1 peer in SBC mode); the first code of each channel | fixed by #77, replaced by upstream e520116e9 on 2026-11-25; the key went away |
 | `DDARing::ConfigureMovementQueue` (M595 P) | main | latent in SBC mode, real without SBC after `network->Activate` | fixed by #73 |
@@ -88,6 +93,8 @@ Notes on the heap findings:
   list inside the critical section and leaves the critical section only to allocate when the list is empty (`RTOSIface.cpp:257-269`).
   Where the compiler does not inline `NewLockRecord` (both lock functions in all three configurations), the check sees the call
   inside the region but not that the callee leaves the region before it allocates, so both keys are FIXED.
+  Upstream d8708f0 (merged in f09f64e, 2026-11-26) removed `NewLockRecord`: the free list takes a new record from
+  `CoreAllocPermanent` inside the critical section (`FreelistManager.h:51`), which takes no mutex, and both keys went away.
 - **`Event::AddEventV`.** The new event is created inside the `TaskCriticalSectionLocker` (`Event.cpp:41-58`). `Event` uses the
   freelist (`Event.h:40`), so it allocates when no released event is on the list. The fix creates it before the locker and
   releases it after the locker when a similar event is queued.
@@ -104,7 +111,8 @@ Notes on the heap findings:
 - **M595, laser task, M951.** `DDA::operator new` is `Tasks::AllocPermanent` (`DDA.h:104`); `Task<>` has no `operator new` of its
   own, so the tasks come from `::operator new`. The fixes allocate before the locker; the two task fixes check again inside the
   locker and free an unused task after it (`TaskBase::TerminateAndUnlink` does nothing for a task that was never created,
-  `RTOSIface.cpp:178-200`).
+  `RTOSIface.cpp:178-200`). Upstream 5bc928ebf replaced the two task fixes (allocation before the locker, no second check), and
+  c37cac98f replaced the locker with a write lock around the check, the allocation and the creation.
 - **M954.** `GCodes::SwitchToExpansionMode` (`GCodes3.cpp:664-677`) calls `FilamentMonitor::DeleteAll`
   (`FilamentMonitor.cpp:767-778`), which takes a `WriteLocker` and deletes each monitor. Inside the region the write lock also
   allocates a lock record and may wait for a reader, which a task must not do with the scheduler suspended. The fix deletes the
