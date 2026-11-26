@@ -1,12 +1,16 @@
-// The heap that RRF's nano-mallocr.c grows with _sbrk, and the check of its free list. Compiled without AddressSanitizer, like
-// nano-mallocr.c, because both touch the chunk headers and free-list links that the ASan build keeps poisoned.
+// The heap that RRF's nano-mallocr.c grows with _sbrk, the real _sbrk and CoreAllocPermanent of CoreN2G, and the check of the free list.
+// Compiled without AddressSanitizer, like nano-mallocr.c, because both touch the chunk headers and free-list links that the ASan build
+// keeps poisoned.
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <new>
 
 #include "arena.h"
+#include "HostRtos.h"
 
 extern "C"
 {
@@ -15,30 +19,32 @@ extern "C"
 	// CoreN2G src/syscalls.h:44 (heapTop = &_end) and :38 (heapLimit = _sstack), here the ends of the private arena
 	char *testHeapTop = testArena;
 	const char *testHeapLimit = testArena + TestArenaSize;
-
-	// Stand-in for CoreN2G src/syscalls.h:49-64 (_sbrk), which nano-mallocr.c calls through sbrk_aligned (nano-mallocr.c:264, :266, :277).
-	// The compiled function loads heapTop once (ldr r0, [r2]), adds incr, compares with heapLimit and stores the new top (str r3, [r2]),
-	// then returns the value it loaded. The addresses here and below are those of one MB6HC 3.7-dev build (Duet3Firmware_MB6HC.elf,
-	// _sbrk at 0x48daf8) and change with every build.
-	// This stand-in has the same order of the load and the store; TestPreemptionPointSbrk stands for an interrupt between them, which the
-	// target allows because _sbrk runs with interrupts enabled (Tasks.cpp:117 asserts that BASEPRI and PRIMASK are 0 in GetMallocMutex).
-	void *test_sbrk(ptrdiff_t incr)
-	{
-		char *const prevHeap = testHeapTop;							// ldr r0, [r2]		0x48db00
-		if (incr != 0)
-		{
-			TestPreemptionPointSbrk();
-		}
-		char *const newHeap = prevHeap + incr;						// add r3, r0		0x48db04
-		if (newHeap <= testHeapLimit)								// cmp r1, r3		0x48db06
-		{
-			testHeapTop = newHeap;									// str r3, [r2]		0x48db0a
-			return prevHeap;
-		}
-		TestOutOfMemory();											// OutOfMemoryHandler, syscalls.h:59
-		return reinterpret_cast<void *>(-1);
-	}
 }
+
+// CoreN2G src/CoreIO.h:353-372, which _sbrk and CoreAllocPermanent take since CoreN2G c9b23d7: IrqSave disables interrupts and
+// IrqRestore restores PRIMASK. Played by the processor of host_rtos.cpp, which holds an interrupt that comes meanwhile until interrupts
+// are enabled again, as the NVIC does with a pending interrupt when PRIMASK is cleared.
+class AtomicCriticalSectionLocker
+{
+public:
+	AtomicCriticalSectionLocker() noexcept { HostRtos::DisableInterrupts(); }
+	~AtomicCriticalSectionLocker() noexcept { HostRtos::EnableInterrupts(); }
+};
+
+// The real _sbrk and CoreAllocPermanent of CoreN2G src/syscalls.h:50-86, which the Makefile extracts into gen/, on the private arena.
+// nano-mallocr.c calls _sbrk through sbrk_aligned (nano-mallocr.c:264, :266, :277), and FreelistManager.h:51 calls CoreAllocPermanent
+// for a lock record (through the recording CoreAllocPermanent of lock_record_alloc_test.cpp). The sbrk scenario's preemption point
+// TestPreemptionPointSbrk is inserted before _sbrk's update of heapTop (syscalls.h:59); the interrupt it raises stays pending until the
+// AtomicCriticalSectionLocker of _sbrk is released.
+#define _ecv_array
+#define heapTop					testHeapTop
+#define heapLimit				testHeapLimit
+#define _sbrk					test_sbrk
+#define CoreAllocPermanent		test_CoreAllocPermanent
+#define OutOfMemoryHandler		TestOutOfMemory
+#define uint32_t				uintptr_t					// syscalls.h casts pointers to uint32_t, which is too narrow on the 64-bit host
+#include "gen/syscalls-heap.inc"
+#undef uint32_t
 
 // The chunk layout of nano-mallocr.c:180-207
 struct Chunk

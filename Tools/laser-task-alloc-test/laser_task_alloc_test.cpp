@@ -1,17 +1,19 @@
 // Host test of the allocation of the laser task by Move::CreateLaserTask (src/Movement/Move.cpp), compiled from the real text of the
-// function and of the definition of Move::laserTask that the Makefile extracts.
+// function and of the definitions of Move::laserTask and Move::laserTaskLock that the Makefile extracts.
 //
 // Task<> has no operator new of its own (RRFLibraries src/RTOSIface/RTOSIface.h), so the laser task comes from ::operator new and
-// so from RRF's malloc. That takes the malloc mutex only while the scheduler is running (GetMallocMutex in src/Platform/Tasks.cpp),
-// so a malloc with the scheduler suspended runs without it, while a task of the same or a lower priority may have been preempted
-// inside malloc. CreateLaserTask runs in the main task, when laser mode or IOBits is selected (M452, M670), a scanning Z probe is
-// configured (EndstopsManager.cpp), M571 is used (Platform.cpp) or extruder heater feedforward is configured (Tool.cpp). Up to
-// 3.7-dev de1bfe598 it allocated the task inside its TaskCriticalSectionLocker, which suspends the scheduler.
+// so from RRF's malloc, which must not run with the scheduler suspended (GetMallocMutex in src/Platform/Tasks.cpp). CreateLaserTask
+// is called when laser mode or IOBits is selected (M452, M670), a scanning Z probe is configured (EndstopsManager.cpp), M571 is used
+// (Platform.cpp) or extruder heater feedforward is configured (Tool.cpp). Up to 3.7-dev de1bfe598 it allocated the task inside its
+// TaskCriticalSectionLocker, which suspends the scheduler. Upstream 5bc928ebf allocated it before the locker, and c37cac98f replaced
+// the locker by a write lock on laserTaskLock around the check, the allocation and the creation, and publishes the task pointer only
+// after Create, so that two callers cannot both create the task and nothing notifies a task that has not been created yet.
 //
-// The test plays TaskCriticalSectionLocker (RRFLibraries RTOSIface.h) with a counter, Task<> with a stand-in whose Create records
-// the call, and ::operator new and delete with the host heap. No allocation or free may happen with the scheduler suspended. It also
-// checks what CreateLaserTask does: it creates the task once and a second call does nothing. Every caller runs in the main task, so
-// no other task can create the laser task while this one allocates its own.
+// The test plays TaskCriticalSectionLocker (RRFLibraries RTOSIface.h) with a counter, ReadWriteLock and WriteLocker with a flag and a
+// waiting task, Task<> with a stand-in whose Create records the call, and ::operator new and delete with the host heap. No
+// allocation or free may happen with the scheduler suspended, and the task pointer must not be set before Create. It also checks what
+// CreateLaserTask does: it creates the task once, a second call does nothing, and another task that calls it while this one allocates
+// the task (played inside operator new) waits for the write lock and creates no second task.
 
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +34,7 @@ static unsigned int suspended = 0;							// uxSchedulerSuspended
 static bool checking = false;									// true while a case runs CreateLaserTask
 static std::vector<std::string> failures;
 static unsigned int taskAllocations = 0, taskFrees = 0, creates = 0;
+static void (*duringAllocation)() = nullptr;					// another task that runs while CreateLaserTask allocates, if it can
 
 // As TaskCriticalSectionLocker in RRFLibraries src/RTOSIface/RTOSIface.h: vTaskSuspendAll in the constructor, xTaskResumeAll in
 // the destructor
@@ -42,7 +45,39 @@ public:
 	~TaskCriticalSectionLocker() noexcept { --suspended; }
 };
 
+// Just what CreateLaserTask uses of ReadWriteLock and WriteLocker (RRFLibraries RTOSIface.h). LockForWriting suspends the scheduler
+// only while it updates its lock records, so the holder runs, and allocates, with the scheduler running. Played on one thread: a task
+// that asks for the write lock while another one holds it waits until that one releases it (LockForWriting in RTOSIface.cpp), so the
+// waiting task runs when the lock is released.
+class ReadWriteLock
+{
+public:
+	bool writeLocked = false;
+	void (*waiter)() = nullptr;										// the task that waits for the write lock, if any
+};
+
+class WriteLocker
+{
+public:
+	explicit WriteLocker(ReadWriteLock& p_lock) noexcept : lock(p_lock) { lock.writeLocked = true; }
+	~WriteLocker() noexcept
+	{
+		lock.writeLocked = false;
+		if (lock.waiter != nullptr)
+		{
+			void (*const waiting)() = lock.waiter;
+			lock.waiter = nullptr;
+			waiting();
+		}
+	}
+
+private:
+	ReadWriteLock& lock;
+};
+
 typedef void (*TaskFunction_t)(void *);
+class TaskBase;
+static bool IsPublished(const TaskBase *t) noexcept;
 
 // Just what CreateLaserTask uses of TaskBase and Task (RRFLibraries RTOSIface.h). As there, a task that was never created has a zero
 // taskId, and the destructor of such a task does nothing (TaskBase::TerminateAndUnlink in RTOSIface.cpp).
@@ -65,6 +100,10 @@ public:
 		{
 			failures.push_back("Create was called twice on the same task");
 		}
+		if (IsPublished(this))
+		{
+			failures.push_back("the task pointer was set before the task was created");
+		}
 		taskId = 1;
 		++creates;
 	}
@@ -83,9 +122,15 @@ public:
 
 	static constexpr size_t LaserTaskStackWords = 300;
 	static Task<LaserTaskStackWords> *_ecv_null laserTask;
+	static ReadWriteLock laserTaskLock;
 };
 
 #include "CreateLaserTask.inc"
+
+static bool IsPublished(const TaskBase *t) noexcept
+{
+	return Move::laserTask == t;
+}
 
 // The host heap, with the check. Only the allocations of a laser task are counted, by their size.
 void *operator new(size_t sz)
@@ -99,7 +144,21 @@ void *operator new(size_t sz)
 		}
 		++taskAllocations;
 	}
-	return malloc(sz);
+	void *const p = malloc(sz);
+	if (isTask && duringAllocation != nullptr && suspended == 0)		// another task can run only while the scheduler is running
+	{
+		void (*const other)() = duringAllocation;
+		duringAllocation = nullptr;
+		if (Move::laserTaskLock.writeLocked)
+		{
+			Move::laserTaskLock.waiter = other;						// it waits for the write lock
+		}
+		else
+		{
+			other();
+		}
+	}
+	return p;
 }
 
 void operator delete(void *p) noexcept
@@ -122,10 +181,11 @@ void operator delete(void *p, size_t sz) noexcept
 
 static unsigned int passed = 0, failed = 0;
 
-static void Case(const char *name, unsigned int calls, unsigned int expectedAllocations, unsigned int expectedFrees) noexcept
+static void Case(const char *name, unsigned int calls, void (*other)(), unsigned int expectedAllocations, unsigned int expectedFrees) noexcept
 {
 	failures.clear();
 	taskAllocations = taskFrees = creates = 0;
+	duringAllocation = other;
 	checking = true;
 	for (unsigned int i = 0; i < calls; ++i)
 	{
@@ -165,10 +225,17 @@ static void Case(const char *name, unsigned int calls, unsigned int expectedAllo
 	Move::laserTask = nullptr;
 }
 
+// A higher priority task that calls CreateLaserTask while the main task allocates the laser task
+static void OtherTaskCreates() noexcept
+{
+	Move::CreateLaserTask();
+}
+
 int main()
 {
-	Case("the laser task is allocated with the scheduler running and created", 1, 1, 0);
-	Case("a second call does not create another laser task", 2, 1, 0);
+	Case("the laser task is allocated with the scheduler running and created", 1, nullptr, 1, 0);
+	Case("a second call does not create another laser task", 2, nullptr, 1, 0);
+	Case("another task that calls it meanwhile waits for the write lock and creates no second laser task", 1, OtherTaskCreates, 1, 0);
 	printf("%u passed, %u failed\n", passed, failed);
 	return (failed == 0) ? 0 : 1;
 }

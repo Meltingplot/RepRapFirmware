@@ -37,8 +37,8 @@ and `GCodeBuffer::RequestMacroFile` report an internal error when the caller hol
 
 The Makefile copies the real text out of the sources at build time (`extract.awk`, with `#line` directives so that messages point at
 the real lines):
-- RRFLibraries `src/RTOSIface/RTOSIface.h` and `RTOSIface.cpp`: `ReadWriteLock` and its `LockRecord` with `NewLockRecord`,
-  `ReadLocker`, `WriteLocker`, `ReadLockedPointer`;
+- RRFLibraries `src/RTOSIface/RTOSIface.h` and `RTOSIface.cpp`: `ReadWriteLock` and its `LockRecord`, `ReadLocker`, `WriteLocker`,
+  `ReadLockedPointer`;
 - `src/SBC/SbcInterface.cpp`: `FileExists`, `TruncateFile`, `CloseFile`, `WaitForFileSlot`, `PostFileOperation`, `DoFileOperation`;
 - `src/CAN/ExpansionManager.cpp`: `ProcessAnnouncement`; `src/Accelerometers/Accelerometers.cpp`: `RemoteBoardRestarted`;
 - `src/Platform/Platform.cpp`: both `SysFileExists`;

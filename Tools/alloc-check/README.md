@@ -16,15 +16,19 @@ libraries that `LIBRARIES` names and in the name of the project in its texts. A 
 ## Why
 
 RRF's heap is newlib's nano-malloc in `src/libc/nano-mallocr.c`. Its lock is `MALLOC_LOCK`, which is `GetMallocMutex`
-(`nano-mallocr.c:134-135`). `GetMallocMutex` (`src/Platform/Tasks.cpp:113-120`) takes the malloc mutex only while the scheduler
-is running. With the scheduler suspended, or before it starts, it takes nothing. `Tasks::AllocPermanent` (`Tasks.cpp:323-329`)
-takes the same mutex around `CoreAllocPermanent`, which lowers the heap limit that `_sbrk` checks (CoreN2G `src/syscalls.h:49-78`).
-This gives two failures:
-- **The mutex is skipped.** Code that allocates or frees with the scheduler suspended runs `malloc` without the mutex. If a task
-  of the same or a lower priority was preempted inside `malloc`, both work on the free list or the heap top at once and corrupt
-  the heap. Preemption and time slicing are on (FreeRTOS `FreeRTOSConfig.h:77`, `:84`). `malloc` blocks only at the mutex,
-  before it touches the heap, so a region in a task of priority p collides only with a task of priority p or lower that was
-  preempted inside `malloc`. `Tools/lock-record-alloc-test` plays this with the real code for `ReadWriteLock` (finding K23).
+(`nano-mallocr.c:134-135`). `GetMallocMutex` (`src/Platform/Tasks.cpp:113-120`) takes the malloc mutex whenever the scheduler
+has started; before it starts, it takes nothing. Up to upstream d85662412 (2026-11-25) it took the mutex only while the scheduler
+was running, so it took nothing with the scheduler suspended either. `Tasks::AllocPermanent` (`Tasks.cpp:323-326`) calls
+`CoreAllocPermanent`, which lowers the heap limit that `_sbrk` raises. Since CoreN2G c9b23d7 both check and move their end of
+the free memory inside an `AtomicCriticalSectionLocker` (CoreN2G `src/syscalls.h:50-86`), and since d85662412 `AllocPermanent`
+takes no mutex, so permanent allocation is allowed in every region. This gives two failures:
+- **The heap with the scheduler suspended.** Code that allocates or frees with the scheduler suspended takes the malloc mutex
+  then. Since d85662412 that fails the assertion of `xQueueSemaphoreTake` (FreeRTOS `queue.c:1682`) and the board resets, which
+  upstream intends. Before, `malloc` ran without the mutex: if a task of the same or a lower priority was preempted inside
+  `malloc`, both worked on the free list or the heap top at once and corrupted the heap. Preemption and time slicing are on
+  (FreeRTOS `FreeRTOSConfig.h:77`, `:84`). `malloc` blocks only at the mutex, before it touches the heap, so a region in a task
+  of priority p collided only with a task of priority p or lower that was preempted inside `malloc`.
+  `Tools/lock-record-alloc-test` plays this with the real code for `ReadWriteLock` (finding K23).
 - **The guard is lifted.** If the scheduler is running, taking the mutex runs a FreeRTOS critical section (FreeRTOS
   `queue.c:1688`, `:1737`), also when the mutex is free; only a task that holds it already skips that (`queue.c:833-844`). Its
   end writes BASEPRI 0 when the nesting count drops to 0 (`vPortExitCritical`, `port.c:480-489` on the Cortex-M7 r0p1,
@@ -38,7 +42,7 @@ In an exception handler the heap is never safe: the interrupted task may be insi
 ### History of the class
 
 - RRF d4b10780d (D. Crocker, 2018-04-05, "More RTOS work again") introduced `GetMallocMutex` with the test "don't take mutex if
-  scheduler not started or suspended" that is still there.
+  scheduler not started or suspended" that was there until d85662412.
 - RRFLibraries 2422ef6 (D. Crocker, 2024-10-08, "Fixed call to ::operator new inside a critical section"): the freelist
   `AllocateItem` (`General/FreelistManager.h`) called `::operator new` inside its own `TaskCriticalSectionLocker`. The fix leaves
   the locker before it allocates. On the same day D3E 0a1c2b65 ("Shortened an excessively long critical section") cut down a
@@ -48,6 +52,12 @@ In an exception handler the heap is never safe: the interrupted task may be insi
   `MoveSegment::PrimeFreeList` before the booster and adds the assertion to `GetMallocMutex`.
 - This fork (2026-11-22): K23, `ReadWriteLock` allocating its lock records with the scheduler suspended (RRFLibraries #2), and
   the sites that `census.md` lists (RRF #72-#77).
+- Upstream (C. Hammacher, 2026-11-25), taken in the syncs of 2026-11-25 and 2026-11-26: RRFLibraries acefba1 replaced the K23
+  fix with `NewLockRecord`, and d8708f0 replaced that with free lists that take new items from `CoreAllocPermanent`. CoreN2G
+  c9b23d7 put `_sbrk` and `CoreAllocPermanent` under an interrupt lock. RRF d85662412 removed the mutex from `AllocPermanent` and
+  made `GetMallocMutex` take it with the scheduler suspended, so that the heap there fails an assertion instead of running
+  unprotected. Upstream e520116e9, 5bc928ebf and c37cac98f replaced the fixes of `FillBuffer` and of the laser and height
+  controller tasks.
 
 The search covered the commit messages of RRF, RRFLibraries, CoreN2G, CANlib, the FreeRTOS fork and Duet3Expansion for
 allocation with critical sections, suspension and interrupts. CoreN2G, CANlib and FreeRTOS have no fix of this class.
@@ -78,7 +88,7 @@ not analysed as a region: it suspends the scheduler inline, and it does not allo
 0 (`FreeRTOSConfig.h:269`).
 
 **Targets.** The heap functions of `nano-mallocr.c` (`malloc`, `free`, `realloc`, `calloc`, `cfree`, `memalign`, `valloc`,
-`pvalloc`, `mallinfo`, `malloc_stats`, `_malloc_r`), `_sbrk` and `CoreAllocPermanent` (CoreN2G `syscalls.h`),
+`pvalloc`, `mallinfo`, `malloc_stats`, `_malloc_r`), `_sbrk` (CoreN2G `syscalls.h`),
 `GetMallocMutex`/`ReleaseMallocMutex`, and newlib's `__malloc_lock`/`__malloc_unlock`, also as clones that the compiler splits off
 (`GetMallocMutex.part.0`). The allocation functions count as targets themselves: `operator new` and `delete`,
 `Tasks::AllocPermanent`, `MessageBufferAlloc` (through which CANlib's `CanMessageBuffer` allocates, CANlib
@@ -86,6 +96,12 @@ not analysed as a region: it suspends the scheduler inline, and it does not allo
 a call to one reaches the heap even when the compiler has inlined the heap functions into it. Everything that calls a target
 directly or through other direct calls reaches the heap, for example the freelist allocators, which call `operator new` when their
 list is empty. The key names the first allocation function on the chain, or the heap function itself.
+
+`CoreAllocPermanent` is not a target: since CoreN2G c9b23d7 it takes an interrupt lock and no mutex, so it may be called in every
+region, and since RRFLibraries d8708f0 the free lists call it inside the critical section of `ReadWriteLock`. It was in the list
+of heap functions until 2026-11-26 but never matched, because the name of a C++ function has its parameter list; its only caller
+then was `Tasks::AllocPermanent`, which is a target. `Tasks::AllocPermanent` and `MessageBufferAlloc` are still targets, although
+since d85662412 they take no mutex either, so their findings (`Move::AddLinearSegments`, SAFE-PRIMED) stay.
 
 **Calls through a register.** A call through a function pointer, a virtual call or a `function_ref` has a target that the check
 cannot see. Each one inside a region, and each direct call inside a region to a function that can reach one, gives a finding with
@@ -122,7 +138,7 @@ function to the heap and to calls through a register.
   upstream e520116e9 replaced that fix.
 - **A callee that leaves the region of its caller.** A function that ends the region, reaches the heap and opens the region again
   before it returns leaves the state unchanged, so its call is found inside the caller's region. Upstream `NewLockRecord`
-  (RRFLibraries `RTOSIface.cpp:257-269`) is such a case where it is not inlined.
+  (RRFLibraries acefba1, removed in d8708f0) was such a case where it was not inlined.
 - **The run-time context of a function.** A function that is only ever called with the scheduler suspended, but that does not
   suspend it itself, is a region only through its callers' calls. A region that a caller opens and a callee closes (or the other
   way round) on some paths only is taken as unchanged, with a note.
