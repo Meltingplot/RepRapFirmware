@@ -2,16 +2,18 @@
 // src/Movement/HeightControl/HeightController.cpp), compiled from the real text of the function that the Makefile extracts.
 //
 // Task<> has no operator new of its own (RRFLibraries src/RTOSIface/RTOSIface.h), so the task comes from ::operator new and so from
-// RRF's malloc. That takes the malloc mutex only while the scheduler is running (GetMallocMutex in src/Platform/Tasks.cpp), so a
-// malloc with the scheduler suspended runs without it, while a task of the same or a lower priority may have been preempted inside
-// malloc. M951 runs in the task of the G-code channel, the main task. Up to 3.7-dev de1bfe598, Configure allocated the task inside
-// its TaskCriticalSectionLocker, which suspends the scheduler.
+// RRF's malloc, which must not run with the scheduler suspended (GetMallocMutex in src/Platform/Tasks.cpp). Up to 3.7-dev de1bfe598,
+// Configure allocated the task inside its TaskCriticalSectionLocker, which suspends the scheduler. Upstream 5bc928ebf allocated it
+// before the locker, and c37cac98f replaced the locker by a write lock on taskLock around the check, the allocation and the creation,
+// and publishes the task pointer only after Create, so that two callers cannot both create the task and nothing notifies a task
+// that has not been created yet.
 //
-// The test plays TaskCriticalSectionLocker (RRFLibraries RTOSIface.h) with a counter, Task<> with a stand-in whose Create records the
-// call, and ::operator new and delete with the host heap. No allocation or free of the task may happen with the scheduler suspended.
-// It also checks what M951 does: H creates the task once, a second M951 does not create another, without a sensor no task is created,
-// and M951 without parameters reports the settings. M951 runs only in the main task, so no other task can create the task while this
-// one allocates its own.
+// The test plays TaskCriticalSectionLocker (RRFLibraries RTOSIface.h) with a counter, ReadWriteLock and WriteLocker with a flag and
+// a waiting task, Task<> with a stand-in whose Create records the call, and ::operator new and delete with the host heap. No
+// allocation or free of the task may happen with the scheduler suspended, and the task pointer must not be set before Create. It also
+// checks what M951 does: H creates the task once, a second M951 does not create another, without a sensor no task is created, M951
+// without parameters reports the settings, and if another task runs M951 while this one allocates the task (played inside operator
+// new), it waits for the write lock and creates no second task.
 
 #include <cmath>
 #include <cstdarg>
@@ -38,6 +40,7 @@ static unsigned int suspended = 0;							// uxSchedulerSuspended
 static bool checking = false;									// true while a case runs Configure
 static std::vector<std::string> failures;
 static unsigned int taskAllocations = 0, taskFrees = 0, creates = 0;
+static void (*duringAllocation)() = nullptr;					// another task that runs while Configure allocates, if it can
 
 // As TaskCriticalSectionLocker in RRFLibraries src/RTOSIface/RTOSIface.h: vTaskSuspendAll in the constructor, xTaskResumeAll in
 // the destructor
@@ -48,7 +51,39 @@ public:
 	~TaskCriticalSectionLocker() noexcept { --suspended; }
 };
 
+// Just what Configure uses of ReadWriteLock and WriteLocker (RRFLibraries RTOSIface.h). LockForWriting suspends the scheduler only
+// while it updates its lock records, so the holder runs, and allocates, with the scheduler running. Played on one thread: a task that
+// asks for the write lock while another one holds it waits until that one releases it (LockForWriting in RTOSIface.cpp), so the
+// waiting task runs when the lock is released.
+class ReadWriteLock
+{
+public:
+	bool writeLocked = false;
+	void (*waiter)() = nullptr;										// the task that waits for the write lock, if any
+};
+
+class WriteLocker
+{
+public:
+	explicit WriteLocker(ReadWriteLock& p_lock) noexcept : lock(p_lock) { lock.writeLocked = true; }
+	~WriteLocker() noexcept
+	{
+		lock.writeLocked = false;
+		if (lock.waiter != nullptr)
+		{
+			void (*const waiting)() = lock.waiter;
+			lock.waiter = nullptr;
+			waiting();
+		}
+	}
+
+private:
+	ReadWriteLock& lock;
+};
+
 typedef void (*TaskFunction_t)(void *);
+class TaskBase;
+static bool IsPublished(const TaskBase *t) noexcept;
 
 // Just what Configure uses of TaskBase and Task (RRFLibraries RTOSIface.h). As there, a task that was never created has a zero taskId,
 // and the destructor of such a task does nothing (TaskBase::TerminateAndUnlink in RTOSIface.cpp).
@@ -70,6 +105,10 @@ public:
 		if (taskId != 0)
 		{
 			failures.push_back("Create was called twice on the same task");
+		}
+		if (IsPublished(this))
+		{
+			failures.push_back("the task pointer was set before the task was created");
 		}
 		taskId = 1;
 		++creates;
@@ -149,6 +188,7 @@ public:
 
 	static constexpr unsigned int HeightControllerTaskStackWords = 100;
 	Task<HeightControllerTaskStackWords> *heightControllerTask = nullptr;
+	ReadWriteLock taskLock;
 	int sensorNumber = -1;
 	uint32_t sampleInterval = 200;
 	float pidP = 1.0, configuredPidI = 0.0, configuredPidD = 0.0;
@@ -163,6 +203,13 @@ private:
 
 #include "HeightController.inc"
 
+static HeightController *controller = nullptr;
+
+static bool IsPublished(const TaskBase *t) noexcept
+{
+	return controller != nullptr && controller->heightControllerTask == t;
+}
+
 // The host heap, with the check. Only the allocations of a height controller task are counted, by their size.
 void *operator new(size_t sz)
 {
@@ -175,7 +222,21 @@ void *operator new(size_t sz)
 		}
 		++taskAllocations;
 	}
-	return malloc(sz);
+	void *const p = malloc(sz);
+	if (isTask && duringAllocation != nullptr && suspended == 0)		// another task can run only while the scheduler is running
+	{
+		void (*const other)() = duringAllocation;
+		duringAllocation = nullptr;
+		if (controller->taskLock.writeLocked)
+		{
+			controller->taskLock.waiter = other;						// it waits for the write lock
+		}
+		else
+		{
+			other();
+		}
+	}
+	return p;
 }
 
 void operator delete(void *p) noexcept
@@ -199,12 +260,14 @@ void operator delete(void *p, size_t sz) noexcept
 static unsigned int passed = 0, failed = 0;
 
 // Run M951 with each of 'commands' on a new HeightController and check the number of tasks created, allocated and freed
-static void Case(const char *name, std::vector<const char *> commands, unsigned int expectedCreates, unsigned int expectedAllocations,
-					unsigned int expectedFrees, const char *expectedReply) noexcept
+static void Case(const char *name, std::vector<const char *> commands, void (*other)(), unsigned int expectedCreates,
+					unsigned int expectedAllocations, unsigned int expectedFrees, const char *expectedReply) noexcept
 {
 	HeightController hc;
+	controller = &hc;
 	failures.clear();
 	taskAllocations = taskFrees = creates = 0;
+	duringAllocation = other;
 	StringRef reply;
 	checking = true;
 	for (const char *cmd : commands)
@@ -247,16 +310,27 @@ static void Case(const char *name, std::vector<const char *> commands, unsigned 
 		printf("FAIL %s: %s\n", name, why.c_str());
 	}
 	delete hc.heightControllerTask;
+	controller = nullptr;
+}
+
+// A higher priority task that runs M951 H1 while Configure in the main task allocates its task
+static void OtherTaskConfigures() noexcept
+{
+	GCodeBuffer gb("H1");
+	StringRef reply;
+	(void)controller->Configure(gb, reply);
 }
 
 int main()
 {
-	Case("M951 H1 allocates the task with the scheduler running and creates it", { "H1" }, 1, 1, 0, nullptr);
-	Case("a second M951 does not create another task", { "H1", "H1 P2" }, 1, 1, 0, nullptr);
-	Case("M951 P2 without a sensor creates no task", { "P2" }, 0, 0, 0, nullptr);
-	Case("M951 without parameters and without a sensor reports that", { "" }, 0, 0, 0, "Height controller is not configured");
-	Case("M951 without parameters reports the settings", { "H2 F10 Z1:4", "" }, 1, 1, 0,
+	Case("M951 H1 allocates the task with the scheduler running and creates it", { "H1" }, nullptr, 1, 1, 0, nullptr);
+	Case("a second M951 does not create another task", { "H1", "H1 P2" }, nullptr, 1, 1, 0, nullptr);
+	Case("M951 P2 without a sensor creates no task", { "P2" }, nullptr, 0, 0, 0, nullptr);
+	Case("M951 without parameters and without a sensor reports that", { "" }, nullptr, 0, 0, 0, "Height controller is not configured");
+	Case("M951 without parameters reports the settings", { "H2 F10 Z1:4", "" }, nullptr, 1, 1, 0,
 			"Height controller uses sensor 2, frequency 10.0, P1.0 I0.0 D0.0, Z1.0 to 4.0");
+	Case("another task that runs M951 meanwhile waits for the write lock and creates no second task", { "H1" }, OtherTaskConfigures,
+			1, 1, 0, nullptr);
 	printf("%u passed, %u failed\n", passed, failed);
 	return (failed == 0) ? 0 : 1;
 }

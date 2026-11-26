@@ -4,6 +4,7 @@
 #define TEST_ARENA_H
 
 #include <cstddef>
+#include <new>
 
 constexpr size_t TestArenaSize = 16384;
 
@@ -23,11 +24,13 @@ extern "C"
 	void *test_malloc(size_t s);										// RRF src/libc/nano-mallocr.c:289 (nano_malloc = malloc)
 	void test_free(void *p);											// nano-mallocr.c:473
 
-	void *test_sbrk(ptrdiff_t incr);
+	void *test_sbrk(ptrdiff_t incr) noexcept;							// CoreN2G src/syscalls.h:50 (_sbrk, renamed by malloc_names.h)
 	void TestPreemptionPointSbrk();									// lock_record_alloc_test.cpp: an interrupt inside _sbrk
 	void TestPreemptionPointSplit();									// lock_record_alloc_test.cpp: an interrupt before nano-mallocr.c:326
 	[[noreturn]] void TestOutOfMemory();
 }
+
+void *test_CoreAllocPermanent(size_t sz, std::align_val_t align) noexcept;	// CoreN2G src/syscalls.h:74 (CoreAllocPermanent)
 
 unsigned int TestCheckFreeList(const TestBlock *live, unsigned int numLive, bool print) noexcept;
 

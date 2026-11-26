@@ -1,4 +1,4 @@
-# Copies the definition of Move::laserTask and Move::CreateLaserTask out of src/Movement/Move.cpp, each with a #line directive, so
+# Copies the definitions of Move::laserTask and Move::laserTaskLock and Move::CreateLaserTask out of src/Movement/Move.cpp, each with a #line directive, so
 # that the test compiles the real text and compiler messages point at the real source lines. Fails if one of them is missing, so a
 # renamed function cannot silently drop out of the test. Give the file with an absolute path.
 
@@ -8,6 +8,13 @@
 	printf "#line %d \"%s\"\n", FNR, FILENAME
 	print
 	found["Move::laserTask"] = 1
+	next
+}
+
+/^ReadWriteLock Move::laserTaskLock;/ {
+	printf "#line %d \"%s\"\n", FNR, FILENAME
+	print
+	found["Move::laserTaskLock"] = 1
 	next
 }
 
@@ -23,7 +30,7 @@ inFunc {
 }
 
 END {
-	split("Move::laserTask Move::CreateLaserTask", wanted, " ")
+	split("Move::laserTask Move::laserTaskLock Move::CreateLaserTask", wanted, " ")
 	for (i in wanted)
 	{
 		if (!(wanted[i] in found)) { print wanted[i] " not found" > "/dev/stderr"; missing = 1 }

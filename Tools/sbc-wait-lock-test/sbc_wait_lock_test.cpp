@@ -331,14 +331,6 @@ public:
 	void *operator new(size_t sz) noexcept { return std::malloc(sz); } \
 	void operator delete(void *p) noexcept { std::free(p); }
 
-// RRFLibraries FreelistManager.h: NewLockRecord (RTOSIface.cpp) takes a record from the free list and calls Allocate only when that is
-// empty. The stand-in's free list never runs empty, so a record never leaves the task critical section to be allocated
-namespace FreelistManager
-{
-	template<class T> inline void *TryAllocate() noexcept { return std::malloc(sizeof(T)); }
-	template<class T> inline void *Allocate() noexcept { return std::malloc(sizeof(T)); }
-}
-
 static void RtosAssertFailed(unsigned int line, const char *file) noexcept
 {
 	Fail(std::string("RTOS_ASSERT failed at ") + file + ":" + std::to_string(line));
