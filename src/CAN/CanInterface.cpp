@@ -1439,7 +1439,7 @@ GCodeResult CanInterface::ConfigureRemoteDriver(DriverId driver, GCodeBuffer& gb
 			return cons.SendAndGetResponse(CanMessageType::m569p2, driver.boardAddress, reply);
 		}
 
-#if NUM_CAN_PORTS > 1
+#if NUM_CAN_PORTS > 1 && SUPPORT_HANGPRINTER
 	case 3:			// read driver encoder via secondary CAN
 		{
 			Kinematics &_ecv_from kin = reprap.GetMove().GetKinematics();
@@ -1464,7 +1464,7 @@ GCodeResult CanInterface::ConfigureRemoteDriver(DriverId driver, GCodeBuffer& gb
 				return cons.SendAndGetResponse(CanMessageType::m569p4, driver.boardAddress, reply);
 			}
 		}
-#if NUM_CAN_PORTS > 1
+#if NUM_CAN_PORTS > 1 && SUPPORT_HANGPRINTER
 		{
 			Kinematics &_ecv_from kin = reprap.GetMove().GetKinematics();
 			if (kin.GetLegacyType() == KinematicsType::hangprinter)
@@ -1551,7 +1551,7 @@ GCodeResult CanInterface::ConfigureRemoteDriver(DriverId driver, GCodeBuffer& gb
 			cons.PopulateFromCommand(gb);
 			return cons.SendAndGetResponse(CanMessageType::m569p7, driver.boardAddress, reply);
 		}
-#if NUM_CAN_PORTS > 1
+#if NUM_CAN_PORTS > 1 && SUPPORT_HANGPRINTER
 	case 8:			// read axis force via secondary CAN
 		{
 			Kinematics &_ecv_from kin = reprap.GetMove().GetKinematics();
