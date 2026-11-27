@@ -90,6 +90,7 @@ constexpr uint32_t IAP_IMAGE_START = 0x20458000;		// last 32kb of RAM on a SAME7
 #define SUPPORT_KEEPOUT_ZONES	1
 #define SUPPORT_MODBUS_RTU		1
 #define SUPPORT_PHASE_STEPPING	1
+#define SUPPORT_HANGPRINTER		0					// leave out hangprinter kinematics to save flash space
 
 #define USE_MPU					1					// Needed if USE_CACHE is set, so that we can have non-cacheable memory regions
 #define USE_CACHE				1
