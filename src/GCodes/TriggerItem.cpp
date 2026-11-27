@@ -12,7 +12,7 @@
 #include "GCodeBuffer/GCodeBuffer.h"
 #include "GCodeBuffer/ExpressionParser.h"
 
-TriggerItem::TriggerItem() noexcept : condition(0)
+TriggerItem::TriggerItem() noexcept : condition(0), action(-1), exprResult(false)
 {
 }
 
@@ -24,18 +24,42 @@ void TriggerItem::Init() noexcept
 	highLevelInputs.Clear();
 	lowLevelInputs.Clear();
 	expr.Delete();
-	action.Delete();
+	actionLine.Delete();
 	confirmMillis = 0;
 	confirming = false;
 	actionIsEmergencyStop = false;
 	locked = false;											// only at a restart: a locked trigger cannot be deleted with P-1
 	condition = -1;
+	action = -1;
 }
 
 // Return true if this trigger is unused, i.e. it doesn't watch any pins
 bool TriggerItem::IsUnused() const noexcept
 {
 	return (highLevelEndstops | lowLevelEndstops).IsEmpty() && (highLevelInputs | lowLevelInputs).IsEmpty() && expr.IsNull();
+}
+
+TriggerAction TriggerItem::GetAction(unsigned int number) const noexcept
+{
+	return (action >= 0) ? (TriggerAction)action
+			: (number == 0) ? TriggerAction::emergencyStop
+				: (number == 1) ? TriggerAction::pause
+					: TriggerAction::runMacro;
+}
+
+// This relies on the states that Check has recorded, so it does not read the inputs itself and can be called between polls
+bool TriggerItem::IsLevelActive() const noexcept
+{
+	if (condition < 0)
+	{
+		return false;
+	}
+	if (!expr.IsNull())
+	{
+		return exprResult;
+	}
+	return (endstopStates & highLevelEndstops).IsNonEmpty() || (lowLevelEndstops & ~endstopStates).IsNonEmpty()
+		|| (inputStates & highLevelInputs).IsNonEmpty() || (lowLevelInputs & ~inputStates).IsNonEmpty();
 }
 
 // Check whether this trigger is active and update the input states. This is called in a polling loop, so it needs to be fast.
@@ -192,20 +216,26 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 
 	const bool wasUnused = IsUnused();		// save for later
 
+	const bool seenAction = gb.Seen('K');
+	if (seenAction)
+	{
+		action = (int8_t)gb.GetLimitedUIValue('K', NumTriggerActions);
+	}
+
 	switch (gb.GetCommandFraction())
 	{
 	case 1:									// trigger on an expression
 		{
 			// Read U and D before anything is changed, so that an error in them leaves the trigger as it was.
 			// The U parameter is one line of G-code to run instead of triggerN.g. An action that is just M112 is an emergency stop.
-			const bool seenAction = gb.Seen('U');
-			if (seenAction && number < 2)
+			const bool seenActionLine = gb.Seen('U');
+			if (seenActionLine && number < 2)
 			{
 				reply.copy("Triggers 0 and 1 cannot have an action");
 				return GCodeResult::error;
 			}
 			String<StringLength256> actionString;
-			if (seenAction)
+			if (seenActionLine)
 			{
 				gb.GetQuotedString(actionString.GetRef(), true);		// may throw
 				if (!IsAllowedAction(actionString.c_str()))
@@ -227,9 +257,9 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 				gb.GetQuotedString(conditionString.GetRef(), false);		// may throw
 				expr.Assign(conditionString.c_str());
 			}
-			if (seenAction)
+			if (seenActionLine)
 			{
-				action.Assign(actionString.c_str());						// U"" deletes the action, so that triggerN.g runs again
+				actionLine.Assign(actionString.c_str());						// U"" deletes the action, so that triggerN.g runs again
 				const char *_ecv_array p = actionString.c_str() + strspn(actionString.c_str(), " \t");
 				actionIsEmergencyStop = StringStartsWithIgnoreCase(p, "M112");
 				if (actionIsEmergencyStop)
@@ -294,7 +324,7 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 
 			if (seen)
 			{
-				action.Delete();									// a trigger on inputs or endstops runs triggerN.g
+				actionLine.Delete();								// a trigger on inputs or endstops runs triggerN.g
 				actionIsEmergencyStop = false;
 			}
 		}
@@ -339,11 +369,13 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 				throw;											// report the error
 			}
 		}
-		locked = !IsUnused() && (number == 0 || !action.IsNull());	// see the start of this function
+		locked = !IsUnused() && (number == 0 || !actionLine.IsNull());	// see the start of this function
 	}
-	else
+	else if (!seenAction)
 	{
-		reply.printf("Trigger %u ", number);
+		static const char *_ecv_array const actionNames[NumTriggerActions] = { "emergency stop", "pause", "run macro", "feed hold", "feed hold and abort" };
+		const unsigned int actionNumber = (unsigned int)GetAction(number);
+		reply.printf("Trigger %u (K%u, %s) ", number, actionNumber, actionNames[actionNumber]);
 		if (IsUnused())
 		{
 			reply.cat("is not configured");
@@ -396,9 +428,9 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 			{
 				reply.catf(" and stays true for %ums", (unsigned int)confirmMillis);
 			}
-			if (!action.IsNull())
+			if (!actionLine.IsNull())
 			{
-				reply.catf(", action \"%s\"", action.Get().Ptr());
+				reply.catf(", action \"%s\"", actionLine.Get().Ptr());
 			}
 			if (locked)
 			{
@@ -420,10 +452,10 @@ bool TriggerItem::CheckLevel(unsigned int number) noexcept
 	return Check(number);
 }
 
-// Copy the action of this trigger. It is copied out of the heap while the heap is read-locked, as EvaluateExpression does.
-void TriggerItem::GetAction(const StringRef& str) const noexcept
+// Copy the action line of this trigger. It is copied out of the heap while the heap is read-locked, as EvaluateExpression does.
+void TriggerItem::GetActionLine(const StringRef& str) const noexcept
 {
-	str.copy((action.IsNull()) ? "" : action.Get().Ptr());
+	str.copy((actionLine.IsNull()) ? "" : actionLine.Get().Ptr());
 }
 
 void TriggerItem::AppendInputNames(AxesBitmap endstops, InputPortsBitmap inputs, const StringRef &reply) noexcept

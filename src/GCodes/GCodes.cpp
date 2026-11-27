@@ -1016,30 +1016,63 @@ void GCodes::EndSimulation(GCodeBuffer *null gb) noexcept
 // Check for and execute triggers
 void GCodes::CheckTriggers() noexcept
 {
+	bool holdTriggerActive = false;
 	for (unsigned int i = 0; i < MaxTriggers; ++i)
 	{
 		if (!triggersPending.IsBitSet(i) && triggers[i].Check(i))
 		{
 			triggersPending.SetBit((triggers[i].IsEmergencyStop()) ? 0 : i);		// a trigger whose action is M112 fires as trigger 0
 		}
+		if (triggers[i].GetAction(i) == TriggerAction::feedHold && triggers[i].IsLevelActive())
+		{
+			holdTriggerActive = true;
+		}
+	}
+	feedHoldTriggerActive = holdTriggerActive;
+
+	// The hard-wired actions need neither the trigger channel nor the file system, so execute them at once and the most urgent first
+	if (triggersPending.IsNonEmpty())
+	{
+		static constexpr TriggerAction immediateActions[] = { TriggerAction::emergencyStop, TriggerAction::feedHoldAndAbort, TriggerAction::feedHold };
+		for (const TriggerAction immediateAction : immediateActions)
+		{
+			for (unsigned int i = 0; i < MaxTriggers; i++)
+			{
+				if (triggersPending.IsBitSet(i) && triggers[i].GetAction(i) == immediateAction)
+				{
+					triggersPending.ClearBit(i);
+					if (immediateAction == TriggerAction::emergencyStop)
+					{
+						DoEmergencyStop();
+						return;															// the reset has cleared all other pending triggers
+					}
+					if (!IsSimulating())
+					{
+						if (immediateAction == TriggerAction::feedHoldAndAbort)
+						{
+							StopAndAbortMotion(*AutoPauseGCode());					// no channel of a user is the requester, so every macro goes
+						}
+						else
+						{
+							reprap.GetMove().FeedHold();
+						}
+					}
+				}
+			}
+		}
 	}
 
-	// If any triggers are pending, activate the one with the lowest number
+	// If any other triggers are pending, activate the one with the lowest number
 	if (triggersPending.IsNonEmpty())
 	{
 		const unsigned int lowestTriggerPending = triggersPending.LowestSetBit();
-		if (lowestTriggerPending == 0)
+		if (!IsTriggerBusy() && TriggerGCode()->GetState() == GCodeState::normal)		// if we are not already executing a trigger or config.g
 		{
-			triggersPending.ClearBit(lowestTriggerPending);								// clear the trigger
-			DoEmergencyStop();
-		}
-		else if (!IsTriggerBusy() && TriggerGCode()->GetState() == GCodeState::normal)	// if we are not already executing a trigger or config.g
-		{
-			if (lowestTriggerPending == 1)
+			if (triggers[lowestTriggerPending].GetAction(lowestTriggerPending) == TriggerAction::pause)
 			{
-				if (!IsReallyPrinting())
+				if (!IsReallyPrinting() || reprap.GetMove().IsFeedHoldActive())
 				{
-					triggersPending.ClearBit(lowestTriggerPending);						// ignore a pause trigger if we are already paused or not printing
+					triggersPending.ClearBit(lowestTriggerPending);						// ignore a pause trigger if we are already paused, not printing or held
 				}
 				else if (DoAsynchronousPause(*TriggerGCode(), PrintPausedReason::trigger, GCodeState::pausing1))
 				{
@@ -1050,13 +1083,13 @@ void GCodes::CheckTriggers() noexcept
 			else
 			{
 				triggersPending.ClearBit(lowestTriggerPending);							// clear the trigger
-				if (triggers[lowestTriggerPending].HasAction())
+				if (triggers[lowestTriggerPending].HasActionLine())
 				{
 					// Run the action instead of triggerN.g. Like the M911 script it is one line, which is copied into the trigger channel's buffer.
 					GCodeBuffer& gb = *TriggerGCode();
 					MutexLocker gbLock(gb.mutex);													// the SBC task changes this buffer under its mutex
 					String<GCodeReplyLength> reply;
-					triggers[lowestTriggerPending].GetAction(reply.GetRef());
+					triggers[lowestTriggerPending].GetActionLine(reply.GetRef());
 					const size_t indent = strspn(reply.c_str(), " \t");
 					if (reply[indent] != 0 && reply[indent] != ';' && reply[indent] != '(')		// PutAndDecode would run the previous line again for a blank or comment line
 					{
