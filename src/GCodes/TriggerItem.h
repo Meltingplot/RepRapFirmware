@@ -26,7 +26,8 @@ public:
 	// Return true if this trigger is unused, i.e. it doesn't watch any pins
 	bool IsUnused() const noexcept;
 
-	// Return what this trigger does when it fires. Without a K parameter trigger 0 is an emergency stop, trigger 1 pauses and all others run their macro
+	// Return what this trigger does when it fires. Without a K parameter trigger 0 is an emergency stop, trigger 1 pauses and all others run their macro.
+	// A trigger that would run its macro is an emergency stop if its action line is just M112.
 	TriggerAction GetAction(unsigned int number) const noexcept;
 
 	// Return true if the level of an input, endstop or expression that fires this trigger is active now, as of the last call to Check
@@ -41,9 +42,6 @@ public:
 	// Handle M582 for this trigger
 	bool CheckLevel(unsigned int number) noexcept;
 
-	// Return true if the action of this trigger is M112, so that it fires as an emergency stop like trigger 0
-	bool IsEmergencyStop() const noexcept { return actionIsEmergencyStop; }
-
 	// Return true if this trigger runs an action line instead of triggerN.g
 	bool HasActionLine() const noexcept { return !actionLine.IsNull(); }
 
@@ -54,6 +52,8 @@ public:
 	static bool IsAllowedInAction(char letter, int number) noexcept;
 
 private:
+	TriggerAction GetConfiguredAction(unsigned int number) const noexcept;
+	bool IsLocked(unsigned int number) const noexcept;
 	bool EvaluateExpression() THROWS(GCodeException);
 	static bool IsAllowedAction(const char *_ecv_array s) noexcept;
 	static void AppendInputNames(AxesBitmap endstops, InputPortsBitmap inputs, const StringRef& reply) noexcept;
@@ -68,8 +68,7 @@ private:
 	int8_t action;							// the action specified by the K parameter, or -1 to use the default for the trigger number
 	bool exprResult;						// the value of the expression when we last evaluated it
 	bool confirming;						// the expression has become true and has not stayed true for confirmMillis yet
-	bool actionIsEmergencyStop;				// the action is M112
-	bool locked;							// trigger 0 or a trigger with an action has been configured, so it cannot be changed until the next restart
+	bool actionIsEmergencyStop;				// the action line is M112
 };
 
 #endif /* SRC_GCODES_TRIGGERITEM_H_ */

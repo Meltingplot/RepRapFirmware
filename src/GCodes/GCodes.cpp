@@ -1021,7 +1021,7 @@ void GCodes::CheckTriggers() noexcept
 	{
 		if (!triggersPending.IsBitSet(i) && triggers[i].Check(i))
 		{
-			triggersPending.SetBit((triggers[i].IsEmergencyStop()) ? 0 : i);		// a trigger whose action is M112 fires as trigger 0
+			triggersPending.SetBit(i);
 		}
 		if (triggers[i].GetAction(i) == TriggerAction::feedHold && triggers[i].IsLevelActive())
 		{

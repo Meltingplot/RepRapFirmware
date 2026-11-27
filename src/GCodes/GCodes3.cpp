@@ -425,7 +425,7 @@ GCodeResult GCodes::CheckTrigger(GCodeBuffer& gb, const StringRef& reply) THROWS
 	const bool unconditional = gb.Seen('S') && gb.GetUIValue() == 1;
 	if (unconditional || triggers[triggerNumber].CheckLevel(triggerNumber))
 	{
-		triggersPending.SetBit((triggers[triggerNumber].IsEmergencyStop()) ? 0 : triggerNumber);	// a trigger whose action is M112 fires as trigger 0
+		triggersPending.SetBit(triggerNumber);
 	}
 	return GCodeResult::ok;
 }

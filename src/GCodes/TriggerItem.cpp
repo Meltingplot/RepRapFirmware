@@ -28,7 +28,6 @@ void TriggerItem::Init() noexcept
 	confirmMillis = 0;
 	confirming = false;
 	actionIsEmergencyStop = false;
-	locked = false;											// only at a restart: a locked trigger cannot be deleted with P-1
 	condition = -1;
 	action = -1;
 }
@@ -41,10 +40,23 @@ bool TriggerItem::IsUnused() const noexcept
 
 TriggerAction TriggerItem::GetAction(unsigned int number) const noexcept
 {
+	const TriggerAction configuredAction = GetConfiguredAction(number);
+	return (configuredAction == TriggerAction::runMacro && actionIsEmergencyStop) ? TriggerAction::emergencyStop : configuredAction;
+}
+
+// Return the action that the K parameter or the trigger number gives, without the action line
+TriggerAction TriggerItem::GetConfiguredAction(unsigned int number) const noexcept
+{
 	return (action >= 0) ? (TriggerAction)action
 			: (number == 0) ? TriggerAction::emergencyStop
 				: (number == 1) ? TriggerAction::pause
 					: TriggerAction::runMacro;
+}
+
+// Return true if this trigger is locked until the next restart, see Configure
+bool TriggerItem::IsLocked(unsigned int number) const noexcept
+{
+	return !IsUnused() && (GetAction(number) == TriggerAction::emergencyStop || !actionLine.IsNull());
 }
 
 // This relies on the states that Check has recorded, so it does not read the inputs itself and can be called between polls
@@ -160,9 +172,9 @@ bool TriggerItem::Check(unsigned int number) noexcept
 		{
 			String<StringLength256> errorMessage;
 			e.GetMessage(errorMessage.GetRef(), nullptr);
-			if (number == 0 || actionIsEmergencyStop)
+			if (GetAction(number) == TriggerAction::emergencyStop)
 			{
-				// Trigger 0 and triggers whose action is M112 are emergency stops: if the expression cannot be evaluated, fire rather than disable
+				// An emergency stop trigger fires rather than being disabled if its expression cannot be evaluated
 				errorMessage.catf("\nTrigger %u fired\n", number);
 				reprap.GetPlatform().Message(ErrorMessage, errorMessage.c_str());
 				return true;
@@ -182,11 +194,11 @@ bool TriggerItem::Check(unsigned int number) noexcept
 // Handle M581 and M581.1 for this trigger. We have already checked that gb.GetCommandFraction() returns <= 1.
 GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const StringRef &reply) THROWS(GCodeException)
 {
-	// Once configured, trigger 0 and triggers with an action can only be reported until the next restart. They run without the SBC because they are
-	// safety functions, such as the door check, and nobody may change or delete those while the machine runs.
-	if (locked)
+	// Once configured, emergency stop triggers and triggers with an action line can only be reported until the next restart. They run without the SBC
+	// because they are safety functions, such as the door check, and nobody may change or delete those while the machine runs.
+	if (IsLocked(number))
 	{
-		bool change = gb.Seen('P') || gb.Seen('U') || gb.Seen('D') || gb.Seen('R') || gb.Seen('S');
+		bool change = gb.Seen('P') || gb.Seen('K') || gb.Seen('U') || gb.Seen('D') || gb.Seen('R') || gb.Seen('S');
 		for (size_t axis = 0; axis < reprap.GetGCodes().GetTotalAxes(); ++axis)
 		{
 			change = change || gb.Seen(reprap.GetGCodes().GetAxisLetters()[axis]);
@@ -221,17 +233,22 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 	{
 		action = (int8_t)gb.GetLimitedUIValue('K', NumTriggerActions);
 	}
+	if (seenAction && GetConfiguredAction(number) != TriggerAction::runMacro)
+	{
+		actionLine.Delete();								// only a trigger that runs its macro file can have an action line
+		actionIsEmergencyStop = false;
+	}
 
 	switch (gb.GetCommandFraction())
 	{
 	case 1:									// trigger on an expression
 		{
-			// Read U and D before anything is changed, so that an error in them leaves the trigger as it was.
+			// Read U and D before the expression is changed, so that an error in them leaves it as it was.
 			// The U parameter is one line of G-code to run instead of triggerN.g. An action that is just M112 is an emergency stop.
 			const bool seenActionLine = gb.Seen('U');
-			if (seenActionLine && number < 2)
+			if (seenActionLine && GetConfiguredAction(number) != TriggerAction::runMacro)
 			{
-				reply.copy("Triggers 0 and 1 cannot have an action");
+				reply.printf("Trigger %u does not run a macro file, so it cannot have an action", number);
 				return GCodeResult::error;
 			}
 			String<StringLength256> actionString;
@@ -362,14 +379,13 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 			}
 			catch (const GCodeException&)
 			{
-				if (number != 0 && !actionIsEmergencyStop)		// keep an emergency stop trigger, so that its next check fires it
+				if (GetAction(number) != TriggerAction::emergencyStop)		// keep an emergency stop trigger, so that its next check fires it
 				{
 					Init();										// clear the trigger
 				}
 				throw;											// report the error
 			}
 		}
-		locked = !IsUnused() && (number == 0 || !actionLine.IsNull());	// see the start of this function
 	}
 	else if (!seenAction)
 	{
@@ -432,7 +448,7 @@ GCodeResult TriggerItem::Configure(unsigned int number, GCodeBuffer &gb, const S
 			{
 				reply.catf(", action \"%s\"", actionLine.Get().Ptr());
 			}
-			if (locked)
+			if (IsLocked(number))
 			{
 				reply.cat(", locked until restart");
 			}
